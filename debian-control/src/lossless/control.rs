@@ -34,6 +34,7 @@
 //! ```
 use crate::fields::{MultiArch, Priority};
 use crate::lossless::relations::Relations;
+use deb822_lossless::lossless::{Deb822, Paragraph};
 
 fn format_field(name: &str, value: &str) -> String {
     match name {
@@ -63,21 +64,21 @@ fn format_field(name: &str, value: &str) -> String {
 }
 
 /// A Debian control file
-pub struct Control(deb822_lossless::Deb822);
+pub struct Control(Deb822);
 
 impl Control {
     /// Create a new control file
     pub fn new() -> Self {
-        Control(deb822_lossless::Deb822::new())
+        Control(Deb822::new())
     }
 
     /// Return the underlying deb822 object, mutable
-    pub fn as_mut_deb822(&mut self) -> &mut deb822_lossless::Deb822 {
+    pub fn as_mut_deb822(&mut self) -> &mut Deb822 {
         &mut self.0
     }
 
     /// Return the underlying deb822 object
-    pub fn as_deb822(&self) -> &deb822_lossless::Deb822 {
+    pub fn as_deb822(&self) -> &Deb822 {
         &self.0
     }
 
@@ -140,28 +141,28 @@ impl Control {
     }
 
     /// Read a control file from a file
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, deb822_lossless::Error> {
-        Ok(Control(deb822_lossless::Deb822::from_file(path)?))
+    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, deb822_lossless::lossless::Error> {
+        Ok(Control(Deb822::from_file(path)?))
     }
 
     /// Read a control file from a file, allowing syntax errors
     pub fn from_file_relaxed<P: AsRef<std::path::Path>>(
         path: P,
     ) -> Result<(Self, Vec<String>), std::io::Error> {
-        let (control, errors) = deb822_lossless::Deb822::from_file_relaxed(path)?;
+        let (control, errors) = Deb822::from_file_relaxed(path)?;
         Ok((Control(control), errors))
     }
 
     /// Read a control file from a reader
-    pub fn read<R: std::io::Read>(mut r: R) -> Result<Self, deb822_lossless::Error> {
-        Ok(Control(deb822_lossless::Deb822::read(&mut r)?))
+    pub fn read<R: std::io::Read>(mut r: R) -> Result<Self, deb822_lossless::lossless::Error> {
+        Ok(Control(Deb822::read(&mut r)?))
     }
 
     /// Read a control file from a reader, allowing syntax errors
     pub fn read_relaxed<R: std::io::Read>(
         mut r: R,
-    ) -> Result<(Self, Vec<String>), deb822_lossless::Error> {
-        let (control, errors) = deb822_lossless::Deb822::read_relaxed(&mut r)?;
+    ) -> Result<(Self, Vec<String>), deb822_lossless::lossless::Error> {
+        let (control, errors) = Deb822::read_relaxed(&mut r)?;
         Ok((Self(control), errors))
     }
 
@@ -177,8 +178,8 @@ impl Control {
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
-        let sort_paragraphs = |a: &deb822_lossless::Paragraph,
-                               b: &deb822_lossless::Paragraph|
+        let sort_paragraphs = |a: &Paragraph,
+                               b: &Paragraph|
          -> std::cmp::Ordering {
             // Sort Source before Package
             let a_is_source = a.get("Source").is_some();
@@ -195,7 +196,7 @@ impl Control {
             a.get("Package").cmp(&b.get("Package"))
         };
 
-        let wrap_paragraph = |p: &deb822_lossless::Paragraph| -> deb822_lossless::Paragraph {
+        let wrap_paragraph = |p: &Paragraph| -> Paragraph {
             // TODO: Add Source/Package specific wrapping
             // TODO: Add support for wrapping and sorting fields
             p.wrap_and_sort(
@@ -213,14 +214,14 @@ impl Control {
     }
 }
 
-impl From<Control> for deb822_lossless::Deb822 {
+impl From<Control> for Deb822 {
     fn from(c: Control) -> Self {
         c.0
     }
 }
 
-impl From<deb822_lossless::Deb822> for Control {
-    fn from(d: deb822_lossless::Deb822) -> Self {
+impl From<Deb822> for Control {
+    fn from(d: Deb822) -> Self {
         Control(d)
     }
 }
@@ -232,7 +233,7 @@ impl Default for Control {
 }
 
 impl std::str::FromStr for Control {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_lossless::lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Control(s.parse()?))
@@ -240,16 +241,16 @@ impl std::str::FromStr for Control {
 }
 
 /// A source package paragraph
-pub struct Source(deb822_lossless::Paragraph);
+pub struct Source(Paragraph);
 
-impl From<Source> for deb822_lossless::Paragraph {
+impl From<Source> for Paragraph {
     fn from(s: Source) -> Self {
         s.0
     }
 }
 
-impl From<deb822_lossless::Paragraph> for Source {
-    fn from(p: deb822_lossless::Paragraph) -> Self {
+impl From<Paragraph> for Source {
+    fn from(p: Paragraph) -> Self {
         Source(p)
     }
 }
@@ -283,12 +284,12 @@ impl Source {
     }
 
     /// Return the underlying deb822 paragraph, mutable
-    pub fn as_mut_deb822(&mut self) -> &mut deb822_lossless::Paragraph {
+    pub fn as_mut_deb822(&mut self) -> &mut Paragraph {
         &mut self.0
     }
 
     /// Return the underlying deb822 paragraph
-    pub fn as_deb822(&self) -> &deb822_lossless::Paragraph {
+    pub fn as_deb822(&self) -> &Paragraph {
         &self.0
     }
 
@@ -596,16 +597,16 @@ impl std::fmt::Display for Control {
 }
 
 /// A binary package paragraph
-pub struct Binary(deb822_lossless::Paragraph);
+pub struct Binary(Paragraph);
 
-impl From<Binary> for deb822_lossless::Paragraph {
+impl From<Binary> for Paragraph {
     fn from(b: Binary) -> Self {
         b.0
     }
 }
 
-impl From<deb822_lossless::Paragraph> for Binary {
-    fn from(p: deb822_lossless::Paragraph) -> Self {
+impl From<Paragraph> for Binary {
+    fn from(p: Paragraph) -> Self {
         Binary(p)
     }
 }
@@ -634,16 +635,16 @@ impl Default for Binary {
 impl Binary {
     /// Create a new binary package control file
     pub fn new() -> Self {
-        Binary(deb822_lossless::Paragraph::new())
+        Binary(Paragraph::new())
     }
 
     /// Return the underlying deb822 paragraph, mutable
-    pub fn as_mut_deb822(&mut self) -> &mut deb822_lossless::Paragraph {
+    pub fn as_mut_deb822(&mut self) -> &mut Paragraph {
         &mut self.0
     }
 
     /// Return the underlying deb822 paragraph
-    pub fn as_deb822(&self) -> &deb822_lossless::Paragraph {
+    pub fn as_deb822(&self) -> &Paragraph {
         &self.0
     }
 
@@ -989,7 +990,7 @@ Description: this is the short description
     #[test]
     fn test_as_deb822() {
         let control = Control::new();
-        let _deb822: &deb822_lossless::Deb822 = control.as_deb822();
+        let _deb822: &Deb822 = control.as_deb822();
     }
 
     #[test]

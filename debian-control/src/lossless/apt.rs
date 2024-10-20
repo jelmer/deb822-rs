@@ -5,7 +5,7 @@ use crate::fields::{
 use crate::lossless::relations::Relations;
 
 /// A source package in the APT package manager.
-pub struct Source(deb822_lossless::Paragraph);
+pub struct Source(deb822_lossless::lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
 impl pyo3::ToPyObject for Source {
@@ -28,22 +28,22 @@ impl pyo3::FromPyObject<'_> for Source {
     }
 }
 
-impl From<deb822_lossless::Paragraph> for Source {
-    fn from(paragraph: deb822_lossless::Paragraph) -> Self {
+impl From<deb822_lossless::lossless::Paragraph> for Source {
+    fn from(paragraph: deb822_lossless::lossless::Paragraph) -> Self {
         Self(paragraph)
     }
 }
 
 impl Default for Source {
     fn default() -> Self {
-        Self(deb822_lossless::Paragraph::new())
+        Self(deb822_lossless::lossless::Paragraph::new())
     }
 }
 
 impl Source {
     /// Create a new source package
     pub fn new() -> Self {
-        Self(deb822_lossless::Paragraph::new())
+        Self(deb822_lossless::lossless::Paragraph::new())
     }
 
     /// Get the source name
@@ -444,7 +444,7 @@ impl Source {
 }
 
 impl std::str::FromStr for Source {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_lossless::lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(s.parse()?))
@@ -452,7 +452,7 @@ impl std::str::FromStr for Source {
 }
 
 /// A package in the APT package manager.
-pub struct Package(deb822_lossless::Paragraph);
+pub struct Package(deb822_lossless::lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
 impl pyo3::ToPyObject for Package {
@@ -477,7 +477,7 @@ impl pyo3::FromPyObject<'_> for Package {
 
 impl Package {
     /// Create a new package.
-    pub fn new(paragraph: deb822_lossless::Paragraph) -> Self {
+    pub fn new(paragraph: deb822_lossless::lossless::Paragraph) -> Self {
         Self(paragraph)
     }
 
@@ -745,7 +745,7 @@ impl Package {
 }
 
 impl std::str::FromStr for Package {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_lossless::lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(s.parse()?))
@@ -753,7 +753,7 @@ impl std::str::FromStr for Package {
 }
 
 /// A release in the APT package manager.
-pub struct Release(deb822_lossless::Paragraph);
+pub struct Release(deb822_lossless::lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
 impl pyo3::ToPyObject for Release {
@@ -778,7 +778,7 @@ impl pyo3::FromPyObject<'_> for Release {
 
 impl Release {
     /// Create a new release
-    pub fn new(paragraph: deb822_lossless::Paragraph) -> Self {
+    pub fn new(paragraph: deb822_lossless::lossless::Paragraph) -> Self {
         Self(paragraph)
     }
 
@@ -1038,7 +1038,7 @@ impl Release {
 }
 
 impl std::str::FromStr for Release {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_lossless::lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(s.parse()?))

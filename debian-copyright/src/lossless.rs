@@ -36,7 +36,7 @@
 //! ```
 
 use crate::{License, CURRENT_FORMAT, KNOWN_FORMATS};
-use deb822_lossless::{Deb822, Paragraph};
+use deb822_lossless::lossless::{Deb822, Paragraph};
 use std::path::Path;
 
 /// A copyright file
@@ -135,7 +135,7 @@ impl Copyright {
 #[derive(Debug)]
 pub enum Error {
     /// Parse error
-    ParseError(deb822_lossless::ParseError),
+    ParseError(deb822_lossless::lossless::ParseError),
 
     /// IO error
     IoError(std::io::Error),
@@ -144,11 +144,11 @@ pub enum Error {
     NotMachineReadable,
 }
 
-impl From<deb822_lossless::Error> for Error {
-    fn from(e: deb822_lossless::Error) -> Self {
+impl From<deb822_lossless::lossless::Error> for Error {
+    fn from(e: deb822_lossless::lossless::Error) -> Self {
         match e {
-            deb822_lossless::Error::ParseError(e) => Error::ParseError(e),
-            deb822_lossless::Error::IoError(e) => Error::IoError(e),
+            deb822_lossless::lossless::Error::ParseError(e) => Error::ParseError(e),
+            deb822_lossless::lossless::Error::IoError(e) => Error::IoError(e),
         }
     }
 }
@@ -159,8 +159,8 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<deb822_lossless::ParseError> for Error {
-    fn from(e: deb822_lossless::ParseError) -> Self {
+impl From<deb822_lossless::lossless::ParseError> for Error {
+    fn from(e: deb822_lossless::lossless::ParseError) -> Self {
         Error::ParseError(e)
     }
 }

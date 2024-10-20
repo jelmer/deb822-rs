@@ -1,13 +1,13 @@
 //! Changes files
 
 /// Changes file
-pub struct Changes(deb822_lossless::Paragraph);
+pub struct Changes(deb822_lossless::lossless::Paragraph);
 
 /// Errors that can occur when parsing a Changes file.
 #[derive(Debug)]
 pub enum ParseError {
     /// An error occurred while parsing a Deb822 file.
-    Deb822(deb822_lossless::Error),
+    Deb822(deb822_lossless::lossless::Error),
 
     /// No paragraphs were found in the file.
     NoParagraphs,
@@ -28,8 +28,8 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-impl From<deb822_lossless::Error> for ParseError {
-    fn from(e: deb822_lossless::Error) -> Self {
+impl From<deb822_lossless::lossless::Error> for ParseError {
+    fn from(e: deb822_lossless::lossless::Error) -> Self {
         Self::Deb822(e)
     }
 }
@@ -185,14 +185,14 @@ impl Changes {
 
     /// Create a new Changes file.
     pub fn new() -> Self {
-        let mut slf = Self(deb822_lossless::Paragraph::new());
+        let mut slf = Self(deb822_lossless::lossless::Paragraph::new());
         slf.set_format("1.8");
         slf
     }
 
     /// Read a Changes file from a file.
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, ParseError> {
-        let deb822 = deb822_lossless::Deb822::from_file(path)?;
+        let deb822 = deb822_lossless::lossless::Deb822::from_file(path)?;
         let mut paras = deb822.paragraphs();
         let para = match paras.next() {
             Some(para) => para,
@@ -208,7 +208,7 @@ impl Changes {
     pub fn from_file_relaxed<P: AsRef<std::path::Path>>(
         path: P,
     ) -> Result<(Self, Vec<String>), std::io::Error> {
-        let (mut deb822, mut errors) = deb822_lossless::Deb822::from_file_relaxed(path)?;
+        let (mut deb822, mut errors) = deb822_lossless::lossless::Deb822::from_file_relaxed(path)?;
         let mut paras = deb822.paragraphs();
         let para = match paras.next() {
             Some(para) => para,
@@ -222,7 +222,7 @@ impl Changes {
 
     /// Read a Changes file from a reader.
     pub fn read<R: std::io::Read>(mut r: R) -> Result<Self, ParseError> {
-        let deb822 = deb822_lossless::Deb822::read(&mut r)?;
+        let deb822 = deb822_lossless::lossless::Deb822::read(&mut r)?;
         let mut paras = deb822.paragraphs();
         let para = match paras.next() {
             Some(para) => para,
@@ -237,8 +237,8 @@ impl Changes {
     /// Read a Changes file from a reader, allowing syntax errors.
     pub fn read_relaxed<R: std::io::Read>(
         mut r: R,
-    ) -> Result<(Self, Vec<String>), deb822_lossless::Error> {
-        let (mut deb822, mut errors) = deb822_lossless::Deb822::read_relaxed(&mut r)?;
+    ) -> Result<(Self, Vec<String>), deb822_lossless::lossless::Error> {
+        let (mut deb822, mut errors) = deb822_lossless::lossless::Deb822::read_relaxed(&mut r)?;
         let mut paras = deb822.paragraphs();
         let para = match paras.next() {
             Some(para) => para,
