@@ -34,7 +34,7 @@
 //! ```
 use crate::fields::{MultiArch, Priority};
 use crate::lossless::relations::Relations;
-use deb822_lossless::lossless::{Deb822, Paragraph};
+use deb822_lossless::{Deb822, Paragraph};
 
 fn format_field(name: &str, value: &str) -> String {
     match name {
@@ -141,7 +141,7 @@ impl Control {
     }
 
     /// Read a control file from a file
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, deb822_lossless::lossless::Error> {
+    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, deb822_lossless::Error> {
         Ok(Control(Deb822::from_file(path)?))
     }
 
@@ -154,14 +154,14 @@ impl Control {
     }
 
     /// Read a control file from a reader
-    pub fn read<R: std::io::Read>(mut r: R) -> Result<Self, deb822_lossless::lossless::Error> {
+    pub fn read<R: std::io::Read>(mut r: R) -> Result<Self, deb822_lossless::Error> {
         Ok(Control(Deb822::read(&mut r)?))
     }
 
     /// Read a control file from a reader, allowing syntax errors
     pub fn read_relaxed<R: std::io::Read>(
         mut r: R,
-    ) -> Result<(Self, Vec<String>), deb822_lossless::lossless::Error> {
+    ) -> Result<(Self, Vec<String>), deb822_lossless::Error> {
         let (control, errors) = Deb822::read_relaxed(&mut r)?;
         Ok((Self(control), errors))
     }
@@ -233,7 +233,7 @@ impl Default for Control {
 }
 
 impl std::str::FromStr for Control {
-    type Err = deb822_lossless::lossless::ParseError;
+    type Err = deb822_lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Control(s.parse()?))

@@ -17,7 +17,7 @@
 //! assert_eq!(patch_header.description(), Some("[PATCH] fix a bug".to_string()));
 //! assert_eq!(patch_header.vendor_bugs("Debian").collect::<Vec<_>>(), vec!["https://bugs.debian.org/123456".to_string()]);
 //! ```
-use deb822_lossless::lossless::Paragraph;
+use deb822_lossless::Paragraph;
 
 use crate::fields::*;
 
@@ -234,7 +234,7 @@ impl Default for PatchHeader {
 }
 
 impl std::str::FromStr for PatchHeader {
-    type Err = deb822_lossless::lossless::ParseError;
+    type Err = deb822_lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(PatchHeader(Paragraph::from_str(s)?))

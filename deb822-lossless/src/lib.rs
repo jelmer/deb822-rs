@@ -6,8 +6,8 @@
 
 mod common;
 mod lex;
-pub mod lossless;
-//pub use lossless::{Deb822, Error, Paragraph, ParseError};
+mod lossless;
+pub use lossless::{Deb822, Error, Paragraph, ParseError};
 
 /// The indentation to use when writing a deb822 file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

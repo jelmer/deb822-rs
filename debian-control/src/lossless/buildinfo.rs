@@ -8,17 +8,17 @@ use crate::fields::{Md5Checksum, Sha1Checksum, Sha256Checksum};
 use crate::lossless::relations::Relations;
 
 /// A buildinfo file
-pub struct Buildinfo(deb822_lossless::lossless::Paragraph);
+pub struct Buildinfo(deb822_lossless::Paragraph);
 
-impl From<deb822_lossless::lossless::Paragraph> for Buildinfo {
-    fn from(paragraph: deb822_lossless::lossless::Paragraph) -> Self {
+impl From<deb822_lossless::Paragraph> for Buildinfo {
+    fn from(paragraph: deb822_lossless::Paragraph) -> Self {
         Self(paragraph)
     }
 }
 
 impl Default for Buildinfo {
     fn default() -> Self {
-        let mut para = deb822_lossless::lossless::Paragraph::new();
+        let mut para = deb822_lossless::Paragraph::new();
         para.set("Format", "1.0");
         Self(para)
     }
@@ -27,7 +27,7 @@ impl Default for Buildinfo {
 impl Buildinfo {
     /// Create a new source package
     pub fn new() -> Self {
-        Self(deb822_lossless::lossless::Paragraph::new())
+        Self(deb822_lossless::Paragraph::new())
     }
 
     /// Get the source name
@@ -243,7 +243,7 @@ impl Buildinfo {
 }
 
 impl std::str::FromStr for Buildinfo {
-    type Err = deb822_lossless::lossless::ParseError;
+    type Err = deb822_lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(s.parse()?))

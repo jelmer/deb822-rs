@@ -1,5 +1,5 @@
 fn main() {
-    use deb822_lossless::lossless::Deb822;
+    use deb822_lossless::Deb822;
     use std::str::FromStr;
 
     let input = r#"Package: deb822-lossless
