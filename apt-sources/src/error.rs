@@ -16,11 +16,9 @@ pub enum RepositoryError {
     /// The `Signed-By` field is incorrect
     InvalidSignature,
     /// Errors in lossy serializer or deserializer
-    Lossy(deb822_lossless::lossy::Error),
-    /// Errors in lossless parser
-    Lossless(deb822_lossless::lossless::Error),
+    Lossy(deb822_fast::Error),
     /// I/O Error
-    Io(std::io::Error)
+    Io(std::io::Error),
 }
 
 impl From<std::io::Error> for RepositoryError {
@@ -38,7 +36,6 @@ impl std::fmt::Display for RepositoryError {
             Self::InvalidType => write!(f, "Invalid repository type"),
             Self::InvalidSignature => write!(f, "The field `Signed-By` is incorrect"),
             Self::Lossy(e) => write!(f, "Lossy parser error: {}", e),
-            Self::Lossless(e) => write!(f, "Lossless parser error: {}", e),
             Self::Io(e) => write!(f, "IO error: {}", e),
         }
     }
