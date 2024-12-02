@@ -28,12 +28,15 @@ rowan = { workspace = true }
 serde = { version = "1", features = ["derive"], optional = true }
 pyo3 = { workspace = true, optional = true }
 deb822-derive = { path = "deb822-derive", version = "^0.2", optional = true }
+futures = { version = "0.3", optional = true }
+tokio = { version = "1", optional = true, features = ["full"] }
 
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
 python-debian = ["dep:pyo3"]
 derive = ["dep:deb822-derive"]
+stream = ["dep:futures", "dep:tokio"]
 
 [dev-dependencies]
 criterion = { version = ">=0.5", features = ["html_reports"] }
