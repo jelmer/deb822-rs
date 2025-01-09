@@ -354,6 +354,19 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_flat_repo() {
+        let s = indoc! {r#"
+            Types: deb
+            URIs: http://ports.ubuntu.com/
+            Suites: ./
+            Architectures: arm64
+        "#};
+
+        let repos = s.parse::<Repositories>().expect("Shall be parsed flawlessly");
+        assert!(repos[0].types.contains(&super::RepositoryType::Binary));
+    }
+
+    #[test]
     fn test_parse_w_keyblock() {
         let s = indoc!(r#"
             Types: deb
