@@ -246,6 +246,15 @@ impl Deb822 {
         r.read_to_string(&mut buf)?;
         buf.parse()
     }
+
+    #[cfg(feature = "stream")]
+    /// Read from a stream.
+    async fn from_stream<S: futures::io::AsyncRead + Unpin>(mut s: S) -> Result<Self, Error> {
+        use futures::AsyncReadExt;
+        let mut buf = String::new();
+        s.read_to_string(&mut buf).await?;
+        buf.parse()
+    }
 }
 
 impl std::str::FromStr for Deb822 {
@@ -543,6 +552,30 @@ Version: 2.10
         assert_eq!(
             para.to_string(),
             "Description: A program that says hello\n Some more text\n"
+        );
+    }
+
+    #[cfg(feature = "stream")]
+    #[tokio::test]
+    async fn test_stream() {
+        let input = r#"Package: hello
+Version: 2.10
+"#;
+        let deb822 = Deb822::from_stream(input.as_bytes()).await.unwrap();
+        assert_eq!(
+            deb822,
+            Deb822(vec![Paragraph {
+                fields: vec![
+                    Field {
+                        name: "Package".to_string(),
+                        value: "hello".to_string(),
+                    },
+                    Field {
+                        name: "Version".to_string(),
+                        value: "2.10".to_string(),
+                    },
+                ],
+            }])
         );
     }
 }
