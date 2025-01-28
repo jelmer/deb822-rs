@@ -1,9 +1,9 @@
 //! This optional module adds feature of lossless handling of the APT repositories,
 //! meaning changes retain structure and unprocessed data of sources, like comments.
-//! 
+//!
 //! Use either lossy or lossless as you see fit, both serve the same purpose, but
 //! with different trade-offs.
-//! 
+//!
 //! # Examples
 //! ```rust
 //! use apt_sources::{lossless::Repositories, traits::Repository};
@@ -33,7 +33,7 @@
 //! assert_eq!(suites[0], "noble");
 //! ```
 
-use std::{borrow::{Borrow, Cow}, collections::HashSet, ops::Index, slice::SliceIndex, str::FromStr};
+use std::{borrow::Cow, collections::HashSet, str::FromStr};
 
 use deb822_lossless::{Deb822, Paragraph};
 use url::Url;
@@ -47,15 +47,20 @@ pub struct Repository(Paragraph);
 
 impl Repository {
     fn return_string_array_cow(&self, key: &str) -> Cow<'_, [String]> {
-        Cow::Owned(self.0.get(key)
-            .unwrap() // TODO: type is mandatory, but this is lazy evaluation, that normally would fail deserialization
-            .split_whitespace()
-            .map(|s| s.to_owned())
-            .collect())
+        Cow::Owned(
+            self.0
+                .get(key)
+                .unwrap() // TODO: type is mandatory, but this is lazy evaluation, that normally would fail deserialization
+                .split_whitespace()
+                .map(|s| s.to_owned())
+                .collect(),
+        )
     }
 
     fn return_optional_yes_no(&self, key: &str) -> Option<bool> {
-        self.0.get(key).map_or(None,|v| super::deserialize_yesno(&v).ok()) // TODO: error consumed!
+        self.0
+            .get(key)
+            .map_or(None, |v| super::deserialize_yesno(&v).ok()) // TODO: error consumed!
     }
 }
 
@@ -65,7 +70,8 @@ impl traits::Repository for Repository {
     }
 
     fn types(&self) -> std::collections::HashSet<crate::RepositoryType> {
-        self.0.get("Types")
+        self.0
+            .get("Types")
             .unwrap() // TODO: type is mandatory, be this is lazy evaluation, that normally would fail deserialization
             .split_whitespace()
             .map(|t| RepositoryType::from_str(t))
@@ -74,12 +80,15 @@ impl traits::Repository for Repository {
     }
 
     fn uris(&self) -> Cow<'_, [url::Url]> {
-        Cow::Owned(self.0.get("URIs")
-            .unwrap() // TODO: type is mandatory, but this is lazy evaluation, that normally would fail deserialization
-            .split_whitespace()
-            .map(|u| Url::from_str(u))
-            .collect::<Result<Vec<Url>, url::ParseError>>()
-            .unwrap())
+        Cow::Owned(
+            self.0
+                .get("URIs")
+                .unwrap() // TODO: type is mandatory, but this is lazy evaluation, that normally would fail deserialization
+                .split_whitespace()
+                .map(|u| Url::from_str(u))
+                .collect::<Result<Vec<Url>, url::ParseError>>()
+                .unwrap(),
+        )
     }
 
     fn suites(&self) -> Cow<'_, [String]> {
@@ -98,7 +107,7 @@ impl traits::Repository for Repository {
         self.return_string_array_cow("Languages")
     }
 
-    fn targets(&self) ->  Cow<'_, [String]> {
+    fn targets(&self) -> Cow<'_, [String]> {
         self.return_string_array_cow("Targets")
     }
 
@@ -107,7 +116,9 @@ impl traits::Repository for Repository {
     }
 
     fn by_hash(&self) -> Option<crate::YesNoForce> {
-        self.0.get("By-Hash").map_or(None, |v| super::YesNoForce::from_str(&v).ok()) // TODO: error consumed! (quitely ignored if values don't match)
+        self.0
+            .get("By-Hash")
+            .map_or(None, |v| super::YesNoForce::from_str(&v).ok()) // TODO: error consumed! (quitely ignored if values don't match)
     }
 
     fn allow_insecure(&self) -> Option<bool> {
@@ -127,11 +138,12 @@ impl traits::Repository for Repository {
     }
 
     fn signature(&self) -> Option<Cow<'_, crate::signature::Signature>> {
-        self.0.get("Signed-By")
+        self.0
+            .get("Signed-By")
             .and_then(|v| Signature::from_str(&v).ok()) // TODO: another case of errors in late parsing
             .and_then(|s| Some(Cow::Owned(s)))
-        
-        //filter(|v| Signature::from_str(&v).ok().and_then(|s| Cow::Owned(s))) 
+
+        //filter(|v| Signature::from_str(&v).ok().and_then(|s| Cow::Owned(s)))
     }
 
     fn x_repolib_name(&self) -> Option<Cow<'_, str>> {
@@ -143,14 +155,14 @@ impl traits::Repository for Repository {
     }
 }
 
-
 /// Container for multiple `Repository` specifications as single `.sources` file may contain as per specification
 #[derive(Debug)]
 pub struct Repositories(Deb822);
 
 impl Repositories {
     /// Provides iterator over individual repositories in the whole file
-    pub fn repositories(&self) -> impl Iterator<Item = Repository> { // TODO: repository is _a copy_ of the paragraph! not compatible with lossy
+    pub fn repositories(&self) -> impl Iterator<Item = Repository> {
+        // TODO: repository is _a copy_ of the paragraph! not compatible with lossy
         self.0.paragraphs().filter_map(|p| Some(Repository(p)))
     }
 }
@@ -169,8 +181,8 @@ impl std::str::FromStr for Repositories {
 }
 
 // TODO: this cannot be easily implemented to act like in `Vec<>` as we don't have slices of `Paragraph`s mapped into `Repository`s
-// impl<Idx> Index<Idx> for Repositories 
-// where 
+// impl<Idx> Index<Idx> for Repositories
+// where
 //     Idx: SliceIndex<[Repository], Output = Repository>
 // {
 //     type Output = Idx::Output;
@@ -187,40 +199,61 @@ mod tests {
 
     use indoc::indoc;
 
-    use crate::{signature::Signature, RepositoryType};
+    use crate::signature::Signature;
     use crate::traits::Repository as RepositoryTrait;
 
-    use super::{Repositories, Repository};
+    use super::Repositories;
 
     #[test]
     fn test_not_machine_readable() {
-        let s = indoc!(r#"
+        let s = indoc!(
+            r#"
             deb [arch=arm64 signed-by=/usr/share/keyrings/docker.gpg] http://ports.ubuntu.com/ noble stable
-        "#);
+        "#
+        );
         let ret = s.parse::<Repositories>();
         assert!(ret.is_err());
         //assert_eq!(ret.unwrap_err(), "Not machine readable".to_string());
-        assert_eq!(ret.unwrap_err(), "expected ':', got Some(NEWLINE)\n".to_owned());
+        assert_eq!(
+            ret.unwrap_err(),
+            "expected ':', got Some(NEWLINE)\n".to_owned()
+        );
     }
 
     #[test]
     fn test_parse_trivial() {
-        let s = indoc!(r#"
+        let s = indoc!(
+            r#"
             Types: deb
             URIs: https://ports.ubuntu.com/
             Suites: jammy
             Components: main restricted universe multiverse
-        "#);
+        "#
+        );
 
-        let repos = s.parse::<Repositories>().expect("Shall be parsed flawlessly");
-        let only_repo = repos.repositories().next().expect("Failed to pick only repo"); 
+        let repos = s
+            .parse::<Repositories>()
+            .expect("Shall be parsed flawlessly");
+        let only_repo = repos
+            .repositories()
+            .next()
+            .expect("Failed to pick only repo");
         assert!(only_repo.types().contains(&super::RepositoryType::Binary));
-        assert_eq!(only_repo.components().as_ref(), ["main".to_owned(), "restricted".to_owned(), "universe".to_owned(), "multiverse".to_owned()]);
+        assert_eq!(
+            only_repo.components().as_ref(),
+            [
+                "main".to_owned(),
+                "restricted".to_owned(),
+                "universe".to_owned(),
+                "multiverse".to_owned()
+            ]
+        );
     }
 
     #[test]
     fn test_parse_w_keyblock() {
-        let s = indoc!(r#"
+        let s = indoc!(
+            r#"
             Types: deb
             URIs: http://ports.ubuntu.com/
             Suites: noble
@@ -237,29 +270,51 @@ mod tests {
              WoG/4oBsAQCEN8Z00DXagPHbwrvsY2t9BCsT+PgnSn9biobwX7bDDg==
              =5NZE
              -----END PGP PUBLIC KEY BLOCK-----
-        "#);
+        "#
+        );
 
-        let repos = s.parse::<Repositories>().expect("Shall be parsed flawlessly");
-        let only_repo = repos.repositories().nth(0).expect("Failed to pick only repo");
+        let repos = s
+            .parse::<Repositories>()
+            .expect("Shall be parsed flawlessly");
+        let only_repo = repos
+            .repositories()
+            .nth(0)
+            .expect("Failed to pick only repo");
         assert!(only_repo.types().contains(&super::RepositoryType::Binary));
-        assert!(matches!(only_repo.signature().expect("Failed to get Signature"), Cow::Owned(Signature::KeyBlock(_))));
+        assert!(matches!(
+            only_repo.signature().expect("Failed to get Signature"),
+            Cow::Owned(Signature::KeyBlock(_))
+        ));
     }
 
     #[test]
     fn test_parse_w_keypath() {
-        let s = indoc!(r#"
+        let s = indoc!(
+            r#"
             Types: deb
             URIs: http://ports.ubuntu.com/
             Suites: noble
             Components: stable
             Architectures: arm64
             Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-        "#);
+        "#
+        );
 
-        let repos = s.parse::<Repositories>().expect("Shall be parsed flawlessly");
-        let only_repo = repos.repositories().nth(0).expect("Failed to pick only repo"); 
+        let repos = s
+            .parse::<Repositories>()
+            .expect("Shall be parsed flawlessly");
+        let only_repo = repos
+            .repositories()
+            .nth(0)
+            .expect("Failed to pick only repo");
         assert!(only_repo.types().contains(&super::RepositoryType::Binary));
-        assert!(matches!(only_repo.signature().expect("Failed to get Signature").as_ref(), Signature::KeyPath(_)));
+        assert!(matches!(
+            only_repo
+                .signature()
+                .expect("Failed to get Signature")
+                .as_ref(),
+            Signature::KeyPath(_)
+        ));
     }
 
     // #[test]
