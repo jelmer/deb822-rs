@@ -4,7 +4,7 @@ authors = ["Jelmer Vernooĳ <jelmer@debian.org>"]
 edition = "2021"
 version = "0.1.40"
 license = "Apache-2.0"
-description = "A parser for Debian copyright files"
+description = "A parser for Debian control files"
 repository = { workspace = true }
 homepage = { workspace = true }
 keywords = ["debian", "deb822", "rfc822", "lossless", "edit"]
