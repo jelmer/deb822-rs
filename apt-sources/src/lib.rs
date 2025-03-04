@@ -442,6 +442,7 @@ mod tests {
         let repos = s.parse::<Repositories>().expect("Shall be parsed flawlessly");
         assert!(repos[0].types.contains(&super::RepositoryType::Binary));
         assert_eq!(repos[0].components().as_ref(), ["main".to_owned(), "restricted".to_owned(), "universe".to_owned(), "multiverse".to_owned()]);
+    }
 
     #[test]
     fn test_parse_flat_repo() {
