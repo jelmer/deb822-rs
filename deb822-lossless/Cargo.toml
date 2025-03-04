@@ -1,0 +1,41 @@
+[package]
+name = "deb822-lossless"
+authors = ["Jelmer Vernooĳ <jelmer@debian.org>"]
+edition = "2021"
+license = "Apache-2.0"
+description = "A lossless parser for deb822 files"
+repository = { workspace = true }
+homepage = { workspace = true }
+version = "0.2.4"
+keywords = ["debian", "deb822", "control", "rfc822", "edit"]
+categories = ["parser-implementations"]
+include = ["bench/Sources", "src/*.rs", "bench/*.rs", "examples/*.rs"]
+
+[dependencies]
+regex = "1"
+rowan = { workspace = true }
+serde = { version = "1", features = ["derive"], optional = true }
+pyo3 = { workspace = true, optional = true }
+deb822-derive = { path = "../deb822-derive", version = "^0.2", optional = true }
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]
+python-debian = ["dep:pyo3"]
+derive = ["dep:deb822-derive"]
+
+[dev-dependencies]
+criterion = { version = ">=0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "parse_lossy"
+path = "bench/bench_lossy.rs"
+harness = false
+
+[[bench]]
+name = "parse_lossless"
+path = "bench/bench_lossless.rs"
+harness = false
+
+[badges]
+maintenance = { status = "actively-maintained" }

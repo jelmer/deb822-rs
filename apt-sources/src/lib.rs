@@ -234,9 +234,10 @@ pub struct Repository {
     /// The distribution name as codename or suite type (like `stable` or `testing`)
     #[deb822(field = "Suites", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
     suites: Vec<String>,
-    /// Section of the repository, usually `main`, `contrib` or `non-free`
+    /// (Optional) Section of the repository, usually `main`, `contrib` or `non-free`
+    /// return `None` if repository is Flat Repository Format (https://wiki.debian.org/DebianRepository/Format#Flat_Repository_Format)
     #[deb822(field = "Components", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    components: Vec<String>,
+    components: Option<Vec<String>>,
 
     /// (Optional) Architectures binaries from this repository run on
     #[deb822(field = "Architectures", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
@@ -441,6 +442,18 @@ mod tests {
         let repos = s.parse::<Repositories>().expect("Shall be parsed flawlessly");
         assert!(repos[0].types.contains(&super::RepositoryType::Binary));
         assert_eq!(repos[0].components().as_ref(), ["main".to_owned(), "restricted".to_owned(), "universe".to_owned(), "multiverse".to_owned()]);
+
+    #[test]
+    fn test_parse_flat_repo() {
+        let s = indoc! {r#"
+            Types: deb
+            URIs: http://ports.ubuntu.com/
+            Suites: ./
+            Architectures: arm64
+        "#};
+
+        let repos = s.parse::<Repositories>().expect("Shall be parsed flawlessly");
+        assert!(repos[0].types.contains(&super::RepositoryType::Binary));
     }
 
     #[test]
@@ -495,7 +508,7 @@ mod tests {
                 architectures: Some(vec!["arm64".to_owned()]),
                 uris: vec![Url::from_str("https://deb.debian.org/debian").unwrap()],
                 suites: vec!["jammy".to_owned()],
-                components: vec!["main". to_owned()],
+                components: vec!["main". to_owned()].into(),
                 signature: None,
                 x_repolib_name: None,
                 languages: None,

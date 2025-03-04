@@ -309,7 +309,7 @@ macro_rules! ast_node {
         #[doc = "An AST node representing a `"]
         #[doc = stringify!($ast)]
         #[doc = "`."]
-        #[derive(PartialEq, Eq, Hash)]
+        #[derive(Debug, PartialEq, Eq, Hash)]
         #[repr(transparent)]
         pub struct $ast(SyntaxNode);
         impl $ast {
@@ -345,12 +345,6 @@ macro_rules! ast_node {
             }
         }
     };
-}
-
-impl std::fmt::Debug for Deb822 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Deb822").finish()
-    }
 }
 
 ast_node!(Deb822, ROOT);

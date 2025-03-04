@@ -4,7 +4,7 @@ authors = ["Jelmer Vernooĳ <jelmer@debian.org>"]
 edition = "2021"
 version = "0.1.40"
 license = "Apache-2.0"
-description = "A parser for Debian copyright files"
+description = "A parser for Debian control files"
 repository = { workspace = true }
 homepage = { workspace = true }
 keywords = ["debian", "deb822", "rfc822", "lossless", "edit"]
@@ -14,7 +14,7 @@ categories = ["parser-implementations"]
 rowan = { version = "0.16", optional = true }
 debversion = ">=0.3"
 regex = "1"
-deb822-lossless = { version = ">=0.2", path = "..", features = ["derive"] }
+deb822-lossless = { version = ">=0.2", path = "../deb822-lossless", features = ["derive"] }
 url = "2"
 pyo3 = { workspace = true, optional = true }
 chrono = { version = "0.4", optional = true }
@@ -32,7 +32,7 @@ name = "create-file"
 required-features = ["lossless"]
 
 [dev-dependencies]
-serde_json = "1.0.133"
+serde_json = "1.0.140"
 
 [badges]
 maintenance = { status = "actively-maintained" }
