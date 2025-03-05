@@ -1,4 +1,4 @@
-use apt_sources::Repositories;
+use apt_sources::{Repositories, traits::Repository as RepositoryTrait};
 use indoc::indoc;
 
 pub const TEXT: &str = indoc! {r#"

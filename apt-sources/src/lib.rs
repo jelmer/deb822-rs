@@ -12,8 +12,7 @@
 //! # Examples
 //!
 //! ```rust
-//!
-//! use apt_sources::Repositories;
+//! use apt_sources::{Repositories, traits::Repository};
 //! use std::path::Path;
 //!
 //! let text = r#"Types: deb
@@ -45,13 +44,16 @@
 
 use deb822_lossless::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 use signature::Signature;
-use std::{collections::HashSet, ops::Deref, str::FromStr};
+use std::{borrow::Cow, collections::HashSet, fmt::Display, ops::Deref, str::FromStr};
 use url::Url;
 use std::result::Result;
 use error::RepositoryError;
 
 pub mod error;
 pub mod signature;
+pub mod traits;
+#[cfg(feature = "lossless")]
+pub mod lossless;
 
 /// A representation of the repository type, by role of packages it can provide, either `Binary`
 /// (indicated by `deb`) or `Source` (indicated by `deb-src`).
@@ -90,7 +92,7 @@ impl ToString for RepositoryType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 /// Enumeration for fields like `By-Hash` which have third value of `force`
 pub enum YesNoForce {
     /// True
@@ -115,19 +117,23 @@ impl FromStr for YesNoForce {
     }
 }
 
-impl From<&YesNoForce> for String {
-    fn from(value: &YesNoForce) -> Self {
-        match value {
-            YesNoForce::Yes => "yes".to_owned(),
-            YesNoForce::No => "no".to_owned(),
-            YesNoForce::Force => "force".to_owned()
-        }
-    }
-}
+// impl From<&YesNoForce> for String {
+//     fn from(value: &YesNoForce) -> Self {
+//         match value {
+//             YesNoForce::Yes => "yes".to_owned(),
+//             YesNoForce::No => "no".to_owned(),
+//             YesNoForce::Force => "force".to_owned()
+//         }
+//     }
+// }
 
-impl ToString for &YesNoForce {
-    fn to_string(&self) -> String {
-        self.to_owned().into()
+impl Display for YesNoForce {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            YesNoForce::Yes => write!(f, "yes"),
+            YesNoForce::No => write!(f, "no"),
+            YesNoForce::Force => write!(f, "force")
+        }
     }
 }
 
@@ -235,7 +241,7 @@ pub struct Repository {
 
     /// (Optional) Architectures binaries from this repository run on
     #[deb822(field = "Architectures", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    architectures: Vec<String>,
+    architectures: Option<Vec<String>>,
     /// (Optional) Translations support to download
     #[deb822(field = "Languages", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
     languages: Option<Vec<String>>, // TODO: Option is redundant to empty vectors
@@ -276,11 +282,75 @@ pub struct Repository {
     // options: HashMap<String, String> // My original parser kept remaining optional fields in the hash map, is this right approach?
 }
 
-impl Repository {
-    /// Returns slice of strings containing suites for which this repository provides
-    pub fn suites(&self) -> &[String] {
-        self.suites.as_slice()
+impl traits::Repository for Repository {
+    fn suites(&self) -> Cow<'_, [String]> {
+        Cow::Borrowed(self.suites.as_slice())
     }
+    
+    fn enabled(&self) -> bool {
+        self.enabled.is_none_or(|x| x)
+    }
+    
+    fn types(&self) -> HashSet<RepositoryType> {
+        todo!()
+    }
+    
+    fn uris(&self) -> Cow<'_, [url::Url]> {
+        Cow::Borrowed(self.uris.as_slice())
+    }
+    
+    fn components(&self) ->  Cow<'_, [String]> {
+        Cow::Borrowed(self.components.as_ref().map_or(&[], |x| x.as_slice()))
+    }
+    
+    fn architectures(&self) ->  Cow<'_, [String]> {
+        Cow::Borrowed(self.architectures.as_ref().map_or(&[], |x| x.as_slice()))
+    }
+    
+    fn languages(&self) ->  Cow<'_, [String]> {
+        Cow::Borrowed(self.languages.as_ref().map_or(&[], |x| x.as_slice()))
+    }
+    
+    fn targets(&self) ->  Cow<'_, [String]> {
+        Cow::Borrowed(self.targets.as_ref().map_or(&[], |x| x.as_slice()))
+    }
+    
+    fn pdiffs(&self) ->  Option<bool> {
+        self.pdiffs
+    }
+    
+    fn by_hash(&self) ->  Option<YesNoForce> {
+        self.by_hash
+    }
+    
+    fn allow_insecure(&self) ->  Option<bool> {
+        self.allow_insecure
+    }
+    
+    fn allow_weak(&self) ->  Option<bool> {
+        self.allow_weak
+    }
+    
+    fn allow_downgrade_to_insecure(&self) ->  Option<bool> {
+        self.allow_downgrade_to_insecure
+    }
+    
+    fn trusted(&self) -> Option<bool> {
+        self.trusted
+    }
+    
+    fn signature(&self) ->  Option<Cow<'_, Signature>> {
+        self.signature.as_ref().map(|v| Cow::Borrowed(v))
+    }
+    
+    fn x_repolib_name(&self) -> Option<Cow<'_, str>> {
+        self.x_repolib_name.as_ref().map(|v| Cow::Borrowed(v.as_str()))
+    }
+    
+    fn description(&self) -> Option<Cow<'_, str>> {
+        self.description.as_ref().map(|v| Cow::Borrowed(v.as_str()))
+    }
+    
     
 }
 
@@ -300,6 +370,11 @@ impl Repositories {
         Container: Into<Vec<Repository>>
     {
         Repositories(container.into())
+    }
+
+    /// Provides iterator over individual repositories in the whole file
+    pub fn repositories(&self) -> impl Iterator<Item = &Repository> { // TODO: that's by ref, not compatible with lossless
+        self.0.iter()
     }
 }
 
@@ -342,6 +417,8 @@ mod tests {
 
     use crate::{signature::Signature, Repositories, Repository, RepositoryType};
 
+    use crate::traits::Repository as RepositoryTrait;
+
     #[test]
     fn test_not_machine_readable() {
         let s = indoc!(r#"
@@ -351,6 +428,20 @@ mod tests {
         assert!(ret.is_err());
         //assert_eq!(ret.unwrap_err(), "Not machine readable".to_string());
         assert_eq!(ret.unwrap_err(), "expected ':', got Some(NEWLINE)\n".to_owned());
+    }
+
+    #[test]
+    fn test_parse_trivial() {
+        let s = indoc!(r#"
+            Types: deb
+            URIs: https://ports.ubuntu.com/
+            Suites: jammy
+            Components: main restricted universe multiverse
+        "#);
+
+        let repos = s.parse::<Repositories>().expect("Shall be parsed flawlessly");
+        assert!(repos[0].types.contains(&super::RepositoryType::Binary));
+        assert_eq!(repos[0].components().as_ref(), ["main".to_owned(), "restricted".to_owned(), "universe".to_owned(), "multiverse".to_owned()]);
     }
 
     #[test]
@@ -415,7 +506,7 @@ mod tests {
             Repository {
                 enabled: Some(true), // TODO: looks odd, as only `Enabled: no` in meaningful
                 types: HashSet::from([RepositoryType::Binary]),
-                architectures: vec!["arm64".to_owned()],
+                architectures: Some(vec!["arm64".to_owned()]),
                 uris: vec![Url::from_str("https://deb.debian.org/debian").unwrap()],
                 suites: vec!["jammy".to_owned()],
                 components: vec!["main". to_owned()].into(),
