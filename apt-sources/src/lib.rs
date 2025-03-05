@@ -300,7 +300,7 @@ impl traits::Repository for Repository {
     }
     
     fn components(&self) ->  Cow<'_, [String]> {
-        Cow::Borrowed(self.components.as_slice())
+        Cow::Borrowed(self.components.as_ref().map_or(&[], |x| x.as_slice()))
     }
     
     fn architectures(&self) ->  Cow<'_, [String]> {
