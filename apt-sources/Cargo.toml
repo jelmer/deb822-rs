@@ -15,4 +15,4 @@ deb822-lossless = { version = ">=0.2", path = "../deb822-lossless", features = [
 url = { version = "2.5.4", features = ["serde"] }
 
 [dev-dependencies]
-indoc = { version = "2.0.5" }
+indoc = { version = "2.0.6" }
