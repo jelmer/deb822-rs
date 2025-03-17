@@ -22,7 +22,7 @@ pub enum RepositoryError {
     /// I/O Error
     Io(std::io::Error),
     /// Problem with URL validity
-    URLParsingFailure(url::ParseError)
+    URLParsingFailure(url::ParseError),
 }
 
 impl From<std::io::Error> for RepositoryError {

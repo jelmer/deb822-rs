@@ -69,14 +69,16 @@ impl traits::Repository for Repository {
         self.0.get("Enabled").is_none_or(|x| x == "yes")
     }
 
-    fn types(&self) -> std::collections::HashSet<crate::RepositoryType> {
-        self.0
-            .get("Types")
-            .unwrap() // TODO: type is mandatory, be this is lazy evaluation, that normally would fail deserialization
-            .split_whitespace()
-            .map(|t| RepositoryType::from_str(t))
-            .collect::<Result<HashSet<RepositoryType>, RepositoryError>>()
-            .unwrap() // TODO: incorrect values would normally fail deserialization
+    fn types(&self) -> Cow<'_, std::collections::HashSet<crate::RepositoryType>> {
+        Cow::Owned(
+            self.0
+                .get("Types")
+                .unwrap() // TODO: type is mandatory, be this is lazy evaluation, that normally would fail deserialization
+                .split_whitespace()
+                .map(|t| RepositoryType::from_str(t))
+                .collect::<Result<HashSet<RepositoryType>, RepositoryError>>()
+                .unwrap(),
+        ) // TODO: incorrect values would normally fail deserialization
     }
 
     fn uris(&self) -> Cow<'_, [url::Url]> {
@@ -118,7 +120,7 @@ impl traits::Repository for Repository {
     fn by_hash(&self) -> Option<crate::YesNoForce> {
         self.0
             .get("By-Hash")
-            .map_or(None, |v| super::YesNoForce::from_str(&v).ok()) // TODO: error consumed! (quitely ignored if values don't match)
+            .map_or(None, |v| super::YesNoForce::from_str(&v).ok()) // TODO: error consumed! (quietly ignored if values don't match)
     }
 
     fn allow_insecure(&self) -> Option<bool> {

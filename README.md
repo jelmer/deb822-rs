@@ -6,7 +6,7 @@ Debian. There is one core crate:
 
 * ``deb822-lossless``: parser that preserves formatting, whitespace and comments as well as allowing syntax errors.
 
-Four related crates that build on this one are:
+Five related crates that build on this one are:
 
 * ``debian-control``: A parser and editor for Debian control files, apt lists.
 * ``debian-copyright``: A parser and editor for Debian copyright files.

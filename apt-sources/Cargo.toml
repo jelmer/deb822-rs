@@ -2,7 +2,7 @@
 name = "apt-sources"
 authors = ["Michał Fita <4925040+michalfita@users.noreply.github.com>"]
 edition = "2021"
-version = "0.1.1"
+version = "0.2.0"
 license = "Apache-2.0"
 description = "A parser for APT source files (package repositories specification)"
 repository = { workspace = true }
@@ -11,7 +11,7 @@ keywords = ["debian", "deb822", "rfc822", "edit", "apt"]
 categories = ["parser-implementations"]
 
 [dependencies]
-deb822-lossless = { version = ">=0.2", path = "../deb822-lossless", features = ["derive"] }
+deb822-lossless = { version = ">=0.2.4", path = "../deb822-lossless", features = ["derive"] }
 url = { version = "2.5.4", features = ["serde"] }
 
 [features]
