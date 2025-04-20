@@ -1,6 +1,6 @@
 //! FTP-master-related files
 
-use deb822_fast::{FromDeb822Paragraph,Paragraph,FromDeb822, ToDeb822};
+use deb822_fast::{FromDeb822Paragraph, FromDeb822, ToDeb822};
 
 fn serialize_list(list: &Vec<String>) -> String {
     list.join("\n")
