@@ -4,14 +4,13 @@ use std::path::PathBuf;
 
 use crate::error::RepositoryError;
 
-/// A type to store 
+/// A type to store
 #[derive(Debug, PartialEq, Clone)]
 pub enum Signature {
     /// The PGP key is stored inside the `.sources` files
     KeyBlock(String), // TODO: shall we validate PGP Public Key?
     /// The public key is store in a file of the given path
-    KeyPath(PathBuf)
-    // TODO: man page specifies fingerprints, but there's no example
+    KeyPath(PathBuf), // TODO: man page specifies fingerprints, but there's no example
 }
 
 impl std::str::FromStr for Signature {

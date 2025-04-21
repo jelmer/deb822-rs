@@ -14,7 +14,8 @@ categories = ["parser-implementations"]
 rowan = { version = "0.16", optional = true }
 debversion = ">=0.3"
 regex = "1"
-deb822-lossless = { version = ">=0.2", path = "../deb822-lossless", features = ["derive"] }
+deb822-lossless = { version = ">=0.2", path = "../deb822-lossless", optional = true }
+deb822-fast = { path = "../deb822-fast", features = ["derive"] }
 url = "2"
 pyo3 = { workspace = true, optional = true }
 chrono = { version = "0.4", optional = true }
@@ -25,7 +26,7 @@ default = ["chrono", "lossless"]
 python-debian = ["dep:pyo3", "deb822-lossless/python-debian"]
 chrono = ["dep:chrono"]
 serde = ["dep:serde"]
-lossless = ["dep:rowan"]
+lossless = ["dep:deb822-lossless", "dep:rowan"]
 
 [[example]]
 name = "create-file"

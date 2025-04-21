@@ -338,10 +338,12 @@ impl std::str::FromStr for Deb822 {
                     }
 
                     // Trim the trailing newline
-                    assert_eq!(
-                        current_paragraph.last_mut().unwrap().value.pop(),
-                        Some('\n')
-                    );
+                    {
+                        let par = current_paragraph.last_mut().unwrap();
+                        if par.value.ends_with('\n') {
+                            par.value.pop();
+                        }
+                    }
                 }
                 SyntaxKind::VALUE => {
                     return Err(Error::UnexpectedToken(k, t.to_string()));

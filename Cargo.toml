@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [ "deb822-lossless", "deb822-derive", "debian-control", "debian-copyright", "dep3", "apt-sources"]
+members = [ "deb822-lossless", "deb822-derive", "deb822-fast", "debian-control", "debian-copyright", "dep3", "apt-sources"]
 
 [workspace.package]
 repository = "https://github.com/jelmer/deb822-lossless"

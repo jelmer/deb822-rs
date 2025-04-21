@@ -42,7 +42,7 @@ checksum = "55cc3b69f167a1ef2e161439aa98aed94e6028e5f9a59be9a6ffb47aef1651f9"
 name = "apt-sources"
 version = "0.1.0"
 dependencies = [
- "deb822-lossless",
+ "deb822-fast",
  "indoc",
  "url",
 ]
@@ -235,11 +235,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "deb822-fast"
+version = "0.1.0"
+dependencies = [
+ "deb822-derive",
+]
+
+[[package]]
 name = "deb822-lossless"
 version = "0.2.4"
 dependencies = [
  "criterion",
- "deb822-derive",
+ "deb822-fast",
  "pyo3",
  "regex",
  "rowan",
@@ -251,6 +258,7 @@ name = "debian-control"
 version = "0.1.41"
 dependencies = [
  "chrono",
+ "deb822-fast",
  "deb822-lossless",
  "debversion",
  "pyo3",
@@ -265,6 +273,7 @@ dependencies = [
 name = "debian-copyright"
 version = "0.1.27"
 dependencies = [
+ "deb822-fast",
  "deb822-lossless",
  "debversion",
  "regex",
@@ -285,6 +294,7 @@ name = "dep3"
 version = "0.1.28"
 dependencies = [
  "chrono",
+ "deb822-fast",
  "deb822-lossless",
  "url",
 ]
