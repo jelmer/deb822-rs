@@ -380,6 +380,22 @@ mod tests {
     use crate::lex::lex;
 
     #[test]
+    fn test_error_display() {
+        let err = Error::UnexpectedToken(SyntaxKind::ERROR, "invalid".to_string());
+        assert_eq!(err.to_string(), "Unexpected token: invalid");
+
+        let err = Error::UnexpectedEof;
+        assert_eq!(err.to_string(), "Unexpected end-of-file");
+
+        let err = Error::ExpectedEof;
+        assert_eq!(err.to_string(), "Expected end-of-file");
+
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test error");
+        let err = Error::Io(io_err);
+        assert!(err.to_string().contains("IO error: test error"));
+    }
+
+    #[test]
     fn test_parse() {
         let input = r#"Package: hello
 Version: 2.10
@@ -548,6 +564,318 @@ Version: 2.10
         assert_eq!(
             para.to_string(),
             "Description: A program that says hello\n Some more text\n"
+        );
+    }
+
+    #[test]
+    fn test_paragraph_from_str_errors() {
+        // Test ExpectedEof error
+        let result = "Package: foo\n\nPackage: bar\n".parse::<Paragraph>();
+        assert!(matches!(result, Err(Error::ExpectedEof)));
+
+        // Test UnexpectedEof error
+        let result = "".parse::<Paragraph>();
+        assert!(matches!(result, Err(Error::UnexpectedEof)));
+    }
+
+    #[test]
+    fn test_from_vec() {
+        let fields = vec![
+            ("Package".to_string(), "hello".to_string()),
+            ("Version".to_string(), "1.0".to_string()),
+        ];
+
+        let para: Paragraph = fields.into();
+        assert_eq!(para.get("Package"), Some("hello"));
+        assert_eq!(para.get("Version"), Some("1.0"));
+    }
+
+    #[test]
+    fn test_unexpected_tokens() {
+        // Test parsing with unexpected tokens
+        let input = "Value before key\nPackage: hello\n";
+        let result = input.parse::<Deb822>();
+        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+
+        // Test parsing with missing colon after key
+        let input = "Package hello\n";
+        let result = input.parse::<Deb822>();
+        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+
+        // Test parsing with unexpected indent
+        let input = " Indented: value\n";
+        let result = input.parse::<Deb822>();
+        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+
+        // Test parsing with unexpected value
+        let input = "Key: value\nvalue without key\n";
+        let result = input.parse::<Deb822>();
+        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+
+        // Test parsing with unexpected colon
+        let input = "Key: value\n:\n";
+        let result = input.parse::<Deb822>();
+        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+    }
+
+    #[test]
+    fn test_from_reader() {
+        // Test Deb822::from_reader with valid input
+        let input = "Package: hello\nVersion: 1.0\n";
+        let result = Deb822::from_reader(input.as_bytes()).unwrap();
+        assert_eq!(result.len(), 1);
+        let para = result.iter().next().unwrap();
+        assert_eq!(para.get("Package"), Some("hello"));
+
+        // Test with IO error
+        use std::io::{Error as IoError, ErrorKind};
+        struct FailingReader;
+        impl std::io::Read for FailingReader {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(IoError::new(ErrorKind::Other, "test error"))
+            }
+        }
+
+        let result = Deb822::from_reader(FailingReader);
+        assert!(matches!(result, Err(Error::Io(_))));
+    }
+
+    #[test]
+    fn test_deb822_vec_conversion() {
+        let paragraphs = vec![
+            Paragraph {
+                fields: vec![Field {
+                    name: "Package".to_string(),
+                    value: "hello".to_string(),
+                }],
+            },
+            Paragraph {
+                fields: vec![Field {
+                    name: "Package".to_string(),
+                    value: "world".to_string(),
+                }],
+            },
+        ];
+
+        let deb822 = Deb822(paragraphs.clone());
+        let vec: Vec<Paragraph> = deb822.into();
+        assert_eq!(vec, paragraphs);
+    }
+
+    #[test]
+    fn test_deb822_iteration() {
+        let paragraphs = vec![
+            Paragraph {
+                fields: vec![Field {
+                    name: "Package".to_string(),
+                    value: "hello".to_string(),
+                }],
+            },
+            Paragraph {
+                fields: vec![Field {
+                    name: "Package".to_string(),
+                    value: "world".to_string(),
+                }],
+            },
+        ];
+
+        let deb822 = Deb822(paragraphs.clone());
+
+        // Test IntoIterator implementation
+        let collected: Vec<_> = deb822.into_iter().collect();
+        assert_eq!(collected, paragraphs);
+
+        // Test iter() and iter_mut()
+        let deb822 = Deb822(paragraphs.clone());
+        let iter_refs: Vec<&Paragraph> = deb822.iter().collect();
+        assert_eq!(iter_refs.len(), 2);
+        assert_eq!(iter_refs[0].get("Package"), Some("hello"));
+
+        let mut deb822 = Deb822(paragraphs.clone());
+        for para in deb822.iter_mut() {
+            if para.get("Package") == Some("hello") {
+                para.set("Version", "1.0");
+            }
+        }
+        assert_eq!(deb822.iter().next().unwrap().get("Version"), Some("1.0"));
+    }
+
+    #[test]
+    fn test_empty_collections() {
+        // Test empty Deb822
+        let deb822 = Deb822(vec![]);
+        assert!(deb822.is_empty());
+        assert_eq!(deb822.len(), 0);
+        assert_eq!(deb822.iter().count(), 0);
+
+        // Test empty Paragraph
+        let para = Paragraph { fields: vec![] };
+        assert!(para.is_empty());
+        assert_eq!(para.len(), 0);
+        assert_eq!(para.iter().count(), 0);
+        assert_eq!(para.get("Any"), None);
+
+        // Test formatting of empty paragraph
+        assert_eq!(para.to_string(), "");
+
+        // Test formatting of empty Deb822
+        assert_eq!(deb822.to_string(), "");
+    }
+
+    #[test]
+    fn test_paragraph_mutable_iteration() {
+        let mut para = Paragraph {
+            fields: vec![
+                Field {
+                    name: "First".to_string(),
+                    value: "1".to_string(),
+                },
+                Field {
+                    name: "Second".to_string(),
+                    value: "2".to_string(),
+                },
+            ],
+        };
+
+        // Test iter_mut
+        for (_, value) in para.iter_mut() {
+            *value = format!("{}0", value);
+        }
+
+        assert_eq!(para.get("First"), Some("10"));
+        assert_eq!(para.get("Second"), Some("20"));
+    }
+
+    #[test]
+    fn test_insert_duplicate_key() {
+        let mut para = Paragraph {
+            fields: vec![Field {
+                name: "Key".to_string(),
+                value: "Value1".to_string(),
+            }],
+        };
+
+        // Insert will add a new field, even if the key already exists
+        para.insert("Key", "Value2");
+
+        assert_eq!(para.fields.len(), 2);
+        assert_eq!(para.fields[0].value, "Value1");
+        assert_eq!(para.fields[1].value, "Value2");
+
+        // But get() will return the first occurrence
+        assert_eq!(para.get("Key"), Some("Value1"));
+    }
+
+    #[test]
+    fn test_multiline_field_format() {
+        // Test display formatting for multiline field values
+        let field = Field {
+            name: "MultiField".to_string(),
+            value: "line1\nline2\nline3".to_string(),
+        };
+
+        let formatted = format!("{}", field);
+        assert_eq!(formatted, "MultiField: line1\n line2\n line3\n");
+
+        // Test formatting within paragraph context
+        let para = Paragraph {
+            fields: vec![field],
+        };
+
+        let formatted = format!("{}", para);
+        assert_eq!(formatted, "MultiField: line1\n line2\n line3\n");
+    }
+
+    #[test]
+    fn test_paragraph_parsing_edge_cases() {
+        // Test parsing empty value
+        let input = "Key:\n";
+        let para: Paragraph = input.parse().unwrap();
+        assert_eq!(para.get("Key"), Some(""));
+
+        // Test parsing value with just whitespace
+        // Note: whitespace after the colon appears to be trimmed by the parser
+        let input = "Key:    \n";
+        let para: Paragraph = input.parse().unwrap();
+        assert_eq!(para.get("Key"), Some(""));
+
+        // Test parsing multiple empty lines between paragraphs
+        let input = "Key1: value1\n\n\n\nKey2: value2\n";
+        let deb822: Deb822 = input.parse().unwrap();
+        assert_eq!(deb822.len(), 2);
+
+        // Test parsing complex indentation
+        // The parser preserves the indentation from the original file
+        let input = "Key: value\n with\n  indentation\n   levels\n";
+        let para: Paragraph = input.parse().unwrap();
+        assert_eq!(para.get("Key"), Some("value\nwith\nindentation\nlevels"));
+    }
+
+    #[test]
+    fn test_parse_complex() {
+        // Test various edge cases in the parser
+        let input = "# Comment at start\nKey1: val1\nKey2: \n indented\nKey3: val3\n\n# Comment between paragraphs\n\nKey4: val4\n";
+        let deb822: Deb822 = input.parse().unwrap();
+
+        assert_eq!(deb822.len(), 2);
+        let paragraphs: Vec<Paragraph> = deb822.into();
+
+        assert_eq!(paragraphs[0].get("Key2"), Some("\nindented"));
+        assert_eq!(paragraphs[1].get("Key4"), Some("val4"));
+
+        // Test parsing with an indented line immediately after a key
+        let input = "Key:\n indented value\n";
+        let para: Paragraph = input.parse().unwrap();
+        assert_eq!(para.get("Key"), Some("\nindented value"));
+    }
+
+    #[test]
+    fn test_deb822_display() {
+        // Test the Deb822::fmt Display implementation (lines 158-164)
+        let para1 = Paragraph {
+            fields: vec![Field {
+                name: "Key1".to_string(),
+                value: "Value1".to_string(),
+            }],
+        };
+
+        let para2 = Paragraph {
+            fields: vec![Field {
+                name: "Key2".to_string(),
+                value: "Value2".to_string(),
+            }],
+        };
+
+        let deb822 = Deb822(vec![para1, para2]);
+        let formatted = format!("{}", deb822);
+
+        assert_eq!(formatted, "Key1: Value1\n\nKey2: Value2\n");
+    }
+
+    #[test]
+    fn test_parser_edge_cases() {
+        // Let's focus on testing various parser behaviors rather than expecting errors
+
+        // Test comment handling
+        let input = "# Comment\nKey: value";
+        let deb822: Deb822 = input.parse().unwrap();
+        assert_eq!(deb822.len(), 1);
+
+        // Test for unexpected token at line 303
+        let input = "Key: value\n .indented";
+        let deb822: Deb822 = input.parse().unwrap();
+        assert_eq!(
+            deb822.iter().next().unwrap().get("Key"),
+            Some("value\n.indented")
+        );
+
+        // Test multi-line values
+        let input = "Key: value\n line1\n line2\n\nNextKey: value";
+        let deb822: Deb822 = input.parse().unwrap();
+        assert_eq!(deb822.len(), 2);
+        assert_eq!(
+            deb822.iter().next().unwrap().get("Key"),
+            Some("value\nline1\nline2")
         );
     }
 }

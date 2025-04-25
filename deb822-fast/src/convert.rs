@@ -45,8 +45,77 @@ pub trait ToDeb822Paragraph<P: Deb822LikeParagraph> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "derive")]
     use super::*;
+
+    #[test]
+    fn test_trait_impl_directly() {
+        // Test the trait methods directly to improve coverage
+        let mut para = crate::Paragraph {
+            fields: vec![crate::Field {
+                name: "Test".to_string(),
+                value: "Value".to_string(),
+            }],
+        };
+
+        // Test Deb822LikeParagraph::get
+        let result: Option<String> = Deb822LikeParagraph::get(&para, "Test");
+        assert_eq!(result, Some("Value".to_string()));
+
+        // Test Deb822LikeParagraph::set
+        Deb822LikeParagraph::set(&mut para, "Test", "NewValue");
+        assert_eq!(para.get("Test"), Some("NewValue"));
+
+        // Test Deb822LikeParagraph::remove
+        Deb822LikeParagraph::remove(&mut para, "Test");
+        assert_eq!(para.get("Test"), None);
+    }
+
+    #[test]
+    fn test_deb822like_paragraph_impl() {
+        // Create mock crate::Paragraph for tests
+        let mut para = crate::Paragraph {
+            fields: vec![crate::Field {
+                name: "Name".to_string(),
+                value: "Test".to_string(),
+            }],
+        };
+
+        // Test get() - this calls the implementation on line 16-17
+        assert_eq!(para.get("Name"), Some("Test"));
+        assert_eq!(para.get("NonExistent"), None);
+
+        // Test set() - this calls the implementation on line 20-21
+        para.set("Name", "NewValue");
+        assert_eq!(para.get("Name"), Some("NewValue"));
+
+        // Test set() with new key
+        para.set("NewKey", "Value");
+        assert_eq!(para.get("NewKey"), Some("Value"));
+
+        // Test remove() - this calls the implementation on line 24-25
+        para.remove("Name");
+        assert_eq!(para.get("Name"), None);
+        assert_eq!(para.get("NewKey"), Some("Value"));
+
+        // Create a new paragraph with multiple fields of the same name
+        let mut para = crate::Paragraph {
+            fields: vec![
+                crate::Field {
+                    name: "Duplicate".to_string(),
+                    value: "Value1".to_string(),
+                },
+                crate::Field {
+                    name: "Duplicate".to_string(),
+                    value: "Value2".to_string(),
+                },
+            ],
+        };
+
+        // Test remove() removes all matches
+        para.remove("Duplicate");
+        assert_eq!(para.get("Duplicate"), None);
+        assert_eq!(para.fields.len(), 0);
+    }
 
     #[cfg(feature = "derive")]
     mod derive {
@@ -97,8 +166,7 @@ mod tests {
 
         #[test]
         fn test_deserialize_with() {
-            let mut para: crate::Paragraph =
-                "bar: bar\n# comment\nbaz: blah\n".parse().unwrap();
+            let mut para: crate::Paragraph = "bar: bar\n# comment\nbaz: blah\n".parse().unwrap();
 
             fn to_bool(s: &str) -> Result<bool, String> {
                 Ok(s == "ja")
@@ -134,8 +202,7 @@ mod tests {
 
         #[test]
         fn test_update_remove() {
-            let mut para: crate::Paragraph =
-                "bar: bar\n# comment\nbaz: blah\n".parse().unwrap();
+            let mut para: crate::Paragraph = "bar: bar\n# comment\nbaz: blah\n".parse().unwrap();
 
             #[derive(FromDeb822, ToDeb822)]
             struct Foo {
