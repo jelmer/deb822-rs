@@ -62,8 +62,8 @@ pub(crate) fn lex(mut input: &str) -> impl Iterator<Item = (SyntaxKind, &str)> {
                     Some((SyntaxKind::NEWLINE, nl))
                 }
                 _ if is_indent(c) => {
-                    let (whitespace, remaining) = input
-                        .split_at(input.find(|c| !is_indent(c)).unwrap_or(input.len()));
+                    let (whitespace, remaining) =
+                        input.split_at(input.find(|c| !is_indent(c)).unwrap_or(input.len()));
                     input = remaining;
                     if start_of_line {
                         indent = whitespace.len();
@@ -81,11 +81,8 @@ pub(crate) fn lex(mut input: &str) -> impl Iterator<Item = (SyntaxKind, &str)> {
                     Some((SyntaxKind::COMMENT, comment))
                 }
                 _ if is_valid_initial_key_char(c) && start_of_line && indent == 0 => {
-                    let (key, remaining) = input.split_at(
-                        input
-                            .find(|c| !is_valid_key_char(c))
-                            .unwrap_or(input.len()),
-                    );
+                    let (key, remaining) = input
+                        .split_at(input.find(|c| !is_valid_key_char(c)).unwrap_or(input.len()));
                     input = remaining;
                     start_of_line = false;
                     Some((SyntaxKind::KEY, key))
@@ -114,6 +111,80 @@ mod tests {
     #[test]
     fn test_empty() {
         assert_eq!(super::lex("").collect::<Vec<_>>(), vec![]);
+    }
+
+    #[test]
+    fn test_error_token() {
+        // Test the default case in the lexer that returns ERROR tokens
+        // We need to create a specific scenario where none of the other patterns match
+
+        // Since the lexer treats ASCII control characters as errors when at the start of a line
+        // We'll use the ASCII bell character (BEL, 0x07)
+        let text = "\x07invalid\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+
+        assert!(tokens.len() >= 2); // At least ERROR token and NEWLINE
+        assert_eq!(tokens[0].0, ERROR); // First token should be ERROR
+
+        // Test with a character that doesn't match any other case in the middle of input
+        let text = "Key: value\n\x07more\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+        assert_eq!(tokens[0], (KEY, "Key"));
+
+        // Make sure we can collect tokens even after errors
+        let text = "\x07error\nKey: value\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+        assert!(tokens.len() > 3); // Should have ERROR token followed by normal tokens
+
+        // Verify that lexer can handle null bytes
+        let text = "Key:\0value\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+        assert!(tokens.len() >= 3); // Should have at least KEY, COLON, and something for the value
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        // Test with empty lines
+        let text = "\n\n\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+        assert_eq!(
+            tokens,
+            vec![(NEWLINE, "\n"), (NEWLINE, "\n"), (NEWLINE, "\n")]
+        );
+
+        // Test with just whitespace
+        let text = "   \n\t\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+        assert_eq!(
+            tokens,
+            vec![
+                (INDENT, "   "),
+                (NEWLINE, "\n"),
+                (INDENT, "\t"),
+                (NEWLINE, "\n")
+            ]
+        );
+
+        // Test with just a comment
+        let text = "# Just a comment\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+        assert_eq!(tokens, vec![(COMMENT, "# Just a comment"), (NEWLINE, "\n")]);
+
+        // Test with a comment followed by a key-value pair
+        let text = "# Comment\nKey: value\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+        assert_eq!(
+            tokens,
+            vec![
+                (COMMENT, "# Comment"),
+                (NEWLINE, "\n"),
+                (KEY, "Key"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "value"),
+                (NEWLINE, "\n")
+            ]
+        );
     }
 
     #[test]
