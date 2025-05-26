@@ -876,16 +876,38 @@ impl std::str::FromStr for Paragraph {
 }
 
 #[cfg(feature = "python-debian")]
-impl pyo3::ToPyObject for Paragraph {
-    fn to_object(&self, py: pyo3::Python) -> pyo3::PyObject {
+impl<'py> pyo3::IntoPyObject<'py> for Paragraph {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
         use pyo3::prelude::*;
-        let d = pyo3::types::PyDict::new_bound(py);
+        let d = pyo3::types::PyDict::new(py);
         for (k, v) in self.items() {
-            d.set_item(k, v).unwrap();
+            d.set_item(k, v)?;
         }
-        let m = py.import_bound("debian.deb822").unwrap();
-        let cls = m.getattr("Deb822").unwrap();
-        cls.call1((d,)).unwrap().to_object(py)
+        let m = py.import("debian.deb822")?;
+        let cls = m.getattr("Deb822")?;
+        cls.call1((d,))
+    }
+}
+
+#[cfg(feature = "python-debian")]
+impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Paragraph {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        use pyo3::prelude::*;
+        let d = pyo3::types::PyDict::new(py);
+        for (k, v) in self.items() {
+            d.set_item(k, v)?;
+        }
+        let m = py.import("debian.deb822")?;
+        let cls = m.getattr("Deb822")?;
+        cls.call1((d,))
     }
 }
 

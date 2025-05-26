@@ -106,9 +106,7 @@ impl std::str::FromStr for Copyright {
             return Err("Not machine readable".to_string());
         }
 
-        let deb822: Deb822 = s
-            .parse()
-            .map_err(|e: deb822_fast::Error| e.to_string())?;
+        let deb822: Deb822 = s.parse().map_err(|e: deb822_fast::Error| e.to_string())?;
 
         let mut paragraphs = deb822.iter();
 

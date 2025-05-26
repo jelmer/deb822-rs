@@ -23,7 +23,7 @@ fn deserialize_env(s: &str) -> Result<HashMap<String, String>, String> {
                 } else {
                     (key, value.to_string())
                 }
-            },
+            }
             None => {
                 // If there is no '=', then the line is invalid
                 return Err("Invalid environment variable".to_string());
@@ -140,9 +140,8 @@ impl std::str::FromStr for Buildinfo {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let para: deb822_fast::Paragraph = s
-            .parse()
-            .map_err(|e: deb822_fast::Error| e.to_string())?;
+        let para: deb822_fast::Paragraph =
+            s.parse().map_err(|e: deb822_fast::Error| e.to_string())?;
         Self::from_paragraph(&para)
     }
 }

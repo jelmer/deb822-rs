@@ -258,9 +258,24 @@ impl Default for Changes {
 }
 
 #[cfg(feature = "python-debian")]
-impl pyo3::ToPyObject for Changes {
-    fn to_object(&self, py: pyo3::Python) -> pyo3::PyObject {
-        self.0.to_object(py)
+impl<'py> pyo3::IntoPyObject<'py> for Changes {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        self.0.into_pyobject(py)
+    }
+}
+
+#[cfg(feature = "python-debian")]
+impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Changes {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        (&self.0).into_pyobject(py)
     }
 }
 

@@ -173,8 +173,7 @@ impl std::str::FromStr for Control {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let deb822: deb822_fast::Deb822 =
-            s.parse().map_err(|e| format!("parse error: {}", e))?;
+        let deb822: deb822_fast::Deb822 = s.parse().map_err(|e| format!("parse error: {}", e))?;
 
         let mut source: Option<Source> = None;
         let mut binaries: Vec<Binary> = Vec::new();

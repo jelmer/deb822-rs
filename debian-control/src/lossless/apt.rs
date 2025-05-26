@@ -8,15 +8,36 @@ use crate::lossless::relations::Relations;
 pub struct Source(deb822_lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
-impl pyo3::ToPyObject for Source {
-    fn to_object(&self, py: pyo3::Python) -> pyo3::PyObject {
+impl<'py> pyo3::IntoPyObject<'py> for Source {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
         use pyo3::prelude::*;
-        let d = self.0.to_object(py);
+        let d = self.0.into_pyobject(py)?;
 
-        let m = py.import_bound("debian.deb822").unwrap();
-        let cls = m.getattr("Sources").unwrap();
+        let m = py.import("debian.deb822")?;
+        let cls = m.getattr("Sources")?;
 
-        cls.call1((d,)).unwrap().to_object(py)
+        cls.call1((d,))
+    }
+}
+
+#[cfg(feature = "python-debian")]
+impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Source {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        use pyo3::prelude::*;
+        let d = (&self.0).into_pyobject(py)?;
+
+        let m = py.import("debian.deb822")?;
+        let cls = m.getattr("Sources")?;
+
+        cls.call1((d,))
     }
 }
 
@@ -455,15 +476,36 @@ impl std::str::FromStr for Source {
 pub struct Package(deb822_lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
-impl pyo3::ToPyObject for Package {
-    fn to_object(&self, py: pyo3::Python) -> pyo3::PyObject {
+impl<'py> pyo3::IntoPyObject<'py> for Package {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
         use pyo3::prelude::*;
-        let d = self.0.to_object(py);
+        let d = self.0.into_pyobject(py)?;
 
-        let m = py.import_bound("debian.deb822").unwrap();
-        let cls = m.getattr("Packages").unwrap();
+        let m = py.import("debian.deb822")?;
+        let cls = m.getattr("Packages")?;
 
-        cls.call1((d,)).unwrap().to_object(py)
+        cls.call1((d,))
+    }
+}
+
+#[cfg(feature = "python-debian")]
+impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Package {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        use pyo3::prelude::*;
+        let d = (&self.0).into_pyobject(py)?;
+
+        let m = py.import("debian.deb822")?;
+        let cls = m.getattr("Packages")?;
+
+        cls.call1((d,))
     }
 }
 
@@ -756,15 +798,36 @@ impl std::str::FromStr for Package {
 pub struct Release(deb822_lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
-impl pyo3::ToPyObject for Release {
-    fn to_object(&self, py: pyo3::Python) -> pyo3::PyObject {
+impl<'py> pyo3::IntoPyObject<'py> for Release {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
         use pyo3::prelude::*;
-        let d = self.0.to_object(py);
+        let d = self.0.into_pyobject(py)?;
 
-        let m = py.import_bound("debian.deb822").unwrap();
-        let cls = m.getattr("Release").unwrap();
+        let m = py.import("debian.deb822")?;
+        let cls = m.getattr("Release")?;
 
-        cls.call1((d,)).unwrap().to_object(py)
+        cls.call1((d,))
+    }
+}
+
+#[cfg(feature = "python-debian")]
+impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Release {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        use pyo3::prelude::*;
+        let d = (&self.0).into_pyobject(py)?;
+
+        let m = py.import("debian.deb822")?;
+        let cls = m.getattr("Release")?;
+
+        cls.call1((d,))
     }
 }
 

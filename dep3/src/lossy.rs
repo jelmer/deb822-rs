@@ -18,7 +18,7 @@
 //! assert_eq!(patch_header.bug_debian, Some("https://bugs.debian.org/123456".parse().unwrap()));
 //! ```
 use crate::fields::*;
-use deb822_fast::{Paragraph, FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
+use deb822_fast::{FromDeb822, FromDeb822Paragraph, Paragraph, ToDeb822, ToDeb822Paragraph};
 
 fn deserialize_date(s: &str) -> Result<chrono::NaiveDate, String> {
     chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| e.to_string())
