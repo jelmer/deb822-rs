@@ -178,9 +178,7 @@ impl Control {
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
-        let sort_paragraphs = |a: &Paragraph,
-                               b: &Paragraph|
-         -> std::cmp::Ordering {
+        let sort_paragraphs = |a: &Paragraph, b: &Paragraph| -> std::cmp::Ordering {
             // Sort Source before Package
             let a_is_source = a.get("Source").is_some();
             let b_is_source = b.get("Source").is_some();
@@ -576,9 +574,24 @@ impl Source {
 }
 
 #[cfg(feature = "python-debian")]
-impl pyo3::ToPyObject for Source {
-    fn to_object(&self, py: pyo3::Python) -> pyo3::PyObject {
-        self.0.to_object(py)
+impl<'py> pyo3::IntoPyObject<'py> for Source {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        self.0.into_pyobject(py)
+    }
+}
+
+#[cfg(feature = "python-debian")]
+impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Source {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        (&self.0).into_pyobject(py)
     }
 }
 
@@ -612,9 +625,24 @@ impl From<Paragraph> for Binary {
 }
 
 #[cfg(feature = "python-debian")]
-impl pyo3::ToPyObject for Binary {
-    fn to_object(&self, py: pyo3::Python) -> pyo3::PyObject {
-        self.0.to_object(py)
+impl<'py> pyo3::IntoPyObject<'py> for Binary {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        self.0.into_pyobject(py)
+    }
+}
+
+#[cfg(feature = "python-debian")]
+impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Binary {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        (&self.0).into_pyobject(py)
     }
 }
 

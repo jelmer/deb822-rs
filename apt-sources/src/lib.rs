@@ -363,10 +363,7 @@ mod tests {
         let ret = s.parse::<Repositories>();
         assert!(ret.is_err());
         //assert_eq!(ret.unwrap_err(), "Not machine readable".to_string());
-        assert_eq!(
-            ret.unwrap_err(),
-            "Unexpected token:  ".to_string()
-        );
+        assert_eq!(ret.unwrap_err(), "Unexpected token:  ".to_string());
     }
 
     #[test]
@@ -378,7 +375,9 @@ mod tests {
             Architectures: arm64
         "#};
 
-        let repos = s.parse::<Repositories>().expect("Shall be parsed flawlessly");
+        let repos = s
+            .parse::<Repositories>()
+            .expect("Shall be parsed flawlessly");
         assert!(repos[0].types.contains(&super::RepositoryType::Binary));
     }
 
