@@ -15,7 +15,7 @@ rowan = { version = "0.16", optional = true }
 debversion = ">=0.3"
 regex = "1"
 deb822-lossless = { version = ">=0.2.6", path = "../deb822-lossless", optional = true }
-deb822-fast = { path = "../deb822-fast", features = ["derive"], version = ">=0.1" }
+deb822-fast = { path = "../deb822-fast", features = ["derive"], version = ">=0.1.1" }
 url = "2"
 pyo3 = { workspace = true, optional = true }
 chrono = { version = "0.4", optional = true }
