@@ -1,6 +1,6 @@
 [package]
 name = "deb822-fast"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 repository.workspace = true
 homepage.workspace = true
@@ -11,7 +11,7 @@ license = "Apache-2.0"
 keywords = ["debian", "deb822", "control", "rfc822"]
 
 [dependencies]
-deb822-derive = { path = "../deb822-derive", version = "^0.2", optional = true }
+deb822-derive = { path = "../deb822-derive", version = "^0.3", optional = true }
 
 [features]
 derive = ["dep:deb822-derive"]
