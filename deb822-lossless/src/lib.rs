@@ -25,6 +25,7 @@ impl Default for Indentation {
     }
 }
 
+#[cfg(feature = "deb822-fast")]
 impl deb822_fast::convert::Deb822LikeParagraph for crate::lossless::Paragraph {
     fn get(&self, key: &str) -> Option<String> {
         crate::lossless::Paragraph::get(self, key).map(|v| v.to_string())
