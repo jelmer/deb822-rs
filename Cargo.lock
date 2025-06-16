@@ -224,7 +224,7 @@ checksum = "43da5946c66ffcc7745f48db692ffbb10a83bfe0afd96235c5c2a4fb23994929"
 
 [[package]]
 name = "deb822-derive"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -233,14 +233,14 @@ dependencies = [
 
 [[package]]
 name = "deb822-fast"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "deb822-derive",
 ]
 
 [[package]]
 name = "deb822-lossless"
-version = "0.2.6"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "deb822-fast",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "debian-control"
-version = "0.1.43"
+version = "0.1.45"
 dependencies = [
  "chrono",
  "deb822-fast",
@@ -861,9 +861,9 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "syn"
-version = "2.0.101"
+version = "2.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ce2b7fc941b3a24138a0a7cf8e858bfc6a992e7978a068a5c760deb0ed43caf"
+checksum = "e4307e30089d6fd6aff212f2da3a1f9e32f3223b1f010fb09b7c95f90f3ca1e8"
 dependencies = [
  "proc-macro2",
  "quote",
