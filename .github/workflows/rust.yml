@@ -21,6 +21,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Install OpenSSL on macOS
+        if: matrix.os == 'macos-latest'
+        run: brew install openssl@3
       - name: Install all-features
         run: cargo install cargo-all-features
       - name: Build
