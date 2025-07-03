@@ -52,6 +52,8 @@ use url::Url;
 
 pub mod error;
 pub mod signature;
+/// Module for managing APT source lists
+pub mod sources_manager;
 
 /// A representation of the repository type, by role of packages it can provide, either `Binary`
 /// (indicated by `deb`) or `Source` (indicated by `deb-src`).
@@ -225,67 +227,129 @@ pub struct Repository {
     /// If `no` (false) the repository is ignored by APT
     #[deb822(field = "Enabled", deserialize_with = deserialize_yesno, serialize_with = serializer_yesno)]
     // TODO: support for `default` if omitted is missing
-    enabled: Option<bool>,
+    pub enabled: Option<bool>,
 
     /// The value `RepositoryType::Binary` (`deb`) or/and `RepositoryType::Source` (`deb-src`)
     #[deb822(field = "Types", deserialize_with = deserialize_types, serialize_with = serialize_types)]
-    types: HashSet<RepositoryType>, // consider alternative, closed set
+    pub types: HashSet<RepositoryType>, // consider alternative, closed set
     /// The address of the repository
     #[deb822(field = "URIs", deserialize_with = deserialize_uris, serialize_with = serialize_uris)]
-    uris: Vec<Url>, // according to Debian that's URI, but this type is more advanced than URI from `http` crate
+    pub uris: Vec<Url>, // according to Debian that's URI, but this type is more advanced than URI from `http` crate
     /// The distribution name as codename or suite type (like `stable` or `testing`)
     #[deb822(field = "Suites", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    suites: Vec<String>,
+    pub suites: Vec<String>,
     /// (Optional) Section of the repository, usually `main`, `contrib` or `non-free`
     /// return `None` if repository is Flat Repository Format (https://wiki.debian.org/DebianRepository/Format#Flat_Repository_Format)
     #[deb822(field = "Components", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    components: Option<Vec<String>>,
+    pub components: Option<Vec<String>>,
 
     /// (Optional) Architectures binaries from this repository run on
     #[deb822(field = "Architectures", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    architectures: Vec<String>,
+    pub architectures: Vec<String>,
     /// (Optional) Translations support to download
     #[deb822(field = "Languages", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    languages: Option<Vec<String>>, // TODO: Option is redundant to empty vectors
+    pub languages: Option<Vec<String>>, // TODO: Option is redundant to empty vectors
     /// (Optional) Download targets to acquire from this source
     #[deb822(field = "Targets", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    targets: Option<Vec<String>>,
+    pub targets: Option<Vec<String>>,
     /// (Optional) Controls if APT should try PDiffs instead of downloading indexes entirely; if not set defaults to configuration option `Acquire::PDiffs`
     #[deb822(field = "PDiffs", deserialize_with = deserialize_yesno)]
-    pdiffs: Option<bool>,
+    pub pdiffs: Option<bool>,
     /// (Optional) Controls if APT should try to acquire indexes via a URI constructed from a hashsum of the expected file
     #[deb822(field = "By-Hash")]
-    by_hash: Option<YesNoForce>,
+    pub by_hash: Option<YesNoForce>,
     /// (Optional) If yes circumvents parts of `apt-secure`, don't thread lightly
     #[deb822(field = "Allow-Insecure")]
-    allow_insecure: Option<bool>, // TODO: redundant option, not present = default no
+    pub allow_insecure: Option<bool>, // TODO: redundant option, not present = default no
     /// (Optional) If yes circumvents parts of `apt-secure`, don't thread lightly
     #[deb822(field = "Allow-Weak")]
-    allow_weak: Option<bool>, // TODO: redundant option, not present = default no
+    pub allow_weak: Option<bool>, // TODO: redundant option, not present = default no
     /// (Optional) If yes circumvents parts of `apt-secure`, don't thread lightly
     #[deb822(field = "Allow-Downgrade-To-Insecure")]
-    allow_downgrade_to_insecure: Option<bool>, // TODO: redundant option, not present = default no
+    pub allow_downgrade_to_insecure: Option<bool>, // TODO: redundant option, not present = default no
     /// (Optional) If set forces whether APT considers source as rusted or no (default not present is a third state)
     #[deb822(field = "Trusted")]
-    trusted: Option<bool>,
+    pub trusted: Option<bool>,
     /// (Optional) Contains either absolute path to GPG keyring or embedded GPG public key block, if not set APT uses all trusted keys;
     /// I can't find example of using with fingerprints
     #[deb822(field = "Signed-By")]
-    signature: Option<Signature>,
+    pub signature: Option<Signature>,
 
     /// (Optional) Field ignored by APT but used by RepoLib to identify repositories, Ubuntu sources contain them
     #[deb822(field = "X-Repolib-Name")]
-    x_repolib_name: Option<String>, // this supports RepoLib still used by PopOS, even if removed from Debian/Ubuntu
+    pub x_repolib_name: Option<String>, // this supports RepoLib still used by PopOS, even if removed from Debian/Ubuntu
 
     /// (Optional) Field not present in the man page, but used in APT unit tests, potentially to hold the repository description
     #[deb822(field = "Description")]
-    description: Option<String>, // options: HashMap<String, String> // My original parser kept remaining optional fields in the hash map, is this right approach?
+    pub description: Option<String>, // options: HashMap<String, String> // My original parser kept remaining optional fields in the hash map, is this right approach?
 }
 
 impl Repository {
     /// Returns slice of strings containing suites for which this repository provides
     pub fn suites(&self) -> &[String] {
         self.suites.as_slice()
+    }
+
+    /// Generate legacy .list format lines for this repository
+    pub fn to_legacy_format(&self) -> String {
+        let mut lines = Vec::new();
+
+        // Generate deb and/or deb-src lines
+        for repo_type in &self.types {
+            let type_str = match repo_type {
+                RepositoryType::Binary => "deb",
+                RepositoryType::Source => "deb-src",
+            };
+
+            for uri in &self.uris {
+                for suite in &self.suites {
+                    let mut line = format!("{} {} {}", type_str, uri, suite);
+
+                    // Add components
+                    if let Some(components) = &self.components {
+                        for component in components {
+                            line.push(' ');
+                            line.push_str(component);
+                        }
+                    }
+
+                    lines.push(line);
+                }
+            }
+        }
+
+        lines.join("\n") + "\n"
+    }
+
+    /// Parse a legacy apt sources.list line (e.g., "deb http://example.com/debian stable main")
+    pub fn parse_legacy_line(line: &str) -> Result<Repository, String> {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        if parts.len() < 4 {
+            return Err("Invalid repository line format".to_string());
+        }
+
+        let repo_type = match parts[0] {
+            "deb" => RepositoryType::Binary,
+            "deb-src" => RepositoryType::Source,
+            _ => return Err("Line must start with 'deb' or 'deb-src'".to_string()),
+        };
+
+        let uri = Url::parse(parts[1]).map_err(|_| "Invalid URI".to_string())?;
+
+        let suite = parts[2].to_string();
+        let components: Vec<String> = parts[3..].iter().map(|s| s.to_string()).collect();
+
+        Ok(Repository {
+            enabled: Some(true),
+            types: HashSet::from([repo_type]),
+            uris: vec![uri],
+            suites: vec![suite],
+            components: Some(components),
+            architectures: vec![],
+            signature: None,
+            ..Default::default()
+        })
     }
 }
 
@@ -305,6 +369,37 @@ impl Repositories {
         Container: Into<Vec<Repository>>,
     {
         Repositories(container.into())
+    }
+
+    /// Push a new repository
+    pub fn push(&mut self, repo: Repository) {
+        self.0.push(repo);
+    }
+
+    /// Retain repositories matching a predicate
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&Repository) -> bool,
+    {
+        self.0.retain(f);
+    }
+
+    /// Get mutable iterator over repositories
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<Repository> {
+        self.0.iter_mut()
+    }
+
+    /// Extend with an iterator of repositories
+    pub fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = Repository>,
+    {
+        self.0.extend(iter);
+    }
+
+    /// Check if empty
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
