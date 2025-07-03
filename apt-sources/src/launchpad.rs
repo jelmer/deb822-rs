@@ -46,6 +46,30 @@ impl PpaInfo {
         })
     }
 
+    /// Try to extract PPA info from a Repository by parsing its URLs
+    ///
+    /// Returns `Some(PpaInfo)` if the repository URL matches the PPA URL pattern.
+    pub fn from_repository(repo: &crate::Repository) -> Option<PpaInfo> {
+        for uri in &repo.uris {
+            let url_str = uri.as_str();
+            // Check for PPA URLs like:
+            // https://ppa.launchpadcontent.net/user/ppa-name/ubuntu
+            // http://ppa.launchpad.net/user/ppa-name/ubuntu
+            if url_str.contains("ppa.launchpadcontent.net") || url_str.contains("ppa.launchpad.net")
+            {
+                let path = uri.path();
+                let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+                if parts.len() >= 2 {
+                    return Some(PpaInfo {
+                        user: parts[0].to_string(),
+                        name: parts[1].to_string(),
+                    });
+                }
+            }
+        }
+        None
+    }
+
     /// Generate the repository URL for this PPA
     pub fn repository_url(&self, _codename: &str) -> Result<Url, String> {
         Url::parse(&format!(
@@ -58,6 +82,11 @@ impl PpaInfo {
     /// Generate a filename for this PPA
     pub fn filename(&self, extension: &str) -> String {
         format!("{}-ubuntu-{}.{}", self.user, self.name, extension)
+    }
+
+    /// Generate a keyring filename for this PPA
+    pub fn keyring_filename(&self) -> String {
+        format!("{}-{}-keyring.asc", self.user, self.name)
     }
 }
 

@@ -57,8 +57,8 @@ use url::Url;
 /// Distribution detection and utilities
 pub mod distribution;
 pub mod error;
-#[cfg(feature = "key-management")]
 /// Key management utilities for GPG keys
+#[cfg(feature = "key-management")]
 pub mod key_management;
 #[cfg(feature = "key-management")]
 pub mod keyserver;
@@ -70,6 +70,8 @@ pub mod legacy;
 pub mod signature;
 /// Module for managing APT source lists
 pub mod sources_manager;
+/// General utilities
+pub mod utils;
 
 /// A representation of the repository type, by role of packages it can provide, either `Binary`
 /// (indicated by `deb`) or `Source` (indicated by `deb-src`).
