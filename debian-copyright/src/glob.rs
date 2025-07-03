@@ -28,7 +28,7 @@ pub fn glob_to_regex(glob: &str) -> regex::Regex {
         }
     }
 
-    r.push_str("$");
+    r.push('$');
 
     regex::Regex::new(r.as_str()).unwrap()
 }

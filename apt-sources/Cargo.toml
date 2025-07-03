@@ -12,7 +12,7 @@ categories = ["parser-implementations"]
 
 [features]
 default = []
-keyserver = ["dep:sequoia-openpgp", "dep:sequoia-net", "dep:tokio"]
+key-management = ["dep:sequoia-openpgp", "dep:sequoia-net", "dep:tokio"]
 
 [dependencies]
 deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = ["derive"] }

@@ -1,9 +1,9 @@
 //! Keyserver operations for downloading and verifying GPG keys
 //!
 //! This module provides functionality for interacting with keyservers using Sequoia.
-//! It requires the `keyserver` feature to be enabled.
+//! It requires the `key-management` feature to be enabled.
 
-#![cfg(feature = "keyserver")]
+#![cfg(feature = "key-management")]
 
 use sequoia_net::KeyServer;
 use sequoia_openpgp::{parse::Parse, serialize::Marshal, Cert, KeyHandle};
