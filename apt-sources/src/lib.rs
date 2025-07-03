@@ -53,6 +53,7 @@ use url::Url;
 /// Distribution detection and utilities
 pub mod distribution;
 pub mod error;
+pub mod ppa;
 pub mod signature;
 /// Module for managing APT source lists
 pub mod sources_manager;
