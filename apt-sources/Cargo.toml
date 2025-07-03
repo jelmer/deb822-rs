@@ -47,7 +47,7 @@ colored = "2.1"
 [[bin]]
 name = "apt-add-repository"
 path = "src/bin/apt-add-repository.rs"
-required-features = ["key-management", "cli"]
+required-features = ["key-management", "launchpad", "cli"]
 
 [[bin]]
 name = "ppa-info"

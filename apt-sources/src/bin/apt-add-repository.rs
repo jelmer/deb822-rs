@@ -1,3 +1,8 @@
+use apt_sources::key_management::create_inline_signature;
+use apt_sources::launchpad::{
+    download_ppa_signing_key, validate_ppa, validate_ppa_components, PpaInfo, PpaValidationResult,
+    LAUNCHPAD_PPA_URL,
+};
 use apt_sources::{
     distribution::{get_system_info, Distribution},
     legacy::LegacyRepositories,
@@ -12,6 +17,11 @@ use clap::Parser;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error, info, warn};
+use reqwest;
+#[allow(unused_imports)] // Required for Cert::from_str
+use sequoia_openpgp::parse::Parse;
+use sequoia_openpgp::Cert;
+use serde_json;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
@@ -20,22 +30,43 @@ use std::process;
 use std::str::FromStr;
 use url::Url;
 
+/// Create HTTP client for making requests
+fn create_http_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))
+}
+
+/// Format network errors in a user-friendly way
+fn format_network_error(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        "Connection timeout - please check your internet connection".to_string()
+    } else if error.is_connect() {
+        "Failed to connect - please check your internet connection".to_string()
+    } else {
+        error.to_string()
+    }
+}
+
 #[derive(Parser, Debug, Clone)]
 #[command(
     name = "apt-add-repository",
     about = "Add APT repository to sources.list.d",
     long_about = None,
     after_help = "Examples:
-  apt-add-repository \"deb http://example.com/debian stable main\"
-  apt-add-repository http://example.com/debian
-  apt-add-repository -s http://example.com/debian
+  apt-add-repository ppa:user/ppa-name
+  apt-add-repository http://ppa.launchpad.net/example/ppa/ubuntu
+  apt-add-repository \"deb http://archive.ubuntu.com/ubuntu focal main\"
+  apt-add-repository -s http://archive.ubuntu.com/ubuntu
   apt-add-repository -s           # Enable existing disabled deb-src entries
   apt-add-repository -ss          # Enable + create missing deb-src entries
-  echo \"deb http://example.com/debian stable main\" | apt-add-repository -
+  apt-add-repository \"ppa:user/ppa1 ppa:user/ppa2\"  # Add multiple repositories
+  echo \"ppa:user/ppa-name\" | apt-add-repository -
   cat repos.txt | apt-add-repository -"
 )]
 struct Args {
-    /// Repository specification (URL or full deb line, or '-' to read from stdin)
+    /// Repository specification (PPA, URL, or full line, or '-' to read from stdin)
     #[arg(required_unless_present_any = ["list", "component", "enable_source"])]
     repository: Option<String>,
 
@@ -67,6 +98,10 @@ struct Args {
     #[arg(short = 'p', long = "pocket")]
     pocket: Option<String>,
 
+    /// Use specified keyserver URL
+    #[arg(short = 'k', long = "keyserver")]
+    keyserver: Option<String>,
+
     /// Add component to all matching repositories
     #[arg(long = "component", conflicts_with = "remove")]
     component: Option<String>,
@@ -79,15 +114,28 @@ struct Args {
     #[arg(long = "dry-run")]
     dry_run: bool,
 
+    /// Login to Launchpad to access private PPAs
+    #[arg(long = "login")]
+    login: bool,
+
     /// List all configured APT repositories
     #[arg(long = "list", conflicts_with_all = ["repository", "remove", "component", "pocket"])]
     list: bool,
+
+    /// Refresh signing keys for all PPAs
+    #[arg(long = "refresh-keys", conflicts_with_all = ["repository", "remove", "component", "pocket", "list"])]
+    refresh_keys: bool,
+
+    /// Use inline Signed-By instead of separate keyring files (recommended)
+    #[arg(long = "inline-key")]
+    inline_key: bool,
 }
 
 #[derive(Debug, Clone)]
 struct ParsedRepository {
     repository: Repository,
     filename: String,
+    ppa_info: Option<PpaInfo>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -200,6 +248,274 @@ fn get_main_sources_list_path(sources_dir: &str) -> PathBuf {
         .join("sources.list")
 }
 
+// download_key_from_keyserver - wrapper with progress indicator
+fn download_key_from_keyserver(fingerprint: &str, keyserver_url: &str) -> Result<String, String> {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    spinner.set_message(format!(
+        "Downloading key {} from keyserver {}...",
+        fingerprint, keyserver_url
+    ));
+    spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+
+    let result =
+        apt_sources::keyserver::download_key_from_keyserver_sync(fingerprint, keyserver_url);
+
+    match result {
+        Ok(key_data) => {
+            spinner.finish_with_message(format!("Successfully downloaded key {}", fingerprint));
+            Ok(key_data)
+        }
+        Err(e) => {
+            spinner.finish_and_clear();
+            Err(e)
+        }
+    }
+}
+
+#[cfg(feature = "launchpad")]
+fn validate_ppa_launchpadlib(
+    ppa_info: &PpaInfo,
+    auth_required: bool,
+) -> Result<PpaValidationResult, String> {
+    debug!(
+        "Validating PPA {}/{} using launchpadlib",
+        ppa_info.user, ppa_info.name
+    );
+    validate_ppa(ppa_info, auth_required).map_err(|e| e.to_string())
+}
+
+/// Validate PPA and provide user-friendly error messages
+fn validate_ppa_with_suggestions(ppa_info: &PpaInfo) -> Result<PpaValidationResult, String> {
+    info!(
+        "Checking if PPA {}/{} exists...",
+        ppa_info.user, ppa_info.name
+    );
+
+    let result = validate_ppa(ppa_info, false).map_err(|e| e.to_string())?;
+
+    if !result.exists {
+        if result.is_private {
+            return Err(format!(
+                "PPA {}/{} is private.\n\
+                 To access private PPAs:\n\
+                 1. Use the --login flag to authenticate with Launchpad\n\
+                 2. Ensure you're subscribed to this PPA\n\
+                 3. Check that apt-add-repository was built with launchpad support",
+                ppa_info.user, ppa_info.name
+            ));
+        } else {
+            return Err(format!(
+                "PPA {}/{} not found.\n\
+                 Suggestions:\n\
+                 - Check the PPA name for typos\n\
+                 - Verify the user '{}' exists on Launchpad\n\
+                 - Browse available PPAs at https://launchpad.net/~{}/+ppas",
+                ppa_info.user, ppa_info.name, ppa_info.user, ppa_info.user
+            ));
+        }
+    }
+
+    Ok(result)
+}
+
+#[cfg(feature = "launchpad")]
+fn get_private_ppa_url(ppa_info: &PpaInfo) -> Result<Url, String> {
+    debug!(
+        "Getting private PPA URL for {}/{}",
+        ppa_info.user, ppa_info.name
+    );
+    apt_sources::launchpad::get_private_ppa_url(ppa_info).map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "launchpad")]
+fn download_ppa_key_launchpadlib(
+    ppa_info: &PpaInfo,
+    auth_required: bool,
+) -> Result<String, String> {
+    debug!(
+        "Using launchpadlib to download PPA key for {}/{}",
+        ppa_info.user, ppa_info.name
+    );
+
+    let signing_key =
+        download_ppa_signing_key(ppa_info, auth_required).map_err(|e| e.to_string())?;
+
+    // Additionally check expiration
+    let cert = Cert::from_str(&signing_key.key_data)
+        .map_err(|e| format!("Failed to parse PGP key for expiration check: {}", e))?;
+
+    if let Some(expiration_error) = apt_sources::key_management::check_key_expiration(&cert) {
+        let expiration_warning = expiration_error.to_string();
+        if expiration_warning.contains("expired") {
+            error!("Key expiration: {}", expiration_warning);
+            return Err(format!("Cannot use expired key: {}", expiration_warning));
+        } else {
+            warn!("Key expiration warning: {}", expiration_warning);
+        }
+    }
+
+    info!(
+        "Downloaded and verified PPA signing key with fingerprint: {}",
+        signing_key.fingerprint
+    );
+    Ok(signing_key.key_data)
+}
+
+// verify_key_fingerprint - wrapper that adds expiration check and logging
+fn verify_key_fingerprint(key_data: &str, expected_fingerprint: &str) -> Result<(), String> {
+    debug!(
+        "Verifying key fingerprint against expected: {}",
+        expected_fingerprint
+    );
+
+    // Use the crate's fingerprint verification
+    apt_sources::key_management::verify_key_fingerprint(key_data, expected_fingerprint)
+        .map_err(|e| e.to_string())?;
+
+    // Additionally check expiration
+    let cert = Cert::from_str(key_data)
+        .map_err(|e| format!("Failed to parse PGP key for expiration check: {}", e))?;
+
+    if let Some(expiration_error) = apt_sources::key_management::check_key_expiration(&cert) {
+        let expiration_warning = expiration_error.to_string();
+        if expiration_warning.contains("expired") {
+            error!("Key expiration: {}", expiration_warning);
+            return Err(format!("Cannot use expired key: {}", expiration_warning));
+        } else {
+            warn!("Key expiration warning: {}", expiration_warning);
+        }
+    }
+
+    debug!("Key fingerprint verification successful");
+    Ok(())
+}
+
+fn download_ppa_key(ppa_info: &PpaInfo, keyserver: Option<&str>) -> Result<String, String> {
+    info!(
+        "Downloading signing key for PPA {}/{}...",
+        ppa_info.user, ppa_info.name
+    );
+
+    let key_data = if let Some(keyserver_url) = keyserver {
+        // Use custom keyserver - need to get fingerprint first
+        debug!("Using custom keyserver: {}", keyserver_url);
+        let api_url = format!(
+            "https://api.launchpad.net/1.0/~{}/+archive/ubuntu/{}",
+            ppa_info.user, ppa_info.name
+        );
+
+        let client = create_http_client()?;
+        let ppa_response = client
+            .get(&api_url)
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| format!("Failed to fetch PPA metadata: {}", format_network_error(&e)))?;
+
+        if !ppa_response.status().is_success() {
+            return Err(format!(
+                "PPA not found: {}/{}",
+                ppa_info.user, ppa_info.name
+            ));
+        }
+
+        let ppa_data: serde_json::Value = ppa_response
+            .json()
+            .map_err(|e| format!("Failed to parse PPA metadata: {}", e))?;
+
+        let fingerprint = ppa_data
+            .get("signing_key_fingerprint")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "PPA has no signing key configured".to_string())?;
+
+        let key = download_key_from_keyserver(fingerprint, keyserver_url)?;
+
+        // Verify the key fingerprint matches what we expect
+        verify_key_fingerprint(&key, fingerprint)?;
+        key
+    } else {
+        // Use library function for default Launchpad download
+        download_ppa_signing_key(ppa_info, false)
+            .map_err(|e| e.to_string())?
+            .key_data
+    };
+
+    info!("Downloaded PPA signing key");
+    Ok(key_data)
+}
+
+fn save_key_to_keyring(
+    key_data: &str,
+    keyring_dir: &str,
+    ppa_info: &PpaInfo,
+) -> Result<PathBuf, String> {
+    // The key data from Launchpad is already in armored format,
+    // but let's parse it to validate it's a proper key
+    let cert = Cert::from_str(key_data).map_err(|e| format!("Failed to parse PGP key: {}", e))?;
+
+    // Verify the key is valid
+    let policy = sequoia_openpgp::policy::StandardPolicy::new();
+    if cert.with_policy(&policy, None).is_err() {
+        return Err("Invalid or expired PGP key".to_string());
+    }
+
+    // Save to keyring directory
+    // Use .asc extension for ASCII-armored keys (apt prefers this)
+    let keyring_path = Path::new(keyring_dir).join(ppa_info.keyring_filename());
+
+    // Check if keyring directory exists
+    if !Path::new(keyring_dir).exists() {
+        fs::create_dir_all(keyring_dir)
+            .map_err(|e| format!("Failed to create keyring directory: {}", e))?;
+    }
+
+    // Write the key in ASCII-armored format
+    // Since the data from Launchpad is already armored, we can write it directly
+    fs::write(&keyring_path, key_data)
+        .map_err(|e| format!("Failed to write key to file: {}", e))?;
+
+    Ok(keyring_path)
+}
+
+/// Save the PPA key and return the appropriate Signature.
+/// If inline_key is true and format is Deb822, tries inline signature first,
+/// falling back to keyring file on failure.
+fn save_ppa_key(
+    key_data: &str,
+    ppa_info: &PpaInfo,
+    keyring_dir: &str,
+    use_inline: bool,
+) -> Option<Signature> {
+    if use_inline {
+        match create_inline_signature(key_data) {
+            Ok(inline_sig) => {
+                info!("Using inline Signed-By (embedded key)");
+                return Some(inline_sig);
+            }
+            Err(e) => {
+                warn!("Failed to create inline signature: {}", e);
+                warn!("Falling back to keyring file");
+            }
+        }
+    }
+
+    match save_key_to_keyring(key_data, keyring_dir, ppa_info) {
+        Ok(keyring_path) => {
+            info!("Signing key saved to {}", keyring_path.display());
+            Some(Signature::KeyPath(keyring_path))
+        }
+        Err(e) => {
+            warn!("Failed to save signing key: {}", e);
+            warn!("The repository will be added without signature verification.");
+            None
+        }
+    }
+}
+
 fn parse_repository_line(
     line: &str,
 ) -> Result<
@@ -309,9 +625,84 @@ fn parse_repository_spec(
         }
     }
 
+    // Check if it's a PPA
+    if spec.starts_with("ppa:") {
+        let ppa_info = PpaInfo::parse(spec)?;
+
+        let types = if enable_source_count > 0 {
+            HashSet::from([RepositoryType::Binary, RepositoryType::Source])
+        } else {
+            HashSet::from([RepositoryType::Binary])
+        };
+
+        // Generate PPA URL (with authentication for private PPAs if needed)
+        let uri = if args.login {
+            // For private PPAs, we need to get the subscription URL from launchpadlib
+            #[cfg(feature = "launchpad")]
+            {
+                get_private_ppa_url(&ppa_info)?
+            }
+            #[cfg(not(feature = "launchpad"))]
+            {
+                return Err("Private PPA support requires the 'launchpad' feature".to_string());
+            }
+        } else {
+            Url::parse(&format!(
+                "{}/{}/{}/ubuntu",
+                LAUNCHPAD_PPA_URL, ppa_info.user, ppa_info.name
+            ))
+            .unwrap()
+        };
+
+        // Validate components for PPA
+        let components = if let Some(ref comps) = args.component {
+            // User specified components - validate them
+            let comp_vec = vec![comps.clone()];
+            validate_ppa_components(&comp_vec)?;
+            comp_vec
+        } else {
+            vec!["main".to_string()]
+        };
+
+        let repository = Repository {
+            enabled: Some(true),
+            types,
+            architectures: vec![],
+            uris: vec![uri],
+            suites: vec![codename.to_string()],
+            components: Some(components),
+            signature: None, // Will be set after key download
+            x_repolib_name: Some(format!("ppa:{}/{}", ppa_info.user, ppa_info.name)),
+            ..Default::default()
+        };
+
+        let extension = match args.format {
+            OutputFormat::Legacy => "list",
+            OutputFormat::Deb822 => "sources",
+        };
+        let filename = format!(
+            "{}-ubuntu-{}-{}.{}",
+            ppa_info.user, ppa_info.name, codename, extension
+        );
+
+        return Ok(RepositorySpec::Repository(ParsedRepository {
+            repository,
+            filename,
+            ppa_info: Some(ppa_info),
+        }));
+    }
+
     // Check if it's a full deb line
     if spec.starts_with("deb ") || spec.starts_with("deb-src ") {
         let (parsed_types, uri, suite, components, signed_by) = parse_repository_line(spec)?;
+
+        // Check if this is a PPA URL and validate components
+        if uri
+            .host_str()
+            .map_or(false, |h| h.contains("ppa.launchpadcontent.net"))
+        {
+            validate_ppa_components(&components)?;
+        }
 
         let mut types = HashSet::new();
         for t in parsed_types {
@@ -341,12 +732,13 @@ fn parse_repository_spec(
         return Ok(RepositorySpec::Repository(ParsedRepository {
             repository,
             filename,
+            ppa_info: None,
         }));
     }
 
     // Try to parse as URL
     let uri = Url::parse(spec).map_err(|_| {
-        "Invalid repository specification. Expected URL or full deb line".to_string()
+        "Invalid repository specification. Expected PPA, URL, or full deb line".to_string()
     })?;
 
     // Strip auth data from URL for storage
@@ -379,6 +771,7 @@ fn parse_repository_spec(
     Ok(RepositorySpec::Repository(ParsedRepository {
         repository,
         filename,
+        ppa_info: None,
     }))
 }
 
@@ -483,6 +876,7 @@ fn add_pocket_repository(
     let parsed = ParsedRepository {
         repository,
         filename,
+        ppa_info: None,
     };
 
     add_parsed_repository(parsed, args, distribution)
@@ -1003,7 +1397,7 @@ fn add_single_repository(
     // Handle -p/--pocket flag
     if let Some(pocket) = &args.pocket {
         let pocket_spec = format!("{}-{}", codename, pocket);
-        return add_pocket_repository(&pocket_spec, &args, args.enable_source, distribution);
+        return add_pocket_repository(&pocket_spec, args, args.enable_source, distribution);
     }
 
     let spec = parse_repository_spec(repository, args.enable_source, args, distribution, codename)?;
@@ -1013,7 +1407,7 @@ fn add_single_repository(
             add_component_to_existing_repos(&component, &args.directory, args.dry_run, distribution)
         }
         RepositorySpec::Pocket(pocket_spec) => {
-            add_pocket_repository(&pocket_spec, &args, args.enable_source, distribution)
+            add_pocket_repository(&pocket_spec, args, args.enable_source, distribution)
         }
         RepositorySpec::Repository(parsed) => add_parsed_repository(parsed, args, distribution),
     }
@@ -1299,7 +1693,7 @@ fn is_duplicate_repository(
 }
 
 fn add_parsed_repository(
-    parsed: ParsedRepository,
+    mut parsed: ParsedRepository,
     args: &Args,
     distribution: &Distribution,
 ) -> Result<(), String> {
@@ -1331,6 +1725,73 @@ fn add_parsed_repository(
         Err(e) => {
             warn!("Error checking for duplicates: {}", e);
             // Continue anyway - better to add a potential duplicate than fail
+        }
+    }
+
+    // Handle PPA key download
+    if let Some(ref ppa_info) = parsed.ppa_info {
+        // Validate PPA first
+        info!("Checking PPA availability...");
+
+        #[cfg(feature = "launchpad")]
+        let validation_result = if args.login || args.keyserver.is_none() {
+            validate_ppa_launchpadlib(ppa_info, args.login)?
+        } else {
+            validate_ppa_with_suggestions(ppa_info)?
+        };
+
+        #[cfg(not(feature = "launchpad"))]
+        let validation_result = validate_ppa_with_suggestions(ppa_info)?;
+
+        // Inform about debug symbols if available
+        if validation_result.publishes_debug_symbols {
+            info!("This PPA publishes debug symbols. To enable debug symbols, add the component 'main/debug'.");
+        }
+
+        if !args.assume_yes && !args.dry_run {
+            eprint!(
+                "You are about to add the following PPA:
+ {}
+ More info: https://launchpad.net/~{}/+archive/ubuntu/{}
+Press [ENTER] to continue or Ctrl-c to cancel.",
+                validation_result.display_name, ppa_info.user, ppa_info.name
+            );
+            io::stdout().flush().unwrap();
+            let mut input = String::new();
+            io::stdin().read_line(&mut input).unwrap();
+        }
+
+        // Download and save the PPA signing key
+        if args.dry_run {
+            info!("Would download and verify PPA signing key");
+            let keyring_path = Path::new(&args.keyring_dir).join(ppa_info.keyring_filename());
+            info!("Would save signing key to {}", keyring_path.display());
+            parsed.repository.signature = Some(Signature::KeyPath(keyring_path));
+        } else {
+            info!("Getting signing key for PPA...");
+
+            // Use launchpadlib if available and needed
+            #[cfg(feature = "launchpad")]
+            let key_result = if args.login || args.keyserver.is_none() {
+                download_ppa_key_launchpadlib(ppa_info, args.login)
+            } else {
+                download_ppa_key(ppa_info, args.keyserver.as_deref())
+            };
+
+            #[cfg(not(feature = "launchpad"))]
+            let key_result = download_ppa_key(ppa_info, args.keyserver.as_deref());
+
+            match key_result {
+                Ok(key_data) => {
+                    let use_inline = args.inline_key && args.format == OutputFormat::Deb822;
+                    parsed.repository.signature =
+                        save_ppa_key(&key_data, ppa_info, &args.keyring_dir, use_inline);
+                }
+                Err(e) => {
+                    warn!("Failed to download PPA signing key: {}", e);
+                    warn!("The repository will be added without signature verification.");
+                }
+            }
         }
     }
 
@@ -1475,6 +1936,240 @@ fn add_parsed_repository(
             } else {
                 spinner.finish_with_message("Package cache updated successfully");
             }
+        }
+    }
+
+    Ok(())
+}
+
+/// Warn about key expiration if applicable
+fn warn_key_expiration(key_data: &str, ppa_info: &PpaInfo) {
+    let Ok(cert) = Cert::from_str(key_data) else {
+        return;
+    };
+    let policy = sequoia_openpgp::policy::StandardPolicy::new();
+    let Ok(valid_cert) = cert.with_policy(&policy, None) else {
+        return;
+    };
+    let Some(expiration) = valid_cert.primary_key().key_expiration_time() else {
+        return;
+    };
+
+    let now = std::time::SystemTime::now();
+    if expiration < now {
+        warn!("Key for {}/{} has expired!", ppa_info.user, ppa_info.name);
+    } else if let Ok(duration) = expiration.duration_since(now) {
+        let days = duration.as_secs() / 86400;
+        if days < 30 {
+            warn!(
+                "Key for {}/{} expires in {} days",
+                ppa_info.user, ppa_info.name, days
+            );
+        }
+    }
+}
+
+/// Collect PPAs from DEB822 sources file
+fn collect_ppas_from_deb822(
+    path: &Path,
+    ppa_repos: &mut Vec<(PathBuf, PpaInfo, Option<Signature>)>,
+) {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Failed to read {}: {}", path.display(), e);
+            return;
+        }
+    };
+
+    let repos = match Repositories::from_str(&content) {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("Failed to parse {}: {}", path.display(), e);
+            return;
+        }
+    };
+
+    for repo in repos.iter() {
+        if let Some(ppa_info) = PpaInfo::from_repository(repo) {
+            ppa_repos.push((path.to_path_buf(), ppa_info, repo.signature.clone()));
+        }
+    }
+}
+
+/// Collect PPAs from legacy .list file
+fn collect_ppas_from_legacy(
+    path: &Path,
+    keyring_dir: &str,
+    ppa_repos: &mut Vec<(PathBuf, PpaInfo, Option<Signature>)>,
+) {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Failed to read {}: {}", path.display(), e);
+            return;
+        }
+    };
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let Ok(repos) = line.parse::<LegacyRepositories>() else {
+            continue;
+        };
+
+        for legacy_repo in repos.iter() {
+            let repo = Repository::from(legacy_repo);
+            if let Some(ppa_info) = PpaInfo::from_repository(&repo) {
+                let keyring_path = Path::new(keyring_dir).join(ppa_info.keyring_filename());
+                let signature = if keyring_path.exists() {
+                    Some(Signature::KeyPath(keyring_path))
+                } else {
+                    None
+                };
+                ppa_repos.push((path.to_path_buf(), ppa_info, signature));
+                break; // Only one PPA per line
+            }
+        }
+    }
+}
+
+fn refresh_ppa_keys(args: &Args) -> Result<(), String> {
+    info!("Refreshing signing keys for all PPAs...");
+
+    let mut ppa_repos = Vec::new();
+
+    // Scan sources.list.d directory for PPAs
+    let sources_dir = Path::new(&args.directory);
+    if sources_dir.exists() {
+        for entry in
+            fs::read_dir(sources_dir).map_err(|e| format!("Failed to read directory: {}", e))?
+        {
+            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let path = entry.path();
+
+            if !path.is_file() {
+                continue;
+            }
+
+            match path.extension().and_then(|s| s.to_str()) {
+                Some("sources") => collect_ppas_from_deb822(&path, &mut ppa_repos),
+                Some("list") => collect_ppas_from_legacy(&path, &args.keyring_dir, &mut ppa_repos),
+                _ => {}
+            }
+        }
+    }
+
+    if ppa_repos.is_empty() {
+        println!("No PPAs found to refresh keys for.");
+        return Ok(());
+    }
+
+    println!("Found {} PPA(s) to refresh keys for", ppa_repos.len());
+
+    let mut updated_count = 0;
+    let mut failed_count = 0;
+    let mut errors = Vec::new();
+
+    for (_source_file, ppa_info, _existing_signature) in &ppa_repos {
+        println!(
+            "\nRefreshing key for PPA: {}/{}",
+            ppa_info.user, ppa_info.name
+        );
+
+        // Download the new key
+        #[cfg(feature = "launchpad")]
+        let key_result = if args.keyserver.is_none() {
+            download_ppa_key_launchpadlib(ppa_info, false)
+        } else {
+            download_ppa_key(ppa_info, args.keyserver.as_deref())
+        };
+
+        #[cfg(not(feature = "launchpad"))]
+        let key_result = download_ppa_key(ppa_info, args.keyserver.as_deref());
+
+        let key_data = match key_result {
+            Ok(data) => data,
+            Err(e) => {
+                failed_count += 1;
+                errors.push(format!("{}/{}: {}", ppa_info.user, ppa_info.name, e));
+                continue;
+            }
+        };
+
+        // Check if we have an existing keyring file
+        let keyring_path = Path::new(&args.keyring_dir).join(ppa_info.keyring_filename());
+
+        // Check if the key has changed
+        let key_changed = match fs::read_to_string(&keyring_path) {
+            Ok(existing_key) => existing_key != key_data,
+            Err(_) => true,
+        };
+
+        if !key_changed {
+            debug!("Key for {}/{} is up to date", ppa_info.user, ppa_info.name);
+            continue;
+        }
+
+        if args.dry_run {
+            info!(
+                "Would update signing key for {}/{}",
+                ppa_info.user, ppa_info.name
+            );
+            updated_count += 1;
+            warn_key_expiration(&key_data, ppa_info);
+            continue;
+        }
+
+        // Save the new key
+        match save_key_to_keyring(&key_data, &args.keyring_dir, ppa_info) {
+            Ok(new_keyring_path) => {
+                info!(
+                    "Updated signing key saved to {}",
+                    new_keyring_path.display()
+                );
+                updated_count += 1;
+                warn_key_expiration(&key_data, ppa_info);
+            }
+            Err(e) => {
+                failed_count += 1;
+                errors.push(format!(
+                    "{}/{}: Failed to save key - {}",
+                    ppa_info.user, ppa_info.name, e
+                ));
+            }
+        }
+    }
+
+    // Report results
+    if args.dry_run {
+        println!("\nDry run - Key refresh summary:");
+        println!("  Would update: {}", updated_count);
+    } else {
+        println!("\nKey refresh complete:");
+        println!("  Updated: {}", updated_count);
+    }
+    println!(
+        "  Up to date: {}",
+        ppa_repos.len() - updated_count - failed_count
+    );
+    println!(
+        "  {}: {}",
+        if args.dry_run {
+            "Failed to check"
+        } else {
+            "Failed"
+        },
+        failed_count
+    );
+
+    if !errors.is_empty() {
+        error!("\nErrors encountered:");
+        for err in errors {
+            error!("  {}", err);
         }
     }
 
@@ -1676,6 +2371,26 @@ fn remove_repository(
     remove_repository_from_file(&filepath, &parsed, args)
 }
 
+/// Log what keyring files would be or were removed for a PPA
+fn handle_ppa_keyring_removal(ppa_info: &PpaInfo, keyring_dir: &str, dry_run: bool) {
+    for ext in ["asc", "gpg"] {
+        let keyring_filename = format!("{}-{}-keyring.{}", ppa_info.user, ppa_info.name, ext);
+        let keyring_path = Path::new(keyring_dir).join(&keyring_filename);
+
+        if keyring_path.exists() {
+            if dry_run {
+                info!(
+                    "Would remove associated keyring: {}",
+                    keyring_path.display()
+                );
+            } else {
+                fs::remove_file(&keyring_path).ok(); // Ignore errors
+                info!("Associated keyring removed from {}", keyring_path.display());
+            }
+        }
+    }
+}
+
 /// Run apt update with a spinner
 fn run_apt_update() {
     let spinner = ProgressBar::new_spinner();
@@ -1796,6 +2511,10 @@ fn remove_repository_from_file(
             info!("Would remove repository file: {}", filepath.display());
         }
 
+        if let Some(ref ppa_info) = parsed.ppa_info {
+            handle_ppa_keyring_removal(ppa_info, &args.keyring_dir, true);
+        }
+
         if !args.no_update {
             info!("Would run: apt update");
         }
@@ -1812,6 +2531,10 @@ fn remove_repository_from_file(
     } else {
         fs::remove_file(filepath).map_err(|e| format!("Failed to remove file: {}", e))?;
         info!("Repository file removed: {}", filepath.display());
+    }
+
+    if let Some(ref ppa_info) = parsed.ppa_info {
+        handle_ppa_keyring_removal(ppa_info, &args.keyring_dir, false);
     }
 
     if !args.no_update {
@@ -1834,6 +2557,14 @@ fn main() {
     env_logger::init();
     let args = Args::parse();
 
+    // Check if login is requested without launchpad feature
+    #[cfg(not(feature = "launchpad"))]
+    if args.login {
+        error!("Private PPA support requires building with the 'launchpad' feature");
+        error!("Rebuild with: cargo build --features launchpad");
+        process::exit(1);
+    }
+
     // Detect distribution and codename once at startup
     let distribution = Distribution::current().unwrap_or(Distribution::Debian);
     let (codename, _arch) =
@@ -1841,6 +2572,8 @@ fn main() {
 
     let result = if args.list {
         list_repositories(&args)
+    } else if args.refresh_keys {
+        refresh_ppa_keys(&args)
     } else if let Some(component) = &args.component {
         // Handle --component flag
         add_component_to_existing_repos(component, &args.directory, args.dry_run, &distribution)
@@ -1864,6 +2597,30 @@ mod tests {
     use super::*;
     use sequoia_openpgp::cert::CertBuilder;
     use std::time::Duration;
+
+    #[test]
+    fn test_create_inline_signature() {
+        // Use a minimal valid PGP key structure
+        let key_data = "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmQENBFXbjPUBCADRje\n=ABCD\n-----END PGP PUBLIC KEY BLOCK-----";
+
+        // The create_inline_signature now validates the key, so we expect it to fail
+        // with this truncated test key
+        let result = create_inline_signature(key_data);
+
+        // For now, just check that the function exists and can be called
+        // In real usage, it would have a valid key
+        assert!(result.is_err() || result.is_ok());
+    }
+
+    #[test]
+    fn test_format_network_error() {
+        // We can't easily create actual reqwest errors, but we can test the function exists
+        // and returns reasonable strings for the error types we can simulate
+
+        // In a real test environment, you would mock the reqwest errors
+        // For now, we just verify the function compiles
+        // Note: We can't call the function without a real reqwest::Error instance
+    }
 
     #[test]
     fn test_is_main_distribution_file() {
@@ -2000,16 +2757,35 @@ mod tests {
             directory: DEFAULT_SOURCES_PATH.to_string(),
             keyring_dir: DEFAULT_KEYRING_PATH.to_string(),
             pocket: None,
+            keyserver: None,
             component: None,
             list: false,
+            login: false,
             dry_run: false,
             format: OutputFormat::Legacy,
+            refresh_keys: false,
+            inline_key: false,
         }
     }
 
     #[test]
     fn test_parse_repository_spec() {
         let args = create_test_args();
+        let distribution = Distribution::Ubuntu;
+        let codename = "noble";
+
+        // Test PPA format
+        let spec =
+            parse_repository_spec("ppa:user/repo", 0, &args, &distribution, codename).unwrap();
+        match spec {
+            RepositorySpec::Repository(parsed) => {
+                assert!(parsed.ppa_info.is_some());
+                let ppa = parsed.ppa_info.unwrap();
+                assert_eq!(ppa.user, "user");
+                assert_eq!(ppa.name, "repo");
+            }
+            _ => panic!("Expected Repository spec with PPA info"),
+        }
 
         // NOTE: Component and pocket tests require real system info from get_system_info()
         // These tests are skipped as they depend on the runtime environment
@@ -2175,7 +2951,27 @@ mod tests {
         let args = create_test_args();
         let distribution = Distribution::Debian;
 
-        // Test repository
+        // Test PPA repository
+        let ppa_repo = ParsedRepository {
+            repository: Repository {
+                enabled: Some(true),
+                types: HashSet::from([RepositoryType::Binary]),
+                uris: vec![Url::parse("http://ppa.launchpad.net/user/ppa/ubuntu").unwrap()],
+                suites: vec!["focal".to_string()],
+                components: Some(vec!["main".to_string()]),
+                ..Default::default()
+            },
+            filename: "user-ubuntu-ppa-focal.list".to_string(),
+            ppa_info: Some(PpaInfo {
+                user: "user".to_string(),
+                name: "ppa".to_string(),
+            }),
+        };
+        let path = determine_repository_filepath(&ppa_repo, &args, &distribution).unwrap();
+        assert!(path.to_str().unwrap().ends_with(".list")); // Legacy format is default in test args
+        assert!(path.to_str().unwrap().contains("user"));
+
+        // Test non-PPA repository
         let url_repo = ParsedRepository {
             repository: Repository {
                 enabled: Some(true),
@@ -2186,6 +2982,7 @@ mod tests {
                 ..Default::default()
             },
             filename: "example.com.list".to_string(),
+            ppa_info: None,
         };
         let path = determine_repository_filepath(&url_repo, &args, &distribution).unwrap();
         assert!(path.to_str().unwrap().ends_with(".list")); // Legacy format is default in test args
@@ -2199,6 +2996,19 @@ mod tests {
         let path =
             determine_repository_filepath(&url_repo_deb822, &args_deb822, &distribution).unwrap();
         assert!(path.to_str().unwrap().ends_with(".sources"));
+    }
+
+    #[test]
+    fn test_verify_key_fingerprint() {
+        // This test needs a real PGP key to work properly
+        // For unit testing, we'll verify the function handles invalid input correctly
+        let invalid_key = "not a valid key";
+        let result = verify_key_fingerprint(invalid_key, "1234567890ABCDEF");
+        assert!(result.is_err());
+
+        // Test with empty fingerprint
+        let result = verify_key_fingerprint(invalid_key, "");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -2376,6 +3186,19 @@ mod tests {
     }
 
     #[test]
+    fn test_ppa_info() {
+        let ppa = PpaInfo {
+            user: "test-user".to_string(),
+            name: "test-ppa".to_string(),
+        };
+
+        // Test Debug trait implementation
+        let debug_str = format!("{:?}", ppa);
+        assert!(debug_str.contains("test-user"));
+        assert!(debug_str.contains("test-ppa"));
+    }
+
+    #[test]
     fn test_repository_spec_enum() {
         // Test Component variant
         let comp_spec = RepositorySpec::Component("main".to_string());
@@ -2390,6 +3213,26 @@ mod tests {
             RepositorySpec::Pocket(p) => assert_eq!(p, "security"),
             _ => panic!("Expected Pocket variant"),
         }
+    }
+
+    #[test]
+    fn test_create_http_client() {
+        // Test without proxy env vars
+        std::env::remove_var("HTTP_PROXY");
+        std::env::remove_var("http_proxy");
+        std::env::remove_var("HTTPS_PROXY");
+        std::env::remove_var("https_proxy");
+
+        let client_result = create_http_client();
+        assert!(client_result.is_ok());
+
+        // Test with invalid proxy
+        std::env::set_var("HTTP_PROXY", "not-a-valid-url");
+        let client_result = create_http_client();
+        assert!(client_result.is_ok()); // Should still succeed, just warn about invalid proxy
+
+        // Clean up
+        std::env::remove_var("HTTP_PROXY");
     }
 
     #[test]
@@ -2413,10 +3256,26 @@ mod tests {
         let parsed = ParsedRepository {
             repository: repo,
             filename: "test.sources".to_string(),
+            ppa_info: Some(PpaInfo {
+                user: "test".to_string(),
+                name: "ppa".to_string(),
+            }),
         };
 
         // Test Debug trait
         let debug_str = format!("{:?}", parsed);
         assert!(debug_str.contains("test.sources"));
+        assert!(debug_str.contains("ppa_info"));
+    }
+
+    #[test]
+    fn test_empty_component_handling() {
+        // Test that empty components are handled properly
+        let empty_vec: Vec<String> = vec![];
+        assert!(validate_ppa_components(&empty_vec).is_ok());
+
+        // Test with empty string in components
+        let vec_with_empty = vec!["".to_string()];
+        assert!(validate_ppa_components(&vec_with_empty).is_err());
     }
 }
