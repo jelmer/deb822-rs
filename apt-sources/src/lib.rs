@@ -50,6 +50,8 @@ use std::result::Result;
 use std::{collections::HashSet, ops::Deref, str::FromStr};
 use url::Url;
 
+/// Distribution detection and utilities
+pub mod distribution;
 pub mod error;
 pub mod signature;
 /// Module for managing APT source lists
