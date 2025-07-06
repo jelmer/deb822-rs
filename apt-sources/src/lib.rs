@@ -53,7 +53,9 @@ use url::Url;
 /// Distribution detection and utilities
 pub mod distribution;
 pub mod error;
-#[cfg(feature = "keyserver")]
+#[cfg(feature = "key-management")]
+pub mod key_management;
+#[cfg(feature = "key-management")]
 pub mod keyserver;
 pub mod ppa;
 pub mod signature;
