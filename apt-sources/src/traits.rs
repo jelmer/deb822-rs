@@ -1,5 +1,8 @@
 //! Module holds traits for dealing with two kinds of repository sources representation in convenient polymorphic way
-use std::{borrow::Cow, collections::HashSet};
+use std::{
+    borrow::{Borrow, Cow},
+    collections::HashSet,
+};
 
 use url::Url;
 
@@ -128,10 +131,10 @@ pub trait RepositoryMut {
 
     /// (Optional) Contains either absolute path to GPG keyring or embedded GPG public key block, if not set APT uses all trusted keys;
     /// I can't find example of using with fingerprints
-    fn set_signature<S, R>(&mut self, signature: S)
+    fn set_signature<O, S>(&mut self, signature: O)
     where
-        S: AsRef<Option<R>>,
-        R: AsRef<Signature>;
+        O: Borrow<Option<S>>,
+        S: Borrow<Signature> + std::fmt::Debug;
     /// alias signed_by
 
     /// (Optional) Field ignored by APT but used by RepoLib to identify repositories, Ubuntu sources contain them

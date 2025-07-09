@@ -37,6 +37,7 @@
 use deb822_lossless::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 use error::RepositoryError;
 use signature::Signature;
+use std::borrow::Borrow;
 use std::result::Result;
 use std::{borrow::Cow, collections::HashSet, fmt::Display, ops::Deref, str::FromStr};
 use url::Url;
@@ -484,14 +485,15 @@ impl traits::RepositoryMut for Repository {
         self.trusted = trusted;
     }
 
-    fn set_signature<S, R>(&mut self, signature: S)
+    fn set_signature<O, S>(&mut self, signature: O)
     where
-        S: AsRef<Option<R>>,
-        R: AsRef<Signature>
+        O: Borrow<Option<S>>,
+        S: Borrow<Signature>,
     {
-        self.signature = match signature.as_ref() {
-            Some(x) => Some(x.as_ref().to_owned()),
-            None => None
+        //println!("* signature = {:?}", signature);
+        self.signature = match signature.borrow() {
+            Some(x) => Some(x.borrow().to_owned()),
+            None => None,
         }
         //self.signature = signature.as_ref().to_owned();
     }
@@ -741,7 +743,7 @@ mod tests {
         r.set_components(vec!["main".to_owned()]);
         r.set_architectures(["arm64"]);
         let s = Signature::KeyPath(PathBuf::from("/usr/share/keyrings/jelmer.gpg"));
-        //r.set_signature(Some(&s)); // TODO: this stuff doesn't build yet
+        r.set_signature(Some(&s)); // TODO: this stuff doesn't build yet
 
         let r = Repositories::new([r]);
 
@@ -755,6 +757,8 @@ mod tests {
                 Suites: stable
                 Components: main
                 Architectures: arm64
-            "#});
+                Signed-By: /usr/share/keyrings/jelmer.gpg
+            "#}
+        );
     }
 }
