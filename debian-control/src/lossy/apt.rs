@@ -1,6 +1,6 @@
 //! APT related structures
 use crate::lossy::Relations;
-use deb822_lossless::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
+use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 
 fn deserialize_components(value: &str) -> Result<Vec<String>, String> {
     Ok(value.split_whitespace().map(|s| s.to_string()).collect())
@@ -203,7 +203,7 @@ impl std::str::FromStr for Source {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let para = s
-            .parse::<deb822_lossless::lossy::Paragraph>()
+            .parse::<deb822_fast::Paragraph>()
             .map_err(|e| e.to_string())?;
 
         FromDeb822Paragraph::from_paragraph(&para)
@@ -212,7 +212,7 @@ impl std::str::FromStr for Source {
 
 impl std::fmt::Display for Source {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let para: deb822_lossless::lossy::Paragraph = self.to_paragraph();
+        let para: deb822_fast::Paragraph = self.to_paragraph();
         write!(f, "{}", para)
     }
 }
@@ -326,7 +326,7 @@ impl std::str::FromStr for Package {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let para = s
-            .parse::<deb822_lossless::lossy::Paragraph>()
+            .parse::<deb822_fast::Paragraph>()
             .map_err(|e| e.to_string())?;
 
         FromDeb822Paragraph::from_paragraph(&para)
@@ -335,7 +335,7 @@ impl std::str::FromStr for Package {
 
 impl std::fmt::Display for Package {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let para: deb822_lossless::lossy::Paragraph = self.to_paragraph();
+        let para: deb822_fast::Paragraph = self.to_paragraph();
         write!(f, "{}", para)
     }
 }
@@ -343,8 +343,8 @@ impl std::fmt::Display for Package {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deb822_lossless::lossy::Paragraph;
-    use deb822_lossless::ToDeb822Paragraph;
+    use deb822_fast::Paragraph;
+    use deb822_fast::ToDeb822Paragraph;
 
     #[test]
     fn test_release() {
@@ -379,7 +379,7 @@ Acquire-By-Hash: true
 
         let para = deb822.parse::<Paragraph>().unwrap();
 
-        let release: deb822_lossless::lossy::Paragraph = release.to_paragraph();
+        let release: deb822_fast::Paragraph = release.to_paragraph();
 
         assert_eq!(release, para);
     }

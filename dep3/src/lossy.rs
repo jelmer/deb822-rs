@@ -18,8 +18,7 @@
 //! assert_eq!(patch_header.bug_debian, Some("https://bugs.debian.org/123456".parse().unwrap()));
 //! ```
 use crate::fields::*;
-use deb822_lossless::Paragraph;
-use deb822_lossless::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
+use deb822_fast::{FromDeb822, FromDeb822Paragraph, Paragraph, ToDeb822, ToDeb822Paragraph};
 
 fn deserialize_date(s: &str) -> Result<chrono::NaiveDate, String> {
     chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| e.to_string())
@@ -89,7 +88,7 @@ impl PatchHeader {
 
 impl std::fmt::Display for PatchHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let paragraph: deb822_lossless::lossy::Paragraph = self.to_paragraph();
+        let paragraph: deb822_fast::Paragraph = self.to_paragraph();
         paragraph.fmt(f)
     }
 }
@@ -159,7 +158,7 @@ Bug-Debian: http://bugs.debian.org/510219
         );
         assert_eq!(
             header.description,
-            Some("Fix regex problems with some multi-bytes characters\n* posix/bug-regex17.c: Add testcases.\n* posix/regcomp.c (re_compile_fastmap_iter): Rewrite COMPLEX_BRACKET\nhandling.".to_string())
+            Some("Fix regex problems with some multi-bytes characters\n\n* posix/bug-regex17.c: Add testcases.\n* posix/regcomp.c (re_compile_fastmap_iter): Rewrite COMPLEX_BRACKET\nhandling.\n".to_string())
         );
     }
 

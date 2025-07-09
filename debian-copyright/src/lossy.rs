@@ -35,7 +35,7 @@
 
 use crate::License;
 use crate::CURRENT_FORMAT;
-use deb822_lossless::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
+use deb822_fast::{Deb822, FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 use std::path::Path;
 
 fn deserialize_file_list(text: &str) -> Result<Vec<String>, String> {
@@ -79,7 +79,7 @@ impl Default for Header {
 
 impl std::fmt::Display for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let para: deb822_lossless::lossy::Paragraph = self.to_paragraph();
+        let para: deb822_fast::Paragraph = self.to_paragraph();
         write!(f, "{}", para)?;
         Ok(())
     }
@@ -106,11 +106,9 @@ impl std::str::FromStr for Copyright {
             return Err("Not machine readable".to_string());
         }
 
-        let deb822: deb822_lossless::Deb822 = s
-            .parse()
-            .map_err(|e: deb822_lossless::ParseError| e.to_string())?;
+        let deb822: Deb822 = s.parse().map_err(|e: deb822_fast::Error| e.to_string())?;
 
-        let mut paragraphs = deb822.paragraphs();
+        let mut paragraphs = deb822.iter();
 
         let first_para = if let Some(para) = paragraphs.next() {
             para
@@ -118,16 +116,16 @@ impl std::str::FromStr for Copyright {
             return Err("No paragraphs".to_string());
         };
 
-        let header: Header = Header::from_paragraph(&first_para)?;
+        let header: Header = Header::from_paragraph(first_para)?;
 
         let mut files_paras = vec![];
         let mut license_paras = vec![];
 
         while let Some(para) = paragraphs.next() {
             if para.get("Files").is_some() {
-                files_paras.push(FilesParagraph::from_paragraph(&para)?);
+                files_paras.push(FilesParagraph::from_paragraph(para)?);
             } else if para.get("License").is_some() {
-                license_paras.push(LicenseParagraph::from_paragraph(&para)?);
+                license_paras.push(LicenseParagraph::from_paragraph(para)?);
             } else {
                 return Err("Paragraph is neither License nor Files".to_string());
             }
@@ -155,7 +153,7 @@ pub struct LicenseParagraph {
 
 impl std::fmt::Display for LicenseParagraph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let para: deb822_lossless::lossy::Paragraph = self.to_paragraph();
+        let para: deb822_fast::Paragraph = self.to_paragraph();
         f.write_str(&para.to_string())
     }
 }
@@ -192,7 +190,7 @@ impl FilesParagraph {
 
 impl std::fmt::Display for FilesParagraph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let para: deb822_lossless::lossy::Paragraph = self.to_paragraph();
+        let para: deb822_fast::Paragraph = self.to_paragraph();
         f.write_str(&para.to_string())?;
         Ok(())
     }

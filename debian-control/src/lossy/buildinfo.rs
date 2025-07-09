@@ -4,16 +4,26 @@
 //! information about the build environment of a package. See https://wiki.debian.org/Buildinfo for
 //! more information.
 use crate::lossy::relations::Relations;
-use deb822_lossless::FromDeb822Paragraph;
-use deb822_lossless::{FromDeb822, ToDeb822};
+use deb822_fast::FromDeb822Paragraph;
+use deb822_fast::{FromDeb822, ToDeb822};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 fn deserialize_env(s: &str) -> Result<HashMap<String, String>, String> {
     let mut env = HashMap::new();
     for line in s.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
         let (key, value) = match line.split_once("=") {
-            Some((key, value)) => (key, value),
+            Some((key, value)) => {
+                if value.starts_with('"') && value.ends_with('"') {
+                    let value = value[1..value.len() - 1].to_string();
+                    (key, value)
+                } else {
+                    (key, value.to_string())
+                }
+            }
             None => {
                 // If there is no '=', then the line is invalid
                 return Err("Invalid environment variable".to_string());
@@ -130,9 +140,8 @@ impl std::str::FromStr for Buildinfo {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let para: deb822_lossless::lossless::Paragraph = s
-            .parse()
-            .map_err(|e: deb822_lossless::lossless::ParseError| e.to_string())?;
+        let para: deb822_fast::Paragraph =
+            s.parse().map_err(|e: deb822_fast::Error| e.to_string())?;
         Self::from_paragraph(&para)
     }
 }

@@ -34,7 +34,8 @@
 //! allows partial parsing, parsing files with errors and unknown fields and editing while
 //! preserving formatting.
 
-use deb822_lossless::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
+use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
+//use deb822_lossless::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 use error::RepositoryError;
 use signature::Signature;
 use std::borrow::Borrow;
@@ -42,10 +43,17 @@ use std::result::Result;
 use std::{borrow::Cow, collections::HashSet, fmt::Display, ops::Deref, str::FromStr};
 use url::Url;
 
+/// Distribution detection and utilities
+pub mod distribution;
 pub mod error;
+#[cfg(feature = "keyserver")]
+pub mod keyserver;
 #[cfg(feature = "lossless")]
 pub mod lossless;
+pub mod ppa;
 pub mod signature;
+/// Module for managing APT source lists
+pub mod sources_manager;
 pub mod traits;
 
 /// A representation of the repository type, by role of packages it can provide, either `Binary`
@@ -109,15 +117,15 @@ impl FromStr for YesNoForce {
     }
 }
 
-// impl From<&YesNoForce> for String {
-//     fn from(value: &YesNoForce) -> Self {
-//         match value {
-//             YesNoForce::Yes => "yes".to_owned(),
-//             YesNoForce::No => "no".to_owned(),
-//             YesNoForce::Force => "force".to_owned()
-//         }
-//     }
-// }
+impl From<&YesNoForce> for String {
+    fn from(value: &YesNoForce) -> Self {
+        match value {
+            YesNoForce::Yes => "yes".to_owned(),
+            YesNoForce::No => "no".to_owned(),
+            YesNoForce::Force => "force".to_owned(),
+        }
+    }
+}
 
 impl Display for YesNoForce {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -228,53 +236,53 @@ pub struct Repository {
 
     /// The value `RepositoryType::Binary` (`deb`) or/and `RepositoryType::Source` (`deb-src`)
     #[deb822(field = "Types", deserialize_with = deserialize_types, serialize_with = serialize_types)]
-    types: HashSet<RepositoryType>, // consider alternative, closed set
+    pub types: HashSet<RepositoryType>, // consider alternative, closed set
     /// The address of the repository
     #[deb822(field = "URIs", deserialize_with = deserialize_uris, serialize_with = serialize_uris)]
-    uris: Vec<Url>, // according to Debian that's URI, but this type is more advanced than URI from `http` crate
+    pub uris: Vec<Url>, // according to Debian that's URI, but this type is more advanced than URI from `http` crate
     /// The distribution name as codename or suite type (like `stable` or `testing`)
     #[deb822(field = "Suites", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    suites: Vec<String>,
+    pub suites: Vec<String>,
     /// (Optional) Section of the repository, usually `main`, `contrib` or `non-free`
     /// return `None` if repository is Flat Repository Format (https://wiki.debian.org/DebianRepository/Format#Flat_Repository_Format)
     #[deb822(field = "Components", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    components: Option<Vec<String>>,
+    pub components: Option<Vec<String>>,
 
     /// (Optional) Architectures binaries from this repository run on
     #[deb822(field = "Architectures", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
     architectures: Option<Vec<String>>,
     /// (Optional) Translations support to download
     #[deb822(field = "Languages", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    languages: Option<Vec<String>>, // TODO: Option is redundant to empty vectors
+    pub languages: Option<Vec<String>>, // TODO: Option is redundant to empty vectors
     /// (Optional) Download targets to acquire from this source
     #[deb822(field = "Targets", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    targets: Option<Vec<String>>,
+    pub targets: Option<Vec<String>>,
     /// (Optional) Controls if APT should try PDiffs instead of downloading indexes entirely; if not set defaults to configuration option `Acquire::PDiffs`
     #[deb822(field = "PDiffs", deserialize_with = deserialize_yesno)]
-    pdiffs: Option<bool>,
+    pub pdiffs: Option<bool>,
     /// (Optional) Controls if APT should try to acquire indexes via a URI constructed from a hashsum of the expected file
     #[deb822(field = "By-Hash")]
-    by_hash: Option<YesNoForce>,
+    pub by_hash: Option<YesNoForce>,
     /// (Optional) If yes circumvents parts of `apt-secure`, don't thread lightly
     #[deb822(field = "Allow-Insecure")]
-    allow_insecure: Option<bool>, // TODO: redundant option, not present = default no
+    pub allow_insecure: Option<bool>, // TODO: redundant option, not present = default no
     /// (Optional) If yes circumvents parts of `apt-secure`, don't thread lightly
     #[deb822(field = "Allow-Weak")]
-    allow_weak: Option<bool>, // TODO: redundant option, not present = default no
+    pub allow_weak: Option<bool>, // TODO: redundant option, not present = default no
     /// (Optional) If yes circumvents parts of `apt-secure`, don't thread lightly
     #[deb822(field = "Allow-Downgrade-To-Insecure")]
-    allow_downgrade_to_insecure: Option<bool>, // TODO: redundant option, not present = default no
+    pub allow_downgrade_to_insecure: Option<bool>, // TODO: redundant option, not present = default no
     /// (Optional) If set forces whether APT considers source as rusted or no (default not present is a third state)
     #[deb822(field = "Trusted")]
-    trusted: Option<bool>,
+    pub trusted: Option<bool>,
     /// (Optional) Contains either absolute path to GPG keyring or embedded GPG public key block, if not set APT uses all trusted keys;
     /// I can't find example of using with fingerprints
     #[deb822(field = "Signed-By")]
-    signature: Option<Signature>,
+    pub signature: Option<Signature>,
 
     /// (Optional) Field ignored by APT but used by RepoLib to identify repositories, Ubuntu sources contain them
     #[deb822(field = "X-Repolib-Name")]
-    x_repolib_name: Option<String>, // this supports RepoLib still used by PopOS, even if removed from Debian/Ubuntu
+    pub x_repolib_name: Option<String>, // this supports RepoLib still used by PopOS, even if removed from Debian/Ubuntu
 
     /// (Optional) Field not present in the man page, but used in APT unit tests, potentially to hold the repository description
     #[deb822(field = "Description")]
@@ -303,6 +311,69 @@ impl Repository {
             x_repolib_name: None,
             description: None,
         }
+    }
+
+    /// Generate legacy .list format lines for this repository
+    pub fn to_legacy_format(&self) -> String {
+        let mut lines = Vec::new();
+
+        // Generate deb and/or deb-src lines
+        for repo_type in &self.types {
+            let type_str = match repo_type {
+                RepositoryType::Binary => "deb",
+                RepositoryType::Source => "deb-src",
+            };
+
+            for uri in &self.uris {
+                for suite in &self.suites {
+                    let mut line = format!("{} {} {}", type_str, uri, suite);
+
+                    // Add components
+                    if let Some(components) = &self.components {
+                        for component in components {
+                            line.push(' ');
+                            line.push_str(component);
+                        }
+                    }
+
+                    lines.push(line);
+                }
+            }
+        }
+
+        lines.join("\n") + "\n"
+    }
+
+    /// Parse a legacy apt sources.list line (e.g., "deb http://example.com/debian stable main")
+    /// This is not complete support, doesn't parse options in square brackets like `[arch=amd64]`
+    pub fn parse_legacy_line(line: &str) -> Result<Repository, String> {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        if parts.len() < 4 {
+            return Err("Invalid repository line format".to_string());
+        }
+
+        let repo_type = match parts[0] {
+            "deb" => RepositoryType::Binary,
+            "deb-src" => RepositoryType::Source,
+            _ => return Err("Line must start with 'deb' or 'deb-src'".to_string()),
+        };
+
+        let uri = Url::parse(parts[1]).map_err(|_| "Invalid URI".to_string())?;
+
+        let suite = parts[2].to_string();
+        let components: Vec<String> = parts[3..].iter().map(|s| s.to_string()).collect();
+
+        Ok(Repository {
+            enabled: Some(true),
+            types: HashSet::from([repo_type]),
+            uris: vec![uri],
+            suites: vec![suite],
+            components: Some(components),
+            architectures: Some(vec![]),
+            signature: None,
+            ..Default::default()
+        })
     }
 }
 
@@ -544,19 +615,49 @@ impl Repositories {
         // TODO: that's by ref, not compatible with lossless
         self.0.iter()
     }
+
+    /// Push a new repository
+    pub fn push(&mut self, repo: Repository) {
+        self.0.push(repo);
+    }
+
+    /// Retain repositories matching a predicate
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&Repository) -> bool,
+    {
+        self.0.retain(f);
+    }
+
+    /// Get mutable iterator over repositories
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<Repository> {
+        self.0.iter_mut()
+    }
+
+    /// Extend with an iterator of repositories
+    pub fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = Repository>,
+    {
+        self.0.extend(iter);
+    }
+
+    /// Check if empty
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl std::str::FromStr for Repositories {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let deb822: deb822_lossless::Deb822 = s
-            .parse()
-            .map_err(|e: deb822_lossless::ParseError| e.to_string())?;
+        let deb822: deb822_fast::Deb822 =
+            s.parse().map_err(|e: deb822_fast::Error| e.to_string())?;
 
         let repos = deb822
-            .paragraphs()
-            .map(|p| Repository::from_paragraph(&p))
+            .iter()
+            .map(|p| Repository::from_paragraph(p))
             .collect::<Result<Vec<Repository>, Self::Err>>()?;
         Ok(Repositories(repos))
     }
@@ -567,7 +668,7 @@ impl ToString for Repositories {
         self.0
             .iter()
             .map(|r| {
-                let p: deb822_lossless::lossy::Paragraph = r.to_paragraph();
+                let p: deb822_fast::Paragraph = r.to_paragraph();
                 p.to_string()
             })
             .collect::<Vec<_>>()
@@ -604,11 +705,12 @@ mod tests {
         );
         let ret = s.parse::<Repositories>();
         assert!(ret.is_err());
+        assert_eq!(ret.unwrap_err(), "Unexpected token:  ".to_string());
         //assert_eq!(ret.unwrap_err(), "Not machine readable".to_string());
-        assert_eq!(
-            ret.unwrap_err(),
-            "expected ':', got Some(NEWLINE)\n".to_owned()
-        );
+        //assert_eq!(
+        //    ret.unwrap_err(),
+        //    "expected ':', got Some(NEWLINE)\n".to_owned()
+        //);
     }
 
     #[test]
@@ -635,6 +737,7 @@ mod tests {
                 "multiverse".to_owned()
             ]
         );
+        // assert_eq!(ret.unwrap_err(), "Unexpected token:  ".to_string());
     }
 
     #[test]
@@ -711,7 +814,7 @@ mod tests {
             architectures: Some(vec!["arm64".to_owned()]),
             uris: vec![Url::from_str("https://deb.debian.org/debian").unwrap()],
             suites: vec!["jammy".to_owned()],
-            components: vec!["main".to_owned()].into(),
+            components: Some(vec!["main".to_owned()]),
             signature: None,
             x_repolib_name: None,
             languages: None,

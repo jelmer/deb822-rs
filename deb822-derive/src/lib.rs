@@ -32,7 +32,7 @@ fn is_option(ty: &syn::Type) -> bool {
 //
 // ```rust
 //
-// impl<P: deb822_lossless::convert::Deb822LikeParagraph> FromDeb822Paragraph<P> for X {
+// impl<P: deb822_fast::convert::Deb822LikeParagraph> FromDeb822Paragraph<P> for X {
 //     fn from_paragraph(para: &P) -> Result<Self, String> {
 //     Ok(Self {
 //         a: para.get("a").ok_or_else(|| "missing field: a")?.parse().map_err(|e| format!("parsing field a: {}", e))?,
@@ -60,7 +60,7 @@ fn is_option(ty: &syn::Type) -> bool {
 // will generate:
 //
 // ```rust
-// impl<P: deb822_lossless::convert::Deb822LikeParagraph> ToDeb822Paragraph<P> for X {
+// impl<P: deb822_fast::convert::Deb822LikeParagraph> ToDeb822Paragraph<P> for X {
 //     fn to_paragraph(&self) -> P {
 //         let mut fields = Vec::<(String, String)>::new();
 //         fields.set("a", self.a.to_string());
@@ -70,10 +70,10 @@ fn is_option(ty: &syn::Type) -> bool {
 //         }
 //         fields.set("d", self.d.join(" "));
 //         fields.set("E", self.e.to_string());
-//         deb822_lossless::Paragraph::from(fields)
+//         deb822_fast::Paragraph::from(fields)
 //     }
 //
-//     fn update_paragraph(&self, para: &mut deb822_lossless::Paragraph) {
+//     fn update_paragraph(&self, para: &mut deb822_fast::Paragraph) {
 //         para.set("a", &self.a.to_string());
 //         para.set("b", &self.b.to_string());
 //         if let Some(v) = &self.c {
@@ -190,7 +190,7 @@ pub fn derive_from_deb822(input: TokenStream) -> TokenStream {
         }).collect::<Vec<_>>();
 
     let gen = quote! {
-        impl<P: deb822_lossless::convert::Deb822LikeParagraph> deb822_lossless::FromDeb822Paragraph<P> for #name {
+        impl<P: deb822_fast::convert::Deb822LikeParagraph> deb822_fast::FromDeb822Paragraph<P> for #name {
             fn from_paragraph(para: &P) -> Result<Self, String> {
                 Ok(Self {
                     #(#from_fields,)*
@@ -258,7 +258,7 @@ pub fn derive_to_deb822(input: TokenStream) -> TokenStream {
     }
 
     let gen = quote! {
-        impl<P: deb822_lossless::convert::Deb822LikeParagraph> deb822_lossless::ToDeb822Paragraph<P> for #name {
+        impl<P: deb822_fast::convert::Deb822LikeParagraph> deb822_fast::ToDeb822Paragraph<P> for #name {
             fn to_paragraph(&self) -> P {
                 let mut fields = Vec::<(String, String)>::new();
                 #(#to_fields)*

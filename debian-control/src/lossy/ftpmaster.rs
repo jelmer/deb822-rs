@@ -1,7 +1,6 @@
 //! FTP-master-related files
 
-use deb822_lossless::FromDeb822Paragraph;
-use deb822_lossless::{FromDeb822, ToDeb822};
+use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822};
 
 fn serialize_list(list: &Vec<String>) -> String {
     list.join("\n")
@@ -47,8 +46,7 @@ impl std::str::FromStr for Removal {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let paragraph =
-            deb822_lossless::lossless::Paragraph::from_str(s).map_err(|e| e.to_string())?;
+        let paragraph = deb822_fast::Paragraph::from_str(s).map_err(|e| e.to_string())?;
         Self::from_paragraph(&paragraph).map_err(|e| e.to_string())
     }
 }

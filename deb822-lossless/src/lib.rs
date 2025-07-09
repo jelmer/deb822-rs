@@ -5,13 +5,8 @@
 #![allow(deprecated)]
 
 mod common;
-pub mod convert;
 mod lex;
-pub mod lossless;
-pub mod lossy;
-pub use convert::{FromDeb822Paragraph, ToDeb822Paragraph};
-#[cfg(feature = "derive")]
-pub use deb822_derive::{FromDeb822, ToDeb822};
+mod lossless;
 pub use lossless::{Deb822, Error, Paragraph, ParseError};
 
 /// The indentation to use when writing a deb822 file.
@@ -27,5 +22,20 @@ pub enum Indentation {
 impl Default for Indentation {
     fn default() -> Self {
         Indentation::Spaces(4)
+    }
+}
+
+#[cfg(feature = "deb822-fast")]
+impl deb822_fast::convert::Deb822LikeParagraph for crate::lossless::Paragraph {
+    fn get(&self, key: &str) -> Option<String> {
+        crate::lossless::Paragraph::get(self, key).map(|v| v.to_string())
+    }
+
+    fn set(&mut self, key: &str, value: &str) {
+        crate::lossless::Paragraph::set(self, key, value);
+    }
+
+    fn remove(&mut self, key: &str) {
+        crate::lossless::Paragraph::remove(self, key);
     }
 }

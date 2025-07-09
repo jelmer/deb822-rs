@@ -10,13 +10,24 @@ homepage = { workspace = true }
 keywords = ["debian", "deb822", "rfc822", "edit", "apt"]
 categories = ["parser-implementations"]
 
-[dependencies]
-deb822-lossless = { version = ">=0.2.4", path = "../deb822-lossless", features = ["derive"] }
-url = { version = "2.5.4", features = ["serde"] }
-
 [features]
 default = ["lossless"]
 lossless = []
+keyserver = ["dep:sequoia-openpgp", "dep:sequoia-net", "dep:tokio"]
+
+[dependencies]
+deb822-lossless = { version = ">=0.2.4", path = "../deb822-lossless" }
+deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = [
+    "derive",
+] }
+url = { version = "2.5.4", features = ["serde"] }
+sequoia-net = { version = "0.29", default-features = false, optional = true }
+tokio = { version = "1", features = ["rt", "macros"], optional = true }
+sequoia-openpgp = { version = "1.22", default-features = false, features = [
+    "compression-deflate",
+    "crypto-openssl",
+], optional = true }
 
 [dev-dependencies]
-indoc = { version = "2.0.5" }
+indoc = { version = "2.0.6" }
+tempfile = "3"

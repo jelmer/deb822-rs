@@ -1,7 +1,7 @@
 use crate::fields::Priority;
 use crate::lossy::relations::Relations;
-use deb822_lossless::{FromDeb822, ToDeb822};
-use deb822_lossless::{FromDeb822Paragraph, ToDeb822Paragraph};
+use deb822_fast::{FromDeb822, ToDeb822};
+use deb822_fast::{FromDeb822Paragraph, ToDeb822Paragraph};
 
 fn deserialize_yesno(s: &str) -> Result<bool, String> {
     match s {
@@ -80,7 +80,7 @@ pub struct Source {
 
 impl std::fmt::Display for Source {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let para: deb822_lossless::lossy::Paragraph = self.to_paragraph();
+        let para: deb822_fast::Paragraph = self.to_paragraph();
         write!(f, "{}", para)?;
         Ok(())
     }
@@ -144,7 +144,7 @@ pub struct Binary {
 
 impl std::fmt::Display for Binary {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let para: deb822_lossless::lossy::Paragraph = self.to_paragraph();
+        let para: deb822_fast::Paragraph = self.to_paragraph();
         write!(f, "{}", para)?;
         Ok(())
     }
@@ -173,21 +173,20 @@ impl std::str::FromStr for Control {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let deb822: deb822_lossless::Deb822 =
-            s.parse().map_err(|e| format!("parse error: {}", e))?;
+        let deb822: deb822_fast::Deb822 = s.parse().map_err(|e| format!("parse error: {}", e))?;
 
         let mut source: Option<Source> = None;
         let mut binaries: Vec<Binary> = Vec::new();
 
-        for para in deb822.paragraphs() {
+        for para in deb822.iter() {
             if para.get("Package").is_some() {
-                let binary: Binary = Binary::from_paragraph(&para)?;
+                let binary: Binary = Binary::from_paragraph(para)?;
                 binaries.push(binary);
             } else if para.get("Source").is_some() {
                 if source.is_some() {
                     return Err("more than one source paragraph".to_string());
                 }
-                source = Some(Source::from_paragraph(&para)?);
+                source = Some(Source::from_paragraph(para)?);
             } else {
                 return Err("paragraph without Source or Package field".to_string());
             }
