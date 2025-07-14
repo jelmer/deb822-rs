@@ -19,7 +19,7 @@ deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = ["derive"
 url = { version = "2.5.4", features = ["serde"] }
 sequoia-net = { version = "0.29", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt", "macros"], optional = true }
-sequoia-openpgp = { version = "1.22", default-features = false, features = ["compression-deflate", "crypto-openssl"], optional = true }
+sequoia-openpgp = { version = "2.0", default-features = false, features = ["compression-deflate", "crypto-openssl"], optional = true }
 
 [dev-dependencies]
 indoc = { version = "2.0.6" }
