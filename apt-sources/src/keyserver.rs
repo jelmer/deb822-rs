@@ -146,7 +146,12 @@ pub fn parse_key_metadata(key_data: &str) -> Result<(String, Vec<String>), Strin
     // Extract user IDs (email addresses)
     let user_ids: Vec<String> = cert
         .userids()
-        .filter_map(|uid| uid.email2().ok().flatten().map(String::from))
+        .filter_map(|uid| {
+            uid.userid()
+                .email()
+                .expect("Failed to get email")
+                .map(String::from)
+        })
         .collect();
 
     Ok((fingerprint, user_ids))
