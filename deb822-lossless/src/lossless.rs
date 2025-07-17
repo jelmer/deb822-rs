@@ -123,10 +123,10 @@ struct Parse {
 }
 
 fn parse(text: &str) -> Parse {
-    struct Parser {
+    struct Parser<'a> {
         /// input tokens, including whitespace,
         /// in *reverse* order.
-        tokens: Vec<(SyntaxKind, String)>,
+        tokens: Vec<(SyntaxKind, &'a str)>,
         /// the in-progress tree.
         builder: GreenNodeBuilder<'static>,
         /// the list of syntax errors we've accumulated
@@ -134,7 +134,7 @@ fn parse(text: &str) -> Parse {
         errors: Vec<String>,
     }
 
-    impl Parser {
+    impl<'a> Parser<'a> {
         fn parse_entry(&mut self) {
             while self.current() == Some(COMMENT) {
                 self.bump();
@@ -241,7 +241,7 @@ fn parse(text: &str) -> Parse {
         /// Advance one token, adding it to the current branch of the tree builder.
         fn bump(&mut self) {
             let (kind, text) = self.tokens.pop().unwrap();
-            self.builder.token(kind.into(), text.as_str());
+            self.builder.token(kind.into(), text);
         }
         /// Peek at the first unprocessed token
         fn current(&self) -> Option<SyntaxKind> {
@@ -269,9 +269,7 @@ fn parse(text: &str) -> Parse {
         }
     }
 
-    let mut tokens = lex(text)
-        .map(|(k, t)| (k, t.to_string()))
-        .collect::<Vec<_>>();
+    let mut tokens = lex(text).collect::<Vec<_>>();
     tokens.reverse();
     Parser {
         tokens,
