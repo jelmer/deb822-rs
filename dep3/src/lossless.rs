@@ -438,4 +438,14 @@ Bug-Ubuntu: http://bugs.launchpad.net/123
             vec!["http://bugs.launchpad.net/123".to_string()]
         );
     }
+
+    #[test]
+    fn test_set_last_update() {
+        let text = r#"Description: Fix widget frobnication speeds
+"#;
+        let mut header = PatchHeader::from_str(&text).unwrap();
+        let date = chrono::NaiveDate::from_ymd_opt(2023, 5, 15).unwrap();
+        header.set_last_update(date);
+        assert_eq!(header.last_update(), Some(date));
+    }
 }

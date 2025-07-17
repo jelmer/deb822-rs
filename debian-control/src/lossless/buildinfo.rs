@@ -259,4 +259,35 @@ mod tests {
         let buildinfo: Buildinfo = s.parse().unwrap();
         assert_eq!(buildinfo.format(), Some("1.0".to_string()));
     }
+
+    #[test]
+    fn test_set_environment() {
+        let s = include_str!("../../testdata/ruff.buildinfo");
+        let mut buildinfo: Buildinfo = s.parse().unwrap();
+        
+        let mut env = std::collections::HashMap::new();
+        env.insert("TEST_VAR".to_string(), "test_value".to_string());
+        env.insert("ANOTHER_VAR".to_string(), "another_value".to_string());
+        
+        buildinfo.set_environment(env);
+        let env_field = buildinfo.0.get("Environment").unwrap();
+        assert!(env_field.contains("TEST_VAR=test_value"));
+        assert!(env_field.contains("ANOTHER_VAR=another_value"));
+    }
+
+    #[test]
+    fn test_set_build_path() {
+        let s = include_str!("../../testdata/ruff.buildinfo");
+        let mut buildinfo: Buildinfo = s.parse().unwrap();
+        
+        buildinfo.set_build_path("/tmp/build/path");
+        assert_eq!(buildinfo.build_path(), Some("/tmp/build/path".to_string()));
+    }
+
+    #[test]
+    fn test_build_origin() {
+        let s = include_str!("../../testdata/ruff.buildinfo");
+        let buildinfo: Buildinfo = s.parse().unwrap();
+        assert_eq!(buildinfo.build_origin(), Some("Debian".to_string()));
+    }
 }

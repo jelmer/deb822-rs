@@ -561,4 +561,35 @@ mod tests {
         "#}
         );
     }
+
+    #[test]
+    fn test_yesnoforce_to_string() {
+        let yes = crate::YesNoForce::Yes;
+        assert_eq!((&yes).to_string(), "yes");
+        
+        let no = crate::YesNoForce::No;
+        assert_eq!((&no).to_string(), "no");
+        
+        let force = crate::YesNoForce::Force;
+        assert_eq!((&force).to_string(), "force");
+    }
+
+    #[test]
+    fn test_parse_legacy_line() {
+        let line = "deb http://archive.ubuntu.com/ubuntu jammy main restricted";
+        let repo = Repository::parse_legacy_line(line).unwrap();
+        assert_eq!(repo.types.len(), 1);
+        assert!(repo.types.contains(&RepositoryType::Binary));
+        assert_eq!(repo.uris.len(), 1);
+        assert_eq!(repo.uris[0].to_string(), "http://archive.ubuntu.com/ubuntu");
+        assert_eq!(repo.suites, vec!["jammy".to_string()]);
+        assert_eq!(repo.components, Some(vec!["main".to_string(), "restricted".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_legacy_line_invalid() {
+        let line = "invalid line";
+        let result = Repository::parse_legacy_line(line);
+        assert!(result.is_err());
+    }
 }

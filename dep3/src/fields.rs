@@ -161,3 +161,24 @@ pub(crate) fn format_origin(category: &Option<OriginCategory>, origin: &Origin) 
         origin
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_forwarded_display() {
+        assert_eq!(Forwarded::No.to_string(), "no");
+        assert_eq!(Forwarded::Yes("url".to_string()).to_string(), "url");
+        assert_eq!(Forwarded::NotNeeded.to_string(), "not-needed");
+    }
+
+    #[test]
+    fn test_applied_upstream_display() {
+        let commit = AppliedUpstream::Commit("abc123".to_string());
+        assert_eq!(commit.to_string(), "commit:abc123");
+        
+        let other = AppliedUpstream::Other("merged".to_string());
+        assert_eq!(other.to_string(), "merged");
+    }
+}

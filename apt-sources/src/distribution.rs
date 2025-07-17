@@ -126,3 +126,28 @@ pub fn get_system_info() -> Result<(String, String), String> {
 
     Ok((codename, arch))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_main_repository() {
+        let dist = Distribution::Ubuntu;
+        let repo = crate::Repository {
+            uris: vec![url::Url::parse("http://archive.ubuntu.com/ubuntu").unwrap()],
+            suites: vec!["jammy".to_string()],
+            components: Some(vec!["main".to_string()]),
+            ..Default::default()
+        };
+        assert!(dist.is_main_repository(&repo));
+
+        let non_main_repo = crate::Repository {
+            uris: vec![url::Url::parse("http://example.com/ubuntu").unwrap()],
+            suites: vec!["jammy".to_string()],
+            components: Some(vec!["main".to_string()]),
+            ..Default::default()
+        };
+        assert!(!dist.is_main_repository(&non_main_repo));
+    }
+}
