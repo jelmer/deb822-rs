@@ -350,4 +350,22 @@ Section: vcs
             ]
         );
     }
+
+    #[test]
+    fn test_lex_colon_count() {
+        // Test that colon_count is properly tracked
+        let text = "Key: value: with: colons\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+        
+        assert_eq!(
+            tokens,
+            vec![
+                (KEY, "Key"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "value: with: colons"),
+                (NEWLINE, "\n")
+            ]
+        );
+    }
 }

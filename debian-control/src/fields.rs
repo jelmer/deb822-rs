@@ -426,3 +426,48 @@ impl std::fmt::Display for MultiArch {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sha1_checksum_filename() {
+        let checksum = Sha1Checksum {
+            sha1: "abc123".to_string(),
+            size: 1234,
+            filename: "test.deb".to_string(),
+        };
+        assert_eq!(checksum.filename(), "test.deb".to_string());
+    }
+
+    #[test]
+    fn test_md5_checksum_filename() {
+        let checksum = Md5Checksum {
+            md5sum: "abc123".to_string(),
+            size: 1234,
+            filename: "test.deb".to_string(),
+        };
+        assert_eq!(checksum.filename(), "test.deb".to_string());
+    }
+
+    #[test]
+    fn test_sha256_checksum_filename() {
+        let checksum = Sha256Checksum {
+            sha256: "abc123".to_string(),
+            size: 1234,
+            filename: "test.deb".to_string(),
+        };
+        assert_eq!(checksum.filename(), "test.deb".to_string());
+    }
+
+    #[test]
+    fn test_sha512_checksum_filename() {
+        let checksum = Sha512Checksum {
+            sha512: "abc123".to_string(),
+            size: 1234,
+            filename: "test.deb".to_string(),
+        };
+        assert_eq!(checksum.filename(), "test.deb".to_string());
+    }
+}
