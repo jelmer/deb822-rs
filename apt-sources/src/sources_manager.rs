@@ -311,8 +311,11 @@ impl SourcesManager {
 
     /// List all repositories with their file paths
     pub fn list_all_repositories(&self) -> Result<Vec<(PathBuf, Repository)>, String> {
-        let mut all_repos = Vec::new();
         let files = self.scan_all_repositories()?;
+        
+        // Pre-calculate capacity to avoid reallocations
+        let total_repos: usize = files.iter().map(|(_, repos)| repos.len()).sum();
+        let mut all_repos = Vec::with_capacity(total_repos);
 
         for (path, repos) in files {
             for repo in repos.iter() {

@@ -3,28 +3,29 @@ pub fn glob_to_regex(glob: &str) -> regex::Regex {
     let mut r = "^".to_string();
 
     while let Some(c) = it.next() {
-        r.push_str(
-            match c {
-                '*' => ".*".to_string(),
-                '?' => ".".to_string(),
-                '\\' => {
-                    let c = it.next();
-                    match c {
-                        Some('?') | Some('*') | Some('\\') => {
-                            regex::escape(c.unwrap().to_string().as_str())
-                        }
-                        Some(x) => {
-                            panic!("invalid escape sequence: \\{}", x);
-                        }
-                        None => {
-                            panic!("invalid escape sequence: \\");
-                        }
+        match c {
+            '*' => r.push_str(".*"),
+            '?' => r.push('.'),
+            '\\' => {
+                let c = it.next();
+                match c {
+                    Some('?') | Some('*') | Some('\\') => {
+                        let escaped = regex::escape(&c.unwrap().to_string());
+                        r.push_str(&escaped);
+                    }
+                    Some(x) => {
+                        panic!("invalid escape sequence: \\{}", x);
+                    }
+                    None => {
+                        panic!("invalid escape sequence: \\");
                     }
                 }
-                c => regex::escape(c.to_string().as_str()),
             }
-            .as_str(),
-        )
+            c => {
+                let escaped = regex::escape(&c.to_string());
+                r.push_str(&escaped);
+            }
+        }
     }
 
     r.push_str("$");

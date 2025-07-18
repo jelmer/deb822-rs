@@ -153,11 +153,15 @@ fn deserialize_types(text: &str) -> Result<HashSet<RepositoryType>, RepositoryEr
 }
 
 fn serialize_types(files: &HashSet<RepositoryType>) -> String {
-    files
-        .iter()
-        .map(|rt| rt.to_string())
-        .collect::<Vec<String>>()
-        .join("\n")
+    use std::fmt::Write;
+    let mut result = String::new();
+    for (i, rt) in files.iter().enumerate() {
+        if i > 0 {
+            result.push('\n');
+        }
+        write!(&mut result, "{}", rt).unwrap();
+    }
+    result
 }
 
 fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
@@ -169,10 +173,14 @@ fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
 }
 
 fn serialize_uris(uris: &[Url]) -> String {
-    uris.iter()
-        .map(|u| u.as_str())
-        .collect::<Vec<&str>>()
-        .join(" ")
+    let mut result = String::new();
+    for (i, uri) in uris.iter().enumerate() {
+        if i > 0 {
+            result.push(' ');
+        }
+        result.push_str(uri.as_str());
+    }
+    result
 }
 
 fn deserialize_string_chain(text: &str) -> Result<Vec<String>, String> {
@@ -191,9 +199,9 @@ fn deserialize_yesno(text: &str) -> Result<bool, String> {
 
 fn serializer_yesno(value: &bool) -> String {
     if *value {
-        "yes".to_owned()
+        "yes".to_string()
     } else {
-        "no".to_owned()
+        "no".to_string()
     }
 }
 

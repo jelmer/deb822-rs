@@ -198,10 +198,10 @@ impl Vcs {
     }
 
     /// Extract the subpath from the VCS information
-    pub fn subpath(&self) -> Option<String> {
+    pub fn subpath(&self) -> Option<&str> {
         match self {
-            Vcs::Git { subpath, .. } => subpath.clone(),
-            Vcs::Bzr { subpath, .. } => subpath.clone(),
+            Vcs::Git { subpath, .. } => subpath.as_deref(),
+            Vcs::Bzr { subpath, .. } => subpath.as_deref(),
             _ => None,
         }
     }
@@ -218,9 +218,9 @@ impl Vcs {
             Vcs::Bzr {
                 repo_url,
                 subpath: _,
-            } => Some(repo_url.clone()),
-            Vcs::Hg { repo_url } => Some(repo_url.clone()),
-            Vcs::Svn { url } => Some(url.clone()),
+            } => Some(repo_url.to_string()),
+            Vcs::Hg { repo_url } => Some(repo_url.to_string()),
+            Vcs::Svn { url } => Some(url.to_string()),
             _ => None,
         }
     }
