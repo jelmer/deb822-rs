@@ -689,4 +689,149 @@ mod tests {
         }
         assert!(!repos_match(&repo1, &repo2));
     }
+
+    #[test]
+    fn test_generate_keyring_filename() {
+        let (manager, _) = create_test_manager();
+        
+        // Test basic filename
+        assert_eq!(
+            manager.generate_keyring_filename("test-repo"),
+            "test-repo.gpg"
+        );
+        
+        // Test with special characters that should be sanitized
+        assert_eq!(
+            manager.generate_keyring_filename("Test/Repo:Name With Spaces"),
+            "test-repo-name-with-spaces.gpg"
+        );
+        
+        // Test empty string
+        assert_eq!(
+            manager.generate_keyring_filename(""),
+            ".gpg"
+        );
+    }
+
+    #[test]
+    fn test_list_all_repositories() {
+        let (manager, _) = create_test_manager();
+        manager.ensure_directories().unwrap();
+        
+        // Initially empty
+        let all_repos = manager.list_all_repositories().unwrap();
+        assert!(all_repos.is_empty());
+        
+        // Add some repositories
+        let repo1 = create_test_repository();
+        let mut repo2 = create_test_repository();
+        repo2.suites = vec!["jammy".to_string()];
+        
+        manager.add_repository(&repo1, "test1.sources").unwrap();
+        manager.add_repository(&repo2, "test2.sources").unwrap();
+        
+        // Should list all repositories with their paths
+        let all_repos = manager.list_all_repositories().unwrap();
+        assert_eq!(all_repos.len(), 2);
+        
+        // Check that paths are included
+        let paths: Vec<_> = all_repos.iter().map(|(p, _)| p.file_name().unwrap()).collect();
+        assert!(paths.contains(&std::ffi::OsStr::new("test1.sources")));
+        assert!(paths.contains(&std::ffi::OsStr::new("test2.sources")));
+    }
+
+    #[test]
+    fn test_enable_source_repositories_counter_edge_cases() {
+        let (manager, _) = create_test_manager();
+        manager.ensure_directories().unwrap();
+        
+        // Add a binary repository
+        let mut repo = create_test_repository();
+        repo.types = HashSet::from([RepositoryType::Binary]);
+        manager.add_repository(&repo, "test.sources").unwrap();
+        
+        // Enable source repositories with creation
+        let (enabled, created) = manager.enable_source_repositories(true).unwrap();
+        assert_eq!(enabled, 0);
+        assert_eq!(created, 1);
+        
+        // Check that source repo was actually created
+        let all_repos = manager.list_all_repositories().unwrap();
+        let source_repos: Vec<_> = all_repos
+            .iter()
+            .filter(|(_, r)| r.types.contains(&RepositoryType::Source) && !r.types.contains(&RepositoryType::Binary))
+            .collect();
+        assert_eq!(source_repos.len(), 1);
+        
+        // Add a disabled binary repository
+        let mut disabled_repo = create_test_repository();
+        disabled_repo.types = HashSet::from([RepositoryType::Binary]);
+        disabled_repo.enabled = Some(false);
+        disabled_repo.suites = vec!["jammy".to_string()]; // Make it different
+        manager.add_repository(&disabled_repo, "test2.sources").unwrap();
+        
+        // Enable source repositories again
+        // The first binary repo will create another source repo
+        // The disabled binary repo will have source type added and be enabled
+        let (enabled2, created2) = manager.enable_source_repositories(true).unwrap();
+        assert_eq!(enabled2, 1); // Should enable the disabled binary repo
+        assert_eq!(created2, 1); // Will create a source repo for the new binary repo
+    }
+
+    #[test]
+    fn test_set_repository_enabled_edge_cases() {
+        let (manager, _) = create_test_manager();
+        manager.ensure_directories().unwrap();
+        
+        let mut repo = create_test_repository();
+        repo.enabled = Some(true);
+        
+        // Add repository
+        manager.add_repository(&repo, "test.sources").unwrap();
+        
+        // Try to enable already enabled repo - should return false
+        let modified = manager.set_repository_enabled(&repo, true).unwrap();
+        assert!(!modified);
+        
+        // Disable it
+        let modified = manager.set_repository_enabled(&repo, false).unwrap();
+        assert!(modified);
+        
+        // Try to disable already disabled repo - should return false
+        let modified = manager.set_repository_enabled(&repo, false).unwrap();
+        assert!(!modified);
+    }
+
+    #[test]
+    fn test_add_component_edge_cases() {
+        let (manager, _) = create_test_manager();
+        manager.ensure_directories().unwrap();
+        
+        let mut repo = create_test_repository();
+        repo.components = Some(vec!["main".to_string()]);
+        
+        manager.add_repository(&repo, "test.sources").unwrap();
+        
+        // Add component that already exists - should not increment counter
+        let count = manager
+            .add_component_to_repositories("main", |_| true)
+            .unwrap();
+        assert_eq!(count, 0);
+        
+        // Add new component
+        let count = manager
+            .add_component_to_repositories("universe", |_| true)
+            .unwrap();
+        assert_eq!(count, 1);
+        
+        // Add to repo with no components initially
+        let mut repo2 = create_test_repository();
+        repo2.components = None;
+        manager.add_repository(&repo2, "test2.sources").unwrap();
+        
+        let count = manager
+            .add_component_to_repositories("restricted", |r| r.components.is_none())
+            .unwrap();
+        assert_eq!(count, 1);
+    }
 }
