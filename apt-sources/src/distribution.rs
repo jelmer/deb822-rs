@@ -16,7 +16,7 @@ impl Distribution {
     /// Get the current system's distribution information
     pub fn current() -> Result<Distribution, String> {
         // First try lsb_release for distribution ID
-        let lsb_id = Command::new("lsb_release").args(&["-i", "-s"]).output();
+        let lsb_id = Command::new("lsb_release").args(["-i", "-s"]).output();
 
         if let Ok(output) = lsb_id {
             if output.status.success() {
@@ -27,7 +27,7 @@ impl Distribution {
                 return Ok(match distro_id.as_str() {
                     "ubuntu" => Distribution::Ubuntu,
                     "debian" => Distribution::Debian,
-                    other => Distribution::Other(other.to_string()),
+                    other => Distribution::Other(other.to_owned()),
                 });
             }
         }
@@ -44,22 +44,22 @@ impl Distribution {
                     return Ok(match id.as_str() {
                         "ubuntu" => Distribution::Ubuntu,
                         "debian" => Distribution::Debian,
-                        other => Distribution::Other(other.to_string()),
+                        other => Distribution::Other(other.to_owned()),
                     });
                 }
             }
         }
 
         // If all else fails, assume Debian-based
-        Ok(Distribution::Other("unknown".to_string()))
+        Ok(Distribution::Other("unknown".to_owned()))
     }
 
     /// Get default components for this distribution
-    pub fn default_components(&self) -> Vec<String> {
+    pub fn default_components(&self) -> Vec<&'static str> {
         match self {
-            Distribution::Ubuntu => vec!["main".to_string(), "universe".to_string()],
-            Distribution::Debian => vec!["main".to_string()],
-            Distribution::Other(_) => vec!["main".to_string()],
+            Distribution::Ubuntu => vec!["main", "universe"],
+            Distribution::Debian => vec!["main"],
+            Distribution::Other(_) => vec!["main"],
         }
     }
 
@@ -98,7 +98,7 @@ impl Distribution {
 pub fn get_system_info() -> Result<(String, String), String> {
     // Get distribution codename
     let lsb_release = Command::new("lsb_release")
-        .args(&["-c", "-s"])
+        .args(["-c", "-s"])
         .output()
         .map_err(|e| format!("Failed to run lsb_release: {}", e))?;
 

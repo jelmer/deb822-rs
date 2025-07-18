@@ -46,11 +46,7 @@ impl SourcesManager {
 
     /// Generate a filename for a repository
     pub fn generate_filename(&self, name: &str, format: FileFormat) -> String {
-        let sanitized = name
-            .replace('/', "-")
-            .replace(':', "-")
-            .replace(' ', "-")
-            .to_lowercase();
+        let sanitized = name.replace(['/', ':', ' '], "-").to_lowercase();
 
         match format {
             FileFormat::Deb822 => format!("{}.sources", sanitized),
@@ -329,11 +325,7 @@ impl SourcesManager {
 
     /// Generate a keyring filename for a repository
     pub fn generate_keyring_filename(&self, repository_name: &str) -> String {
-        let sanitized = repository_name
-            .replace('/', "-")
-            .replace(':', "-")
-            .replace(' ', "-")
-            .to_lowercase();
+        let sanitized = repository_name.replace(['/', ':', ' '], "-").to_lowercase();
         format!("{}.gpg", sanitized)
     }
 

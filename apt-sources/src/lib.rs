@@ -91,9 +91,13 @@ impl From<&RepositoryType> for String {
     }
 }
 
-impl ToString for RepositoryType {
-    fn to_string(&self) -> String {
-        self.into()
+impl std::fmt::Display for RepositoryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            RepositoryType::Binary => "deb",
+            RepositoryType::Source => "deb-src",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -131,21 +135,26 @@ impl From<&YesNoForce> for String {
     }
 }
 
-impl ToString for &YesNoForce {
-    fn to_string(&self) -> String {
-        self.to_owned().into()
+impl std::fmt::Display for YesNoForce {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            YesNoForce::Yes => "yes",
+            YesNoForce::No => "no",
+            YesNoForce::Force => "force",
+        };
+        write!(f, "{}", s)
     }
 }
 
 fn deserialize_types(text: &str) -> Result<HashSet<RepositoryType>, RepositoryError> {
     text.split_whitespace()
-        .map(|t| RepositoryType::from_str(t))
+        .map(RepositoryType::from_str)
         .collect::<Result<HashSet<RepositoryType>, RepositoryError>>()
 }
 
 fn serialize_types(files: &HashSet<RepositoryType>) -> String {
     files
-        .into_iter()
+        .iter()
         .map(|rt| rt.to_string())
         .collect::<Vec<String>>()
         .join("\n")
@@ -154,13 +163,13 @@ fn serialize_types(files: &HashSet<RepositoryType>) -> String {
 fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
     // TODO: bad error type
     text.split_whitespace()
-        .map(|u| Url::from_str(u))
+        .map(Url::from_str)
         .collect::<Result<Vec<Url>, _>>()
         .map_err(|e| e.to_string()) // TODO: bad error type
 }
 
 fn serialize_uris(uris: &[Url]) -> String {
-    uris.into_iter()
+    uris.iter()
         .map(|u| u.as_str())
         .collect::<Vec<&str>>()
         .join(" ")
@@ -417,22 +426,24 @@ impl std::str::FromStr for Repositories {
 
         let repos = deb822
             .iter()
-            .map(|p| Repository::from_paragraph(p))
+            .map(Repository::from_paragraph)
             .collect::<Result<Vec<Repository>, Self::Err>>()?;
         Ok(Repositories(repos))
     }
 }
 
-impl ToString for Repositories {
-    fn to_string(&self) -> String {
-        self.0
+impl std::fmt::Display for Repositories {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let result = self
+            .0
             .iter()
             .map(|r| {
                 let p: deb822_fast::Paragraph = r.to_paragraph();
                 p.to_string()
             })
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n");
+        write!(f, "{}", result)
     }
 }
 
@@ -566,10 +577,10 @@ mod tests {
     fn test_yesnoforce_to_string() {
         let yes = crate::YesNoForce::Yes;
         assert_eq!((&yes).to_string(), "yes");
-        
+
         let no = crate::YesNoForce::No;
         assert_eq!((&no).to_string(), "no");
-        
+
         let force = crate::YesNoForce::Force;
         assert_eq!((&force).to_string(), "force");
     }
@@ -583,7 +594,10 @@ mod tests {
         assert_eq!(repo.uris.len(), 1);
         assert_eq!(repo.uris[0].to_string(), "http://archive.ubuntu.com/ubuntu");
         assert_eq!(repo.suites, vec!["jammy".to_string()]);
-        assert_eq!(repo.components, Some(vec!["main".to_string(), "restricted".to_string()]));
+        assert_eq!(
+            repo.components,
+            Some(vec!["main".to_string(), "restricted".to_string()])
+        );
     }
 
     #[test]
