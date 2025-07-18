@@ -50,8 +50,8 @@ fn lex_(mut input: &str, mut start_of_line: bool) -> impl Iterator<Item = (Synta
                     Some((SyntaxKind::NEWLINE, nl))
                 }
                 _ if common::is_indent(c) => {
-                    let (whitespace, remaining) = input
-                        .split_at(input.find(|c| !common::is_indent(c)).unwrap_or(input.len()));
+                    let end_pos = input.find(|c| !common::is_indent(c)).unwrap_or(input.len());
+                    let (whitespace, remaining) = input.split_at(end_pos);
                     input = remaining;
                     if start_of_line {
                         indent = whitespace.len();

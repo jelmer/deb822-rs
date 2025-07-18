@@ -10,8 +10,19 @@ Forwarded: not-needed
 "#;
 
 pub fn main() {
-    let patch_header = PatchHeader::from_str(TEXT).unwrap();
+    let patch_header = match PatchHeader::from_str(TEXT) {
+        Ok(header) => header,
+        Err(e) => {
+            eprintln!("Failed to parse patch header: {}", e);
+            std::process::exit(1);
+        }
+    };
 
-    println!("Description: {}", patch_header.description.unwrap());
-    println!("Debian Bugs: {}", patch_header.bug_debian.unwrap());
+    if let Some(description) = &patch_header.description {
+        println!("Description: {}", description);
+    }
+
+    if let Some(bug_debian) = &patch_header.bug_debian {
+        println!("Debian Bugs: {}", bug_debian);
+    }
 }
