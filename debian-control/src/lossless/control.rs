@@ -1137,7 +1137,10 @@ Vcs-Svn: https://example.com/svn/repo
         .parse()
         .unwrap();
         let source = control.source().unwrap();
-        assert_eq!(source.vcs_svn(), Some("https://example.com/svn/repo".to_string()));
+        assert_eq!(
+            source.vcs_svn(),
+            Some("https://example.com/svn/repo".to_string())
+        );
     }
 
     #[test]

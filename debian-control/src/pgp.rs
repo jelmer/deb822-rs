@@ -77,39 +77,27 @@ pub fn strip_pgp_signature(input: &str) -> Result<(String, Option<String>), Erro
     // Read the metadata
     let mut metadata = String::new();
     loop {
-        let line = if let Some(line) = lines.next() {
-            line
-        } else {
-            return Err(Error::MissingPayload);
-        };
+        let line = lines.next().ok_or(Error::MissingPayload)?;
         if line.is_empty() {
             break;
         }
-        metadata.push_str(line);
-        metadata.push('\n');
+        use std::fmt::Write;
+        writeln!(&mut metadata, "{}", line).unwrap();
     }
 
     let mut payload = String::new();
     loop {
-        let line = if let Some(line) = lines.next() {
-            line
-        } else {
-            return Err(Error::MissingPgpSignature);
-        };
+        let line = lines.next().ok_or(Error::MissingPgpSignature)?;
         if line == "-----BEGIN PGP SIGNATURE-----" {
             break;
         }
-        payload.push_str(line);
-        payload.push('\n');
+        use std::fmt::Write;
+        writeln!(&mut payload, "{}", line).unwrap();
     }
 
     let mut signature = String::new();
     loop {
-        let line = if let Some(line) = lines.next() {
-            line
-        } else {
-            return Err(Error::TruncatedPgpSignature);
-        };
+        let line = lines.next().ok_or(Error::TruncatedPgpSignature)?;
         if line == "-----END PGP SIGNATURE-----" {
             break;
         }

@@ -264,11 +264,11 @@ mod tests {
     fn test_set_environment() {
         let s = include_str!("../../testdata/ruff.buildinfo");
         let mut buildinfo: Buildinfo = s.parse().unwrap();
-        
+
         let mut env = std::collections::HashMap::new();
         env.insert("TEST_VAR".to_string(), "test_value".to_string());
         env.insert("ANOTHER_VAR".to_string(), "another_value".to_string());
-        
+
         buildinfo.set_environment(env);
         let env_field = buildinfo.0.get("Environment").unwrap();
         assert!(env_field.contains("TEST_VAR=test_value"));
@@ -279,7 +279,7 @@ mod tests {
     fn test_set_build_path() {
         let s = include_str!("../../testdata/ruff.buildinfo");
         let mut buildinfo: Buildinfo = s.parse().unwrap();
-        
+
         buildinfo.set_build_path("/tmp/build/path");
         assert_eq!(buildinfo.build_path(), Some("/tmp/build/path".to_string()));
     }

@@ -1356,7 +1356,10 @@ Version: 1.0
 Vcs-Arch: https://example.com/arch/repo
 "#;
         let p: super::Source = s.parse().unwrap();
-        assert_eq!(p.vcs_arch(), Some("https://example.com/arch/repo".to_string()));
+        assert_eq!(
+            p.vcs_arch(),
+            Some("https://example.com/arch/repo".to_string())
+        );
     }
 
     #[test]
@@ -1366,7 +1369,10 @@ Version: 1.0
 Vcs-Cvs: :pserver:anoncvs@example.com:/cvs/repo
 "#;
         let p: super::Source = s.parse().unwrap();
-        assert_eq!(p.vcs_cvs(), Some(":pserver:anoncvs@example.com:/cvs/repo".to_string()));
+        assert_eq!(
+            p.vcs_cvs(),
+            Some(":pserver:anoncvs@example.com:/cvs/repo".to_string())
+        );
     }
 
     #[test]
