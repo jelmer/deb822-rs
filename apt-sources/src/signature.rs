@@ -62,9 +62,10 @@ mod tests {
         // Test KeyPath display
         let path_sig = Signature::KeyPath(PathBuf::from("/etc/apt/trusted.gpg"));
         assert_eq!(path_sig.to_string(), "/etc/apt/trusted.gpg");
-        
+
         // Test KeyBlock display
-        let key_block = "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest key\n-----END PGP PUBLIC KEY BLOCK-----";
+        let key_block =
+            "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest key\n-----END PGP PUBLIC KEY BLOCK-----";
         let block_sig = Signature::KeyBlock(key_block.to_string());
         assert_eq!(block_sig.to_string(), format!("\n{}", key_block));
     }

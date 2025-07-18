@@ -153,11 +153,15 @@ fn deserialize_types(text: &str) -> Result<HashSet<RepositoryType>, RepositoryEr
 }
 
 fn serialize_types(files: &HashSet<RepositoryType>) -> String {
-    files
-        .iter()
-        .map(|rt| rt.to_string())
-        .collect::<Vec<String>>()
-        .join("\n")
+    use std::fmt::Write;
+    let mut result = String::new();
+    for (i, rt) in files.iter().enumerate() {
+        if i > 0 {
+            result.push('\n');
+        }
+        write!(&mut result, "{}", rt).unwrap();
+    }
+    result
 }
 
 fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
@@ -169,10 +173,14 @@ fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
 }
 
 fn serialize_uris(uris: &[Url]) -> String {
-    uris.iter()
-        .map(|u| u.as_str())
-        .collect::<Vec<&str>>()
-        .join(" ")
+    let mut result = String::new();
+    for (i, uri) in uris.iter().enumerate() {
+        if i > 0 {
+            result.push(' ');
+        }
+        result.push_str(uri.as_str());
+    }
+    result
 }
 
 fn deserialize_string_chain(text: &str) -> Result<Vec<String>, String> {
@@ -191,9 +199,9 @@ fn deserialize_yesno(text: &str) -> Result<bool, String> {
 
 fn serializer_yesno(value: &bool) -> String {
     if *value {
-        "yes".to_owned()
+        "yes".to_string()
     } else {
-        "no".to_owned()
+        "no".to_string()
     }
 }
 
@@ -637,7 +645,10 @@ mod tests {
         let line = "invalid-type http://example.com/debian stable main";
         let result = Repository::parse_legacy_line(line);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Line must start with 'deb' or 'deb-src'");
+        assert_eq!(
+            result.unwrap_err(),
+            "Line must start with 'deb' or 'deb-src'"
+        );
     }
 
     #[test]
@@ -657,7 +668,7 @@ mod tests {
             components: Some(vec!["main".to_string()]),
             ..Default::default()
         };
-        
+
         let legacy = repo.to_legacy_format();
         assert_eq!(legacy, "deb http://example.com/debian stable main\n");
     }
@@ -671,7 +682,7 @@ mod tests {
             components: Some(vec!["main".to_string(), "contrib".to_string()]),
             ..Default::default()
         };
-        
+
         let legacy = repo.to_legacy_format();
         // Should contain both deb and deb-src lines
         assert!(legacy.contains("deb http://example.com/debian stable main contrib"));
@@ -690,7 +701,7 @@ mod tests {
             components: Some(vec!["main".to_string()]),
             ..Default::default()
         };
-        
+
         let legacy = repo.to_legacy_format();
         // Should generate a line for each URI/suite combination
         assert!(legacy.contains("deb http://example1.com/debian stable main"));
@@ -708,7 +719,7 @@ mod tests {
             components: None,
             ..Default::default()
         };
-        
+
         let legacy = repo.to_legacy_format();
         assert_eq!(legacy, "deb http://example.com/debian stable\n");
     }
@@ -730,7 +741,7 @@ mod tests {
     fn test_repositories_is_empty() {
         let empty_repos = Repositories::empty();
         assert!(empty_repos.is_empty());
-        
+
         let mut repos = Repositories::empty();
         repos.push(Repository::default());
         assert!(!repos.is_empty());

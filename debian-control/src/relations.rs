@@ -163,63 +163,63 @@ impl<'a> Lexer<'a> {
             match c {
                 ':' => {
                     self.input.next();
-                    Some((SyntaxKind::COLON, ":".to_owned()))
+                    Some((SyntaxKind::COLON, c.to_string()))
                 }
                 '|' => {
                     self.input.next();
-                    Some((SyntaxKind::PIPE, "|".to_owned()))
+                    Some((SyntaxKind::PIPE, c.to_string()))
                 }
                 ',' => {
                     self.input.next();
-                    Some((SyntaxKind::COMMA, ",".to_owned()))
+                    Some((SyntaxKind::COMMA, c.to_string()))
                 }
                 '(' => {
                     self.input.next();
-                    Some((SyntaxKind::L_PARENS, "(".to_owned()))
+                    Some((SyntaxKind::L_PARENS, c.to_string()))
                 }
                 ')' => {
                     self.input.next();
-                    Some((SyntaxKind::R_PARENS, ")".to_owned()))
+                    Some((SyntaxKind::R_PARENS, c.to_string()))
                 }
                 '[' => {
                     self.input.next();
-                    Some((SyntaxKind::L_BRACKET, "[".to_owned()))
+                    Some((SyntaxKind::L_BRACKET, c.to_string()))
                 }
                 ']' => {
                     self.input.next();
-                    Some((SyntaxKind::R_BRACKET, "]".to_owned()))
+                    Some((SyntaxKind::R_BRACKET, c.to_string()))
                 }
                 '!' => {
                     self.input.next();
-                    Some((SyntaxKind::NOT, "!".to_owned()))
+                    Some((SyntaxKind::NOT, c.to_string()))
                 }
                 '$' => {
                     self.input.next();
-                    Some((SyntaxKind::DOLLAR, "$".to_owned()))
+                    Some((SyntaxKind::DOLLAR, c.to_string()))
                 }
                 '{' => {
                     self.input.next();
-                    Some((SyntaxKind::L_CURLY, "{".to_owned()))
+                    Some((SyntaxKind::L_CURLY, c.to_string()))
                 }
                 '}' => {
                     self.input.next();
-                    Some((SyntaxKind::R_CURLY, "}".to_owned()))
+                    Some((SyntaxKind::R_CURLY, c.to_string()))
                 }
                 '<' => {
                     self.input.next();
-                    Some((SyntaxKind::L_ANGLE, "<".to_owned()))
+                    Some((SyntaxKind::L_ANGLE, c.to_string()))
                 }
                 '>' => {
                     self.input.next();
-                    Some((SyntaxKind::R_ANGLE, ">".to_owned()))
+                    Some((SyntaxKind::R_ANGLE, c.to_string()))
                 }
                 '=' => {
                     self.input.next();
-                    Some((SyntaxKind::EQUAL, "=".to_owned()))
+                    Some((SyntaxKind::EQUAL, c.to_string()))
                 }
                 '\n' => {
                     self.input.next();
-                    Some((SyntaxKind::NEWLINE, "\n".to_owned()))
+                    Some((SyntaxKind::NEWLINE, c.to_string()))
                 }
                 _ if Self::is_whitespace(c) => {
                     let whitespace = self.read_while(Self::is_whitespace);

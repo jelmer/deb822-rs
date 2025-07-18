@@ -68,12 +68,12 @@ mod tests {
             RepositoryError::InvalidSignature.to_string(),
             "The field `Signed-By` is incorrect"
         );
-        
+
         // Test lossy error
         let lossy_err = deb822_fast::Error::UnexpectedEof;
         let repo_err = RepositoryError::Lossy(lossy_err);
         assert!(repo_err.to_string().contains("Lossy parser error:"));
-        
+
         // Test IO error
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let repo_err = RepositoryError::from(io_err);

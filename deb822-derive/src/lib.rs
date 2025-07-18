@@ -45,7 +45,7 @@ fn is_option(ty: &syn::Type) -> bool {
 //
 // And:
 //
-//// ```rust
+// ```rust
 // #[derive(ToDeb822)]
 // struct X {
 //    a: i32,

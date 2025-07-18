@@ -50,7 +50,7 @@ impl std::str::FromStr for Priority {
 /// A checksum of a file
 pub trait Checksum {
     /// Filename
-    fn filename(&self) -> String;
+    fn filename(&self) -> &str;
 
     /// Size of the file, in bytes
     fn size(&self) -> usize;
@@ -70,8 +70,8 @@ pub struct Sha1Checksum {
 }
 
 impl Checksum for Sha1Checksum {
-    fn filename(&self) -> String {
-        self.filename.clone()
+    fn filename(&self) -> &str {
+        &self.filename
     }
 
     fn size(&self) -> usize {
@@ -122,8 +122,8 @@ pub struct Sha256Checksum {
 }
 
 impl Checksum for Sha256Checksum {
-    fn filename(&self) -> String {
-        self.filename.clone()
+    fn filename(&self) -> &str {
+        &self.filename
     }
 
     fn size(&self) -> usize {
@@ -174,8 +174,8 @@ pub struct Sha512Checksum {
 }
 
 impl Checksum for Sha512Checksum {
-    fn filename(&self) -> String {
-        self.filename.clone()
+    fn filename(&self) -> &str {
+        &self.filename
     }
 
     fn size(&self) -> usize {
@@ -246,8 +246,8 @@ impl std::str::FromStr for Md5Checksum {
 }
 
 impl Checksum for Md5Checksum {
-    fn filename(&self) -> String {
-        self.filename.clone()
+    fn filename(&self) -> &str {
+        &self.filename
     }
 
     fn size(&self) -> usize {

@@ -356,7 +356,7 @@ Section: vcs
         // Test that colon_count is properly tracked
         let text = "Key: value: with: colons\n";
         let tokens = super::lex(text).collect::<Vec<_>>();
-        
+
         assert_eq!(
             tokens,
             vec![
