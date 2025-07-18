@@ -149,7 +149,7 @@ fn parse(text: &str) -> Parse {
                     Some(g) => {
                         self.builder.start_node(ERROR.into());
                         self.bump();
-                        self.errors.push(format!("expected newline, got {:?}", g));
+                        self.errors.push(format!("expected newline, got {g:?}"));
                         self.builder.finish_node();
                     }
                 }
@@ -196,7 +196,7 @@ fn parse(text: &str) -> Parse {
                     Some(g) => {
                         self.builder.start_node(ERROR.into());
                         self.bump();
-                        self.errors.push(format!("expected newline, got {:?}", g));
+                        self.errors.push(format!("expected newline, got {g:?}"));
                         self.builder.finish_node();
                     }
                 }
@@ -796,7 +796,7 @@ impl Paragraph {
     /// Returns an iterator over all values for the given key in the paragraph.
     pub fn get_all<'a>(&'a self, key: &'a str) -> impl Iterator<Item = String> + 'a {
         self.items()
-            .filter_map(move |(k, v)| if k.as_str() == key { Some(v) } else { None })
+            .filter_map(move |(k, v)| if k == key { Some(v) } else { None })
     }
 
     /// Returns an iterator over all keys in the paragraph.
@@ -1056,13 +1056,24 @@ impl Entry {
 
     /// Returns the value of the entry.
     pub fn value(&self) -> String {
-        self.0
+        let mut parts = self
+            .0
             .children_with_tokens()
             .filter_map(|it| it.into_token())
             .filter(|it| it.kind() == VALUE)
-            .map(|it| it.text().to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
+            .map(|it| it.text().to_string());
+
+        match parts.next() {
+            None => String::new(),
+            Some(first) => {
+                let mut result = first;
+                for part in parts {
+                    result.push('\n');
+                    result.push_str(&part);
+                }
+                result
+            }
+        }
     }
 
     /// Detach this entry from the paragraph.
@@ -1297,16 +1308,20 @@ fn rebuild_value(
             builder.token(WHITESPACE.into(), " ");
         }
         // Strip leading whitespace and newlines
-        while let Some((k, _t)) = tokens.first() {
-            if *k == NEWLINE || *k == WHITESPACE {
-                tokens.remove(0);
+        let mut start_idx = 0;
+        while start_idx < tokens.len() {
+            if tokens[start_idx].0 == NEWLINE || tokens[start_idx].0 == WHITESPACE {
+                start_idx += 1;
             } else {
                 break;
             }
         }
+        tokens.drain(..start_idx);
+        // Pre-allocate indentation string to avoid repeated allocations
+        let indent_str = " ".repeat(indentation as usize);
         for (k, t) in tokens {
             if last_was_newline {
-                builder.token(INDENT.into(), &" ".repeat(indentation as usize));
+                builder.token(INDENT.into(), &indent_str);
             }
             builder.token(k.into(), &t);
             last_was_newline = k == NEWLINE;
