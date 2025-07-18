@@ -154,16 +154,16 @@ mod tests {
     #[test]
     fn test_is_main_repository_all_ubuntu_hosts() {
         let dist = Distribution::Ubuntu;
-        
+
         // Test each Ubuntu host individually
         let ubuntu_hosts = [
             "http://archive.ubuntu.com/ubuntu",
-            "http://security.ubuntu.com/ubuntu", 
+            "http://security.ubuntu.com/ubuntu",
             "http://ports.ubuntu.com/ubuntu-ports",
-            "http://us.archive.ubuntu.com/ubuntu",  // contains ubuntu.com
-            "http://mirrors.canonical.com/ubuntu",   // contains canonical.com
+            "http://us.archive.ubuntu.com/ubuntu", // contains ubuntu.com
+            "http://mirrors.canonical.com/ubuntu", // contains canonical.com
         ];
-        
+
         for host in &ubuntu_hosts {
             let repo = crate::Repository {
                 uris: vec![url::Url::parse(host).unwrap()],
@@ -176,15 +176,15 @@ mod tests {
     #[test]
     fn test_is_main_repository_all_debian_hosts() {
         let dist = Distribution::Debian;
-        
+
         // Test each Debian host individually
         let debian_hosts = [
             "http://deb.debian.org/debian",
             "http://security.debian.org/debian-security",
-            "http://ftp.debian.org/debian",  // contains debian.org
-            "http://mirrors.debian.org/debian",  // contains debian.org
+            "http://ftp.debian.org/debian",     // contains debian.org
+            "http://mirrors.debian.org/debian", // contains debian.org
         ];
-        
+
         for host in &debian_hosts {
             let repo = crate::Repository {
                 uris: vec![url::Url::parse(host).unwrap()],
@@ -197,14 +197,14 @@ mod tests {
     #[test]
     fn test_is_main_repository_other_distribution() {
         let dist = Distribution::Other("mint".to_string());
-        
+
         // Other distributions should not match any repository
         let repo = crate::Repository {
             uris: vec![url::Url::parse("http://archive.ubuntu.com/ubuntu").unwrap()],
             ..Default::default()
         };
         assert!(!dist.is_main_repository(&repo));
-        
+
         let repo2 = crate::Repository {
             uris: vec![url::Url::parse("http://deb.debian.org/debian").unwrap()],
             ..Default::default()
@@ -222,7 +222,7 @@ mod tests {
         assert!(!dist.is_main_repository(&repo));
     }
 
-    #[test] 
+    #[test]
     fn test_is_main_repository_multiple_uris() {
         let dist = Distribution::Ubuntu;
         let repo = crate::Repository {
@@ -238,8 +238,14 @@ mod tests {
 
     #[test]
     fn test_default_components() {
-        assert_eq!(Distribution::Ubuntu.default_components(), vec!["main", "universe"]);
+        assert_eq!(
+            Distribution::Ubuntu.default_components(),
+            vec!["main", "universe"]
+        );
         assert_eq!(Distribution::Debian.default_components(), vec!["main"]);
-        assert_eq!(Distribution::Other("mint".to_string()).default_components(), vec!["main"]);
+        assert_eq!(
+            Distribution::Other("mint".to_string()).default_components(),
+            vec!["main"]
+        );
     }
 }

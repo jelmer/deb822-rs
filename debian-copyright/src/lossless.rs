@@ -522,14 +522,18 @@ License: GPL-3+
     #[test]
     fn test_from_file_relaxed() {
         let tmpfile = std::env::temp_dir().join("test_copyright.txt");
-        std::fs::write(&tmpfile, r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+        std::fs::write(
+            &tmpfile,
+            r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: foo
 Source: https://example.com/foo
 
 Files: *
 Copyright: 2020 Joe Bloggs <joe@example.com>
 License: GPL-3+
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         let (copyright, errors) = super::Copyright::from_file_relaxed(&tmpfile).unwrap();
         assert!(errors.is_empty());
         assert_eq!("foo", copyright.header().unwrap().upstream_name().unwrap());
@@ -541,7 +545,10 @@ License: GPL-3+
         let copyright = super::Copyright::new();
         let mut header = copyright.header().unwrap();
         header.set_upstream_contact("Test Person <test@example.com>");
-        assert_eq!(header.upstream_contact().unwrap(), "Test Person <test@example.com>");
+        assert_eq!(
+            header.upstream_contact().unwrap(),
+            "Test Person <test@example.com>"
+        );
     }
 
     #[test]

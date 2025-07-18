@@ -99,18 +99,24 @@ mod tests {
             user: "test-user".to_string(),
             name: "test-repo".to_string(),
         };
-        
+
         assert_eq!(ppa.filename("list"), "test-user-ubuntu-test-repo.list");
-        assert_eq!(ppa.filename("sources"), "test-user-ubuntu-test-repo.sources");
-        
+        assert_eq!(
+            ppa.filename("sources"),
+            "test-user-ubuntu-test-repo.sources"
+        );
+
         // Test with empty extension
         assert_eq!(ppa.filename(""), "test-user-ubuntu-test-repo.");
-        
+
         // Test with special characters (they remain as-is)
         let ppa_special = PpaInfo {
             user: "user_123".to_string(),
             name: "repo-name".to_string(),
         };
-        assert_eq!(ppa_special.filename("list"), "user_123-ubuntu-repo-name.list");
+        assert_eq!(
+            ppa_special.filename("list"),
+            "user_123-ubuntu-repo-name.list"
+        );
     }
 }

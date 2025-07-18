@@ -177,7 +177,7 @@ mod tests {
     fn test_applied_upstream_display() {
         let commit = AppliedUpstream::Commit("abc123".to_string());
         assert_eq!(commit.to_string(), "commit:abc123");
-        
+
         let other = AppliedUpstream::Other("merged".to_string());
         assert_eq!(other.to_string(), "merged");
     }

@@ -645,7 +645,10 @@ mod tests {
         let line = "invalid-type http://example.com/debian stable main";
         let result = Repository::parse_legacy_line(line);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Line must start with 'deb' or 'deb-src'");
+        assert_eq!(
+            result.unwrap_err(),
+            "Line must start with 'deb' or 'deb-src'"
+        );
     }
 
     #[test]
@@ -665,7 +668,7 @@ mod tests {
             components: Some(vec!["main".to_string()]),
             ..Default::default()
         };
-        
+
         let legacy = repo.to_legacy_format();
         assert_eq!(legacy, "deb http://example.com/debian stable main\n");
     }
@@ -679,7 +682,7 @@ mod tests {
             components: Some(vec!["main".to_string(), "contrib".to_string()]),
             ..Default::default()
         };
-        
+
         let legacy = repo.to_legacy_format();
         // Should contain both deb and deb-src lines
         assert!(legacy.contains("deb http://example.com/debian stable main contrib"));
@@ -698,7 +701,7 @@ mod tests {
             components: Some(vec!["main".to_string()]),
             ..Default::default()
         };
-        
+
         let legacy = repo.to_legacy_format();
         // Should generate a line for each URI/suite combination
         assert!(legacy.contains("deb http://example1.com/debian stable main"));
@@ -716,7 +719,7 @@ mod tests {
             components: None,
             ..Default::default()
         };
-        
+
         let legacy = repo.to_legacy_format();
         assert_eq!(legacy, "deb http://example.com/debian stable\n");
     }
@@ -738,7 +741,7 @@ mod tests {
     fn test_repositories_is_empty() {
         let empty_repos = Repositories::empty();
         assert!(empty_repos.is_empty());
-        
+
         let mut repos = Repositories::empty();
         repos.push(Repository::default());
         assert!(!repos.is_empty());

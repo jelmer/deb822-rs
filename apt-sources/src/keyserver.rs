@@ -203,18 +203,18 @@ UqZBMYWFftpFkh5E5FGqs7kO
         let fingerprint_with_spaces = fingerprint
             .chars()
             .enumerate()
-            .map(|(i, c)| if i > 0 && i % 4 == 0 { format!(" {}", c) } else { c.to_string() })
+            .map(|(i, c)| {
+                if i > 0 && i % 4 == 0 {
+                    format!(" {}", c)
+                } else {
+                    c.to_string()
+                }
+            })
             .collect::<String>();
-        assert!(verify_key_fingerprint(
-            key_data,
-            &fingerprint_with_spaces
-        )
-        .is_ok());
+        assert!(verify_key_fingerprint(key_data, &fingerprint_with_spaces).is_ok());
 
         // Test lowercase
-        assert!(
-            verify_key_fingerprint(key_data, &fingerprint.to_lowercase()).is_ok()
-        );
+        assert!(verify_key_fingerprint(key_data, &fingerprint.to_lowercase()).is_ok());
 
         // Test short fingerprint (last 16 chars)
         assert!(verify_key_fingerprint(key_data, &fingerprint[fingerprint.len() - 16..]).is_ok());
