@@ -11,15 +11,25 @@ keywords = ["debian", "deb822", "rfc822", "edit", "apt"]
 categories = ["parser-implementations"]
 
 [features]
-default = []
+default = ["lossless", "legacy"]
+lossless = []
 keyserver = ["dep:sequoia-openpgp", "dep:sequoia-net", "dep:tokio"]
+legacy = ["dep:regex"]
 
 [dependencies]
-deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = ["derive"] }
+deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = [
+    "derive",
+] }
 url = { version = "2.5.4", features = ["serde"] }
+url-macro = { version = "0.2.0" }
 sequoia-net = { version = "0.30", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt", "macros"], optional = true }
-sequoia-openpgp = { version = "2.0", default-features = false, features = ["compression-deflate", "crypto-openssl"], optional = true }
+sequoia-openpgp = { version = "2.0", default-features = false, features = [
+    "compression-deflate",
+    "crypto-openssl",
+], optional = true }
+regex = { version = "1.11.1", optional = true }
+itertools = { version = "0.14.0" }
 
 [dev-dependencies]
 indoc = { version = "2.0.6" }

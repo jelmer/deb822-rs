@@ -2,6 +2,8 @@
 //! It intends to address error handling in meaningful manner, less vague than just passing
 //! `String` as error.
 
+use std::convert::Infallible;
+
 /// Errors for APT sources parsing and conversion to `Repository`
 #[derive(Debug)]
 pub enum RepositoryError {
@@ -15,10 +17,18 @@ pub enum RepositoryError {
     InvalidType,
     /// The `Signed-By` field is incorrect
     InvalidSignature,
+    /// The Yes/No/Force field has invalid/unexpected value
+    YesNoForceFieldInvalid,
+    /// The Yes/No field has invalid/unexpected value
+    YesNoFieldInvalid,
+    /// The field in the parsed data is not recognized (check `man sources.list`)
+    UnrecognizedFieldName,
     /// Errors in lossy serializer or deserializer
     Lossy(deb822_fast::Error),
     /// I/O Error
     Io(std::io::Error),
+    /// URL Error
+    Url(url::ParseError),
 }
 
 impl From<std::io::Error> for RepositoryError {
@@ -27,16 +37,31 @@ impl From<std::io::Error> for RepositoryError {
     }
 }
 
+impl From<url::ParseError> for RepositoryError {
+    fn from(e: url::ParseError) -> Self {
+        Self::Url(e)
+    }
+}
+
 impl std::fmt::Display for RepositoryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        // Spare longer messages to split lines by `rustfmt`
+        const YNFERRMSG: &str = "The field requiring only `Yes`/`No`/`Force` values is incorrect";
+        const YNERRMSG: &str = "The field requiring only `Yes`/`No` values is incorrect";
+        const UFNERRMSG: &str =
+            "The field in the parsed data is not recognized (check `man sources.list`)";
         match self {
             Self::InvalidFormat => write!(f, "Invalid repository format"),
             Self::InvalidUri => write!(f, "Invalid repository URI"),
             Self::MissingUri => write!(f, "Missing repository URI"),
             Self::InvalidType => write!(f, "Invalid repository type"),
             Self::InvalidSignature => write!(f, "The field `Signed-By` is incorrect"),
+            Self::YesNoForceFieldInvalid => f.write_str(YNFERRMSG),
+            Self::YesNoFieldInvalid => f.write_str(YNERRMSG),
+            Self::UnrecognizedFieldName => f.write_str(UFNERRMSG),
             Self::Lossy(e) => write!(f, "Lossy parser error: {}", e),
             Self::Io(e) => write!(f, "IO error: {}", e),
+            Self::Url(e) => write!(f, "URL parse error: {}", e),
         }
     }
 }
