@@ -87,9 +87,13 @@ impl From<&RepositoryType> for String {
     }
 }
 
-impl ToString for RepositoryType {
-    fn to_string(&self) -> String {
-        self.into()
+impl Display for RepositoryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            RepositoryType::Binary => "deb",
+            RepositoryType::Source => "deb-src",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -127,43 +131,52 @@ impl From<&YesNoForce> for String {
     }
 }
 
-impl Display for YesNoForce {
+impl std::fmt::Display for YesNoForce {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            YesNoForce::Yes => write!(f, "yes"),
-            YesNoForce::No => write!(f, "no"),
-            YesNoForce::Force => write!(f, "force"),
-        }
+        let s = match self {
+            YesNoForce::Yes => "yes",
+            YesNoForce::No => "no",
+            YesNoForce::Force => "force",
+        };
+        f.write_str(s)
     }
 }
 
 fn deserialize_types(text: &str) -> Result<HashSet<RepositoryType>, RepositoryError> {
     text.split_whitespace()
-        .map(|t| RepositoryType::from_str(t))
+        .map(RepositoryType::from_str)
         .collect::<Result<HashSet<RepositoryType>, RepositoryError>>()
 }
 
 fn serialize_types(files: &HashSet<RepositoryType>) -> String {
-    files
-        .into_iter()
-        .map(|rt| rt.to_string())
-        .collect::<Vec<String>>()
-        .join("\n")
+    use std::fmt::Write;
+    let mut result = String::new();
+    for (i, rt) in files.iter().enumerate() {
+        if i > 0 {
+            result.push('\n');
+        }
+        write!(&mut result, "{}", rt).unwrap();
+    }
+    result
 }
 
 fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
     // TODO: bad error type
     text.split_whitespace()
-        .map(|u| Url::from_str(u))
+        .map(Url::from_str)
         .collect::<Result<Vec<Url>, _>>()
         .map_err(|e| e.to_string()) // TODO: bad error type
 }
 
 fn serialize_uris(uris: &[Url]) -> String {
-    uris.into_iter()
-        .map(|u| u.as_str())
-        .collect::<Vec<&str>>()
-        .join(" ")
+    let mut result = String::new();
+    for (i, uri) in uris.iter().enumerate() {
+        if i > 0 {
+            result.push(' ');
+        }
+        result.push_str(uri.as_str());
+    }
+    result
 }
 
 fn deserialize_string_chain(text: &str) -> Result<Vec<String>, String> {
@@ -182,9 +195,9 @@ fn deserialize_yesno(text: &str) -> Result<bool, String> {
 
 fn serializer_yesno(value: &bool) -> String {
     if *value {
-        "yes".to_owned()
+        "yes".to_string()
     } else {
-        "no".to_owned()
+        "no".to_string()
     }
 }
 
@@ -657,22 +670,24 @@ impl std::str::FromStr for Repositories {
 
         let repos = deb822
             .iter()
-            .map(|p| Repository::from_paragraph(p))
+            .map(Repository::from_paragraph)
             .collect::<Result<Vec<Repository>, Self::Err>>()?;
         Ok(Repositories(repos))
     }
 }
 
-impl ToString for Repositories {
-    fn to_string(&self) -> String {
-        self.0
+impl std::fmt::Display for Repositories {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let result = self
+            .0
             .iter()
             .map(|r| {
                 let p: deb822_fast::Paragraph = r.to_paragraph();
                 p.to_string()
             })
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n");
+        write!(f, "{}", result)
     }
 }
 
@@ -863,5 +878,171 @@ mod tests {
                 Signed-By: /usr/share/keyrings/jelmer.gpg
             "#}
         );
+    }
+
+    #[test]
+    fn test_yesnoforce_to_string() {
+        let yes = crate::YesNoForce::Yes;
+        assert_eq!((&yes).to_string(), "yes");
+
+        let no = crate::YesNoForce::No;
+        assert_eq!((&no).to_string(), "no");
+
+        let force = crate::YesNoForce::Force;
+        assert_eq!((&force).to_string(), "force");
+    }
+
+    #[test]
+    fn test_parse_legacy_line() {
+        let line = "deb http://archive.ubuntu.com/ubuntu jammy main restricted";
+        let repo = Repository::parse_legacy_line(line).unwrap();
+        assert_eq!(repo.types.len(), 1);
+        assert!(repo.types.contains(&RepositoryType::Binary));
+        assert_eq!(repo.uris.len(), 1);
+        assert_eq!(repo.uris[0].to_string(), "http://archive.ubuntu.com/ubuntu");
+        assert_eq!(repo.suites, vec!["jammy".to_string()]);
+        assert_eq!(
+            repo.components,
+            Some(vec!["main".to_string(), "restricted".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_parse_legacy_line_deb_src() {
+        let line = "deb-src http://archive.ubuntu.com/ubuntu jammy main";
+        let repo = Repository::parse_legacy_line(line).unwrap();
+        assert!(repo.types.contains(&RepositoryType::Source));
+        assert!(!repo.types.contains(&RepositoryType::Binary));
+    }
+
+    #[test]
+    fn test_parse_legacy_line_minimum_components() {
+        // Test with exactly 4 parts (minimum required)
+        let line = "deb http://example.com/debian stable main";
+        let repo = Repository::parse_legacy_line(line).unwrap();
+        assert_eq!(repo.components, Some(vec!["main".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_legacy_line_invalid() {
+        let line = "invalid line";
+        let result = Repository::parse_legacy_line(line);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_legacy_line_too_few_parts() {
+        // Test with < 4 parts
+        let line = "deb http://example.com/debian";
+        let result = Repository::parse_legacy_line(line);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Invalid repository line format");
+    }
+
+    #[test]
+    fn test_parse_legacy_line_invalid_type() {
+        let line = "invalid-type http://example.com/debian stable main";
+        let result = Repository::parse_legacy_line(line);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "Line must start with 'deb' or 'deb-src'"
+        );
+    }
+
+    #[test]
+    fn test_parse_legacy_line_invalid_uri() {
+        let line = "deb not-a-valid-uri stable main";
+        let result = Repository::parse_legacy_line(line);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Invalid URI");
+    }
+
+    #[test]
+    fn test_to_legacy_format_single_type() {
+        let repo = Repository {
+            types: HashSet::from([RepositoryType::Binary]),
+            uris: vec![Url::parse("http://example.com/debian").unwrap()],
+            suites: vec!["stable".to_string()],
+            components: Some(vec!["main".to_string()]),
+            ..Default::default()
+        };
+
+        let legacy = repo.to_legacy_format();
+        assert_eq!(legacy, "deb http://example.com/debian stable main\n");
+    }
+
+    #[test]
+    fn test_to_legacy_format_both_types() {
+        let repo = Repository {
+            types: HashSet::from([RepositoryType::Binary, RepositoryType::Source]),
+            uris: vec![Url::parse("http://example.com/debian").unwrap()],
+            suites: vec!["stable".to_string()],
+            components: Some(vec!["main".to_string(), "contrib".to_string()]),
+            ..Default::default()
+        };
+
+        let legacy = repo.to_legacy_format();
+        // Should contain both deb and deb-src lines
+        assert!(legacy.contains("deb http://example.com/debian stable main contrib"));
+        assert!(legacy.contains("deb-src http://example.com/debian stable main contrib"));
+    }
+
+    #[test]
+    fn test_to_legacy_format_multiple_uris_and_suites() {
+        let repo = Repository {
+            types: HashSet::from([RepositoryType::Binary]),
+            uris: vec![
+                Url::parse("http://example1.com/debian").unwrap(),
+                Url::parse("http://example2.com/debian").unwrap(),
+            ],
+            suites: vec!["stable".to_string(), "testing".to_string()],
+            components: Some(vec!["main".to_string()]),
+            ..Default::default()
+        };
+
+        let legacy = repo.to_legacy_format();
+        // Should generate a line for each URI/suite combination
+        assert!(legacy.contains("deb http://example1.com/debian stable main"));
+        assert!(legacy.contains("deb http://example1.com/debian testing main"));
+        assert!(legacy.contains("deb http://example2.com/debian stable main"));
+        assert!(legacy.contains("deb http://example2.com/debian testing main"));
+    }
+
+    #[test]
+    fn test_to_legacy_format_no_components() {
+        let repo = Repository {
+            types: HashSet::from([RepositoryType::Binary]),
+            uris: vec![Url::parse("http://example.com/debian").unwrap()],
+            suites: vec!["stable".to_string()],
+            components: None,
+            ..Default::default()
+        };
+
+        let legacy = repo.to_legacy_format();
+        assert_eq!(legacy, "deb http://example.com/debian stable\n");
+    }
+
+    #[test]
+    fn test_repository_type_display() {
+        assert_eq!(RepositoryType::Binary.to_string(), "deb");
+        assert_eq!(RepositoryType::Source.to_string(), "deb-src");
+    }
+
+    #[test]
+    fn test_yesnoforce_display() {
+        assert_eq!(crate::YesNoForce::Yes.to_string(), "yes");
+        assert_eq!(crate::YesNoForce::No.to_string(), "no");
+        assert_eq!(crate::YesNoForce::Force.to_string(), "force");
+    }
+
+    #[test]
+    fn test_repositories_is_empty() {
+        let empty_repos = Repositories::empty();
+        assert!(empty_repos.is_empty());
+
+        let mut repos = Repositories::empty();
+        repos.push(Repository::default());
+        assert!(!repos.is_empty());
     }
 }

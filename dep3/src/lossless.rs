@@ -244,6 +244,7 @@ impl std::str::FromStr for PatchHeader {
 #[cfg(test)]
 mod tests {
     use super::PatchHeader;
+    use std::borrow::Cow;
     use std::str::FromStr;
 
     #[test]
@@ -266,9 +267,9 @@ Bug-Debian: http://bugs.debian.org/510219
             header.origin(),
             Some((
                 Some(super::OriginCategory::Upstream),
-                super::Origin::Other(
-                    "http://sourceware.org/git/?p=glibc.git;a=commitdiff;h=bdb56bac".to_string()
-                )
+                super::Origin::Other(Cow::Borrowed(
+                    "http://sourceware.org/git/?p=glibc.git;a=commitdiff;h=bdb56bac"
+                ))
             ))
         );
         assert_eq!(header.forwarded(), None);
@@ -314,9 +315,9 @@ Last-Update: 2006-12-21
         assert_eq!(header.origin(), None);
         assert_eq!(
             header.forwarded(),
-            Some(super::Forwarded::Yes(
-                "http://lists.example.com/oct-2006/1234.html".to_string()
-            ))
+            Some(super::Forwarded::Yes(Cow::Borrowed(
+                "http://lists.example.com/oct-2006/1234.html"
+            )))
         );
         assert_eq!(
             header.author(),
@@ -352,9 +353,9 @@ Author: Thiemo Seufer <ths@debian.org>
             header.origin(),
             Some((
                 Some(super::OriginCategory::Vendor),
-                super::Origin::Other(
-                    "http://bugs.debian.org/cgi-bin/bugreport.cgi?msg=80;bug=265678".to_string()
-                )
+                super::Origin::Other(Cow::Borrowed(
+                    "http://bugs.debian.org/cgi-bin/bugreport.cgi?msg=80;bug=265678"
+                ))
             ))
         );
         assert_eq!(header.forwarded(), Some(super::Forwarded::NotNeeded));
@@ -393,9 +394,9 @@ Last-Update: 2010-03-29
         assert_eq!(header.origin(), None);
         assert_eq!(
             header.forwarded(),
-            Some(super::Forwarded::Yes(
-                "http://lists.example.com/2010/03/1234.html".to_string()
-            ))
+            Some(super::Forwarded::Yes(Cow::Borrowed(
+                "http://lists.example.com/2010/03/1234.html"
+            )))
         );
         assert_eq!(
             header.author(),
@@ -408,9 +409,9 @@ Last-Update: 2010-03-29
         );
         assert_eq!(
             header.applied_upstream(),
-            Some(super::AppliedUpstream::Other(
-                "1.2, http://bzr.example.com/frobnicator/trunk/revision/123".to_string()
-            ))
+            Some(super::AppliedUpstream::Other(Cow::Borrowed(
+                "1.2, http://bzr.example.com/frobnicator/trunk/revision/123"
+            )))
         );
         assert_eq!(header.bugs().collect::<Vec<_>>(), vec![]);
         assert_eq!(
@@ -437,5 +438,15 @@ Bug-Ubuntu: http://bugs.launchpad.net/123
             header.vendor_bugs("Ubuntu").collect::<Vec<_>>(),
             vec!["http://bugs.launchpad.net/123".to_string()]
         );
+    }
+
+    #[test]
+    fn test_set_last_update() {
+        let text = r#"Description: Fix widget frobnication speeds
+"#;
+        let mut header = PatchHeader::from_str(&text).unwrap();
+        let date = chrono::NaiveDate::from_ymd_opt(2023, 5, 15).unwrap();
+        header.set_last_update(date);
+        assert_eq!(header.last_update(), Some(date));
     }
 }

@@ -1,6 +1,5 @@
 //! Version Control System information
 use regex::Regex;
-use std::borrow::Cow;
 use std::str::FromStr;
 
 /// Parsed VCS information
@@ -20,24 +19,27 @@ impl FromStr for ParsedVcs {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut s: Cow<str> = s.trim().into();
+        let s = s.trim();
         let mut subpath: Option<String> = None;
         let branch: Option<String>;
         let repo_url: String;
         let re = Regex::new(r" \[([^] ]+)\]").unwrap();
 
-        if let Some(ref m) = re.find(s.as_ref()) {
-            subpath = Some(m.as_str()[2..m.as_str().len() - 1].to_string());
-            s = Cow::Owned([s[..m.start()].to_string(), s[m.end()..].to_string()].concat());
-        }
+        let remaining = if let Some(m) = re.find(s) {
+            let substr = &m.as_str()[2..m.as_str().len() - 1];
+            subpath = Some(substr.to_string());
+            format!("{}{}", &s[..m.start()], &s[m.end()..])
+        } else {
+            s.to_string()
+        };
 
-        if let Some(index) = s.find(" -b ") {
-            let (url, branch_str) = s.split_at(index);
+        if let Some(index) = remaining.find(" -b ") {
+            let (url, branch_str) = remaining.split_at(index);
             branch = Some(branch_str[4..].to_string());
             repo_url = url.to_string();
         } else {
             branch = None;
-            repo_url = s.to_string();
+            repo_url = remaining;
         }
 
         Ok(ParsedVcs {
@@ -170,7 +172,7 @@ impl Vcs {
             } => (
                 "Git",
                 ParsedVcs {
-                    repo_url: repo_url.to_string(),
+                    repo_url: repo_url.clone(),
                     branch: branch.clone(),
                     subpath: subpath.clone(),
                 }
@@ -178,29 +180,28 @@ impl Vcs {
             ),
             Vcs::Bzr { repo_url, subpath } => (
                 "Bzr",
-                if let Some(subpath) = subpath {
-                    format!("{} [{}]", repo_url, subpath)
-                } else {
-                    repo_url.to_string()
+                match subpath {
+                    Some(subpath) => format!("{} [{}]", repo_url, subpath),
+                    None => repo_url.clone(),
                 },
             ),
-            Vcs::Hg { repo_url } => ("Hg", repo_url.to_string()),
-            Vcs::Svn { url } => ("Svn", url.to_string()),
-            Vcs::Cvs { root, module } => ("Cvs", {
-                if let Some(module) = module {
-                    format!("{} {}", root, module)
-                } else {
-                    root.to_string()
-                }
-            }),
+            Vcs::Hg { repo_url } => ("Hg", repo_url.clone()),
+            Vcs::Svn { url } => ("Svn", url.clone()),
+            Vcs::Cvs { root, module } => (
+                "Cvs",
+                match module {
+                    Some(module) => format!("{} {}", root, module),
+                    None => root.clone(),
+                },
+            ),
         }
     }
 
     /// Extract the subpath from the VCS information
-    pub fn subpath(&self) -> Option<String> {
+    pub fn subpath(&self) -> Option<&str> {
         match self {
-            Vcs::Git { subpath, .. } => subpath.clone(),
-            Vcs::Bzr { subpath, .. } => subpath.clone(),
+            Vcs::Git { subpath, .. } => subpath.as_deref(),
+            Vcs::Bzr { subpath, .. } => subpath.as_deref(),
             _ => None,
         }
     }
@@ -217,9 +218,9 @@ impl Vcs {
             Vcs::Bzr {
                 repo_url,
                 subpath: _,
-            } => Some(repo_url.clone()),
-            Vcs::Hg { repo_url } => Some(repo_url.clone()),
-            Vcs::Svn { url } => Some(url.clone()),
+            } => Some(repo_url.to_string()),
+            Vcs::Hg { repo_url } => Some(repo_url.to_string()),
+            Vcs::Svn { url } => Some(url.to_string()),
             _ => None,
         }
     }

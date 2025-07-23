@@ -1348,4 +1348,90 @@ Multi-Arch: same
         );
         assert_eq!(318, release.checksums_md5().len());
     }
+
+    #[test]
+    fn test_source_vcs_arch() {
+        let s = r#"Package: foo
+Version: 1.0
+Vcs-Arch: https://example.com/arch/repo
+"#;
+        let p: super::Source = s.parse().unwrap();
+        assert_eq!(
+            p.vcs_arch(),
+            Some("https://example.com/arch/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn test_source_vcs_cvs() {
+        let s = r#"Package: foo
+Version: 1.0
+Vcs-Cvs: :pserver:anoncvs@example.com:/cvs/repo
+"#;
+        let p: super::Source = s.parse().unwrap();
+        assert_eq!(
+            p.vcs_cvs(),
+            Some(":pserver:anoncvs@example.com:/cvs/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn test_source_set_priority() {
+        let s = r#"Package: foo
+Version: 1.0
+Priority: optional
+"#;
+        let mut p: super::Source = s.parse().unwrap();
+        p.set_priority(super::Priority::Required);
+        assert_eq!(p.priority(), Some(super::Priority::Required));
+    }
+
+    #[test]
+    fn test_release_set_suite() {
+        let s = r#"Origin: Debian
+Label: Debian
+Suite: testing
+"#;
+        let mut release: super::Release = s.parse().unwrap();
+        release.set_suite("unstable");
+        assert_eq!(release.suite(), Some("unstable".to_string()));
+    }
+
+    #[test]
+    fn test_release_codename() {
+        let s = r#"Origin: Debian
+Label: Debian
+Suite: testing
+Codename: trixie
+"#;
+        let release: super::Release = s.parse().unwrap();
+        assert_eq!(release.codename(), Some("trixie".to_string()));
+    }
+
+    #[test]
+    fn test_release_set_checksums_sha512() {
+        let s = r#"Origin: Debian
+Label: Debian
+Suite: testing
+"#;
+        let mut release: super::Release = s.parse().unwrap();
+        let checksums = vec![super::Sha512Checksum {
+            sha512: "abc123".to_string(),
+            size: 1234,
+            filename: "test.deb".to_string(),
+        }];
+        release.set_checksums_sha512(checksums);
+        assert_eq!(release.checksums_sha512().len(), 1);
+    }
+
+    #[test]
+    fn test_package_set_replaces() {
+        let s = r#"Package: foo
+Version: 1.0
+"#;
+        let mut p: super::Package = s.parse().unwrap();
+        let relations: Relations = "bar (>= 1.0.0)".parse().unwrap();
+        p.set_replaces(relations);
+        assert_eq!(p.replaces(), Some("bar (>= 1.0.0)".parse().unwrap()));
+    }
 }

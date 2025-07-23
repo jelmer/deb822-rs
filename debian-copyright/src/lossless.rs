@@ -503,4 +503,59 @@ the Free Software Foundation, either version 3 of the License, or
         let gpl = copyright.find_license_for_file(std::path::Path::new("debian/foo.c"));
         assert_eq!(gpl.unwrap().name().unwrap(), "GPL-3+");
     }
+
+    #[test]
+    fn test_from_str_relaxed() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: foo
+Source: https://example.com/foo
+
+Files: *
+Copyright: 2020 Joe Bloggs <joe@example.com>
+License: GPL-3+
+"#;
+        let (copyright, errors) = super::Copyright::from_str_relaxed(s).unwrap();
+        assert!(errors.is_empty());
+        assert_eq!("foo", copyright.header().unwrap().upstream_name().unwrap());
+    }
+
+    #[test]
+    fn test_from_file_relaxed() {
+        let tmpfile = std::env::temp_dir().join("test_copyright.txt");
+        std::fs::write(
+            &tmpfile,
+            r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: foo
+Source: https://example.com/foo
+
+Files: *
+Copyright: 2020 Joe Bloggs <joe@example.com>
+License: GPL-3+
+"#,
+        )
+        .unwrap();
+        let (copyright, errors) = super::Copyright::from_file_relaxed(&tmpfile).unwrap();
+        assert!(errors.is_empty());
+        assert_eq!("foo", copyright.header().unwrap().upstream_name().unwrap());
+        std::fs::remove_file(&tmpfile).unwrap();
+    }
+
+    #[test]
+    fn test_header_set_upstream_contact() {
+        let copyright = super::Copyright::new();
+        let mut header = copyright.header().unwrap();
+        header.set_upstream_contact("Test Person <test@example.com>");
+        assert_eq!(
+            header.upstream_contact().unwrap(),
+            "Test Person <test@example.com>"
+        );
+    }
+
+    #[test]
+    fn test_header_set_source() {
+        let copyright = super::Copyright::new();
+        let mut header = copyright.header().unwrap();
+        header.set_source("https://example.com/source");
+        assert_eq!(header.source().unwrap(), "https://example.com/source");
+    }
 }

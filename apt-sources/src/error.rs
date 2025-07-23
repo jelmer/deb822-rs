@@ -49,3 +49,43 @@ impl std::fmt::Display for RepositoryError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_repository_error_display() {
+        // Test each error variant
+        assert_eq!(
+            RepositoryError::InvalidFormat.to_string(),
+            "Invalid repository format"
+        );
+        assert_eq!(
+            RepositoryError::InvalidUri.to_string(),
+            "Invalid repository URI"
+        );
+        assert_eq!(
+            RepositoryError::MissingUri.to_string(),
+            "Missing repository URI"
+        );
+        assert_eq!(
+            RepositoryError::InvalidType.to_string(),
+            "Invalid repository type"
+        );
+        assert_eq!(
+            RepositoryError::InvalidSignature.to_string(),
+            "The field `Signed-By` is incorrect"
+        );
+
+        // Test lossy error
+        let lossy_err = deb822_fast::Error::UnexpectedEof;
+        let repo_err = RepositoryError::Lossy(lossy_err);
+        assert!(repo_err.to_string().contains("Lossy parser error:"));
+
+        // Test IO error
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let repo_err = RepositoryError::from(io_err);
+        assert!(repo_err.to_string().contains("IO error:"));
+    }
+}

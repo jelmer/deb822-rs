@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 /// Whether the patch has been forwarded to the upstream project.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Forwarded {
@@ -9,7 +11,7 @@ pub enum Forwarded {
 
     /// The patch has been forwarded to the upstream project, and the value
     /// provides some reference to the forwarded patch.
-    Yes(String),
+    Yes(Cow<'static, str>),
 }
 
 impl std::fmt::Display for Forwarded {
@@ -29,7 +31,7 @@ impl std::str::FromStr for Forwarded {
         match s {
             "no" => Ok(Forwarded::No),
             "not-needed" => Ok(Forwarded::NotNeeded),
-            s => Ok(Forwarded::Yes(s.to_string())),
+            s => Ok(Forwarded::Yes(Cow::Owned(s.to_string()))),
         }
     }
 }
@@ -77,17 +79,17 @@ impl std::str::FromStr for OriginCategory {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Origin {
     /// The patch was cherry-picked from the upstream VCS
-    Commit(String),
+    Commit(Cow<'static, str>),
 
     /// Some other origin
-    Other(String),
+    Other(Cow<'static, str>),
 }
 
 impl std::fmt::Display for Origin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Origin::Commit(s) => write!(f, "commit:{}", s),
-            Origin::Other(s) => f.write_str(&s.to_string()),
+            Origin::Other(s) => f.write_str(s),
         }
     }
 }
@@ -97,9 +99,9 @@ impl std::str::FromStr for Origin {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(rest) = s.strip_prefix("commit:") {
-            Ok(Origin::Commit(rest.to_string()))
+            Ok(Origin::Commit(Cow::Owned(rest.to_string())))
         } else {
-            Ok(Origin::Other(s.to_string()))
+            Ok(Origin::Other(Cow::Owned(s.to_string())))
         }
     }
 }
@@ -108,17 +110,17 @@ impl std::str::FromStr for Origin {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum AppliedUpstream {
     /// The patch has not been applied in the upstream project, in the specified commit.
-    Commit(String),
+    Commit(Cow<'static, str>),
 
     /// The patch has been applied in the upstream project, in the specified reference.
-    Other(String),
+    Other(Cow<'static, str>),
 }
 
 impl std::fmt::Display for AppliedUpstream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AppliedUpstream::Commit(s) => write!(f, "commit:{}", s),
-            AppliedUpstream::Other(s) => f.write_str(&s.to_string()),
+            AppliedUpstream::Other(s) => f.write_str(s),
         }
     }
 }
@@ -128,9 +130,9 @@ impl std::str::FromStr for AppliedUpstream {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(rest) = s.strip_prefix("commit:") {
-            Ok(AppliedUpstream::Commit(rest.to_string()))
+            Ok(AppliedUpstream::Commit(Cow::Owned(rest.to_string())))
         } else {
-            Ok(AppliedUpstream::Other(s.to_string()))
+            Ok(AppliedUpstream::Other(Cow::Owned(s.to_string())))
         }
     }
 }
@@ -148,9 +150,9 @@ pub(crate) fn parse_origin(s: &str) -> (Option<OriginCategory>, Origin) {
     };
 
     if let Some(rest) = s.strip_prefix("commit:") {
-        (category, Origin::Commit(rest.to_string()))
+        (category, Origin::Commit(Cow::Owned(rest.to_string())))
     } else {
-        (category, Origin::Other(s.to_string()))
+        (category, Origin::Other(Cow::Owned(s.to_string())))
     }
 }
 
@@ -160,4 +162,25 @@ pub(crate) fn format_origin(category: &Option<OriginCategory>, origin: &Origin) 
         category.map(|c| c.to_string() + ", ").unwrap_or_default(),
         origin
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_forwarded_display() {
+        assert_eq!(Forwarded::No.to_string(), "no");
+        assert_eq!(Forwarded::Yes(Cow::Borrowed("url")).to_string(), "url");
+        assert_eq!(Forwarded::NotNeeded.to_string(), "not-needed");
+    }
+
+    #[test]
+    fn test_applied_upstream_display() {
+        let commit = AppliedUpstream::Commit(Cow::Borrowed("abc123"));
+        assert_eq!(commit.to_string(), "commit:abc123");
+
+        let other = AppliedUpstream::Other(Cow::Borrowed("merged"));
+        assert_eq!(other.to_string(), "merged");
+    }
 }

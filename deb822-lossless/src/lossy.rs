@@ -116,7 +116,8 @@ impl Paragraph {
     pub fn set(&mut self, name: &str, value: &str) {
         for field in &mut self.fields {
             if field.name == name {
-                field.value = value.to_string();
+                field.value.clear();
+                field.value.push_str(value);
                 return;
             }
         }
