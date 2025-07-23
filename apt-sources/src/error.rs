@@ -2,8 +2,6 @@
 //! It intends to address error handling in meaningful manner, less vague than just passing
 //! `String` as error.
 
-use std::convert::Infallible;
-
 /// Errors for APT sources parsing and conversion to `Repository`
 #[derive(Debug)]
 pub enum RepositoryError {
