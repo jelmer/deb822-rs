@@ -37,6 +37,7 @@
 use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 //use deb822_lossless::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 use error::RepositoryError;
+use itertools::Itertools;
 use signature::Signature;
 use std::borrow::Borrow;
 use std::result::Result;
@@ -149,39 +150,32 @@ fn deserialize_types(text: &str) -> Result<HashSet<RepositoryType>, RepositoryEr
 }
 
 fn serialize_types(files: &HashSet<RepositoryType>) -> String {
-    use std::fmt::Write;
-    let mut result = String::new();
-    for (i, rt) in files.iter().enumerate() {
-        if i > 0 {
-            result.push('\n');
-        }
-        write!(&mut result, "{}", rt).unwrap();
-    }
-    result
+    files.iter().map(|rt| rt.to_string()).join("\n")
+    // use std::fmt::Write;
+    // let mut result = String::new();
+    // for (i, rt) in files.iter().enumerate() {
+    //     if i > 0 {
+    //         result.push('\n');
+    //     }
+    //     write!(&mut result, "{}", rt).unwrap();
+    // }
+    // result
 }
 
-fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
-    // TODO: bad error type
+fn deserialize_uris(text: &str) -> Result<Vec<Url>, RepositoryError> {
     text.split_whitespace()
         .map(Url::from_str)
         .collect::<Result<Vec<Url>, _>>()
-        .map_err(|e| e.to_string()) // TODO: bad error type
+        .map_err(|e| e.into())
 }
 
 fn serialize_uris(uris: &[Url]) -> String {
-    let mut result = String::new();
-    for (i, uri) in uris.iter().enumerate() {
-        if i > 0 {
-            result.push(' ');
-        }
-        result.push_str(uri.as_str());
-    }
-    result
+    uris.iter().map(|u| u.as_str()).join(" ")
 }
 
-fn deserialize_string_chain(text: &str) -> Result<Vec<String>, String> {
+fn deserialize_string_chain(text: &str) -> Result<Vec<String>, RepositoryError> {
     // TODO: bad error type
-    Ok(text.split_whitespace().map(|x| x.to_string()).collect())
+    Ok(text.split_whitespace().map(|x| x.into()).collect())
 }
 
 fn deserialize_yesno(text: &str) -> Result<bool, String> {
