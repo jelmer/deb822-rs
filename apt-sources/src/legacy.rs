@@ -251,25 +251,114 @@ impl Deref for LegacyRepositories {
     }
 }
 
+impl From<&LegacyRepository> for super::Repository {
+    fn from(original: &LegacyRepository) -> Self {
+        Self {
+            enabled: Some(original.enabled), // TODO: more valid one would be if true -> None else `Some(false)`...
+            types: HashSet::from([original.typ.clone()]),
+            uris: vec![original.uri.clone()],
+            suites: vec![original.suite.clone()],
+            components: original.components.clone().into(),
+            architectures: original.architectures.clone(),
+            languages: (!original.languages.is_empty()).then_some(original.languages.clone()),
+            targets: (!original.targets.is_empty()).then_some(original.targets.clone()),
+            pdiffs: original.pdiffs,
+            by_hash: original.by_hash,
+            allow_insecure: original.allow_insecure.then_some(true),
+            allow_weak: original.allow_weak.then_some(true),
+            allow_downgrade_to_insecure: original.allow_downgrade_to_insecure.then_some(true),
+            trusted: original.trusted,
+            signature: original.signature.clone(),
+            x_repolib_name: original.x_repolib_name.clone(),
+            description: original.description.clone(),
+        }
+    }
+}
+
+impl From<LegacyRepository> for super::Repository {
+    fn from(original: LegacyRepository) -> Self {
+        Self {
+            enabled: Some(original.enabled), // TODO: more valid one would be if true -> None else `Some(false)`...
+            types: HashSet::from([original.typ]),
+            uris: vec![original.uri],
+            suites: vec![original.suite],
+            components: original.components.into(),
+            architectures: original.architectures,
+            languages: (!original.languages.is_empty()).then_some(original.languages),
+            targets: (!original.targets.is_empty()).then_some(original.targets),
+            pdiffs: original.pdiffs,
+            by_hash: original.by_hash,
+            allow_insecure: original.allow_insecure.then_some(true),
+            allow_weak: original.allow_weak.then_some(true),
+            allow_downgrade_to_insecure: original.allow_downgrade_to_insecure.then_some(true),
+            trusted: original.trusted,
+            signature: original.signature,
+            x_repolib_name: original.x_repolib_name,
+            description: original.description,
+        }
+    }
+}
+
+impl From<&LegacyRepositories> for super::Repositories {
+    fn from(original: &LegacyRepositories) -> Self {
+        Self(original.iter().map(|v| v.into()).collect())
+    }
+}
+
+impl From<LegacyRepositories> for super::Repositories {
+    fn from(original: LegacyRepositories) -> Self {
+        Self(original.0.into_iter().map(|v| v.into()).collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::Repository;
+
     use super::*;
     use indoc::indoc;
 
+    const SAMPLE: &str = indoc!("
+        deb [arch=arm64 signed-by=/usr/share/keyrings/rcn-ee-archive-keyring.gpg] http://debian.beagleboard.org/arm64/ jammy main
+    ");
+
+    fn golden_sample() -> Repository {
+        // TODO: qualifies for lazy_static
+        Repository {
+            enabled: Some(true), // TODO: looks odd, as only `Enabled: no` in meaningful
+            types: HashSet::from([RepositoryType::Binary]),
+            architectures: vec!["arm64".to_owned()],
+            uris: vec![Url::from_str("http://debian.beagleboard.org/arm64/").unwrap()],
+            suites: vec!["jammy".to_owned()],
+            components: Some(vec!["main".to_owned()]),
+            signature: Some(Signature::KeyPath(PathBuf::from(
+                "/usr/share/keyrings/rcn-ee-archive-keyring.gpg",
+            ))),
+            x_repolib_name: None,
+            languages: None,
+            targets: None,
+            pdiffs: None,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn test_legacy_repositories_from_str() {
-        const SAMPLE: &str = indoc!("
-            deb [arch=arm64 signed-by=/usr/share/keyrings/rcn-ee-archive-keyring.gpg] http://debian.beagleboard.org/arm64/ jammy main
-        ");
-
         let repositories =
             LegacyRepositories::from_str(SAMPLE).expect("Shall not fail for correct list entry!");
 
         assert_eq!(repositories.len(), 1);
-
         let repository = repositories.iter().nth(0).unwrap();
 
         assert_eq!(repository.enabled, true);
+        assert_eq!(repository.typ, RepositoryType::Binary);
+        assert_eq!(repository.architectures, vec!["arm64".to_owned()]);
+        assert_eq!(
+            repository.signature,
+            Some(Signature::KeyPath(
+                PathBuf::from_str("/usr/share/keyrings/rcn-ee-archive-keyring.gpg").unwrap()
+            ))
+        );
         assert_eq!(repository.typ, RepositoryType::Binary);
         assert_eq!(repository.uri, url!("http://debian.beagleboard.org/arm64/"));
         assert_eq!(repository.suite, "jammy".to_owned());
@@ -286,5 +375,33 @@ mod tests {
         //     ])
         // );
         // assert_eq!(repository.format, RepositoryFormat::List);
+    }
+
+    #[test]
+    fn test_conversion_from_legacy_to_deb822() {
+        let repositories =
+            LegacyRepositories::from_str(SAMPLE).expect("Shall not fail for correct list entry!");
+
+        assert_eq!(repositories.len(), 1);
+        let legacy_repository = repositories.iter().nth(0).unwrap();
+
+        let deb822_repository = Repository::from(legacy_repository);
+        let golden_sample = golden_sample();
+
+        assert_eq!(golden_sample, deb822_repository);
+    }
+
+    #[test]
+    fn test_moving_conversion_from_legacy_to_deb822() {
+        let mut repositories =
+            LegacyRepositories::from_str(SAMPLE).expect("Shall not fail for correct list entry!");
+
+        assert_eq!(repositories.len(), 1);
+        let legacy_repository = repositories.0.pop().unwrap(); // TODO: To make it work for user we'd need `DerefMut` but I'm reluctant
+
+        let deb822_repository = Repository::from(legacy_repository);
+        let golden_sample = golden_sample();
+
+        assert_eq!(golden_sample, deb822_repository);
     }
 }

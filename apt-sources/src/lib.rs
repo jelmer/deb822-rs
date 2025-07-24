@@ -56,6 +56,8 @@ pub mod distribution;
 pub mod error;
 #[cfg(feature = "keyserver")]
 pub mod keyserver;
+#[cfg(feature = "legacy")]
+pub mod legacy;
 pub mod ppa;
 pub mod signature;
 /// Module for managing APT source lists
@@ -102,7 +104,7 @@ impl std::fmt::Display for RepositoryType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 /// Enumeration for fields like `By-Hash` which have third value of `force`
 pub enum YesNoForce {
     /// True
