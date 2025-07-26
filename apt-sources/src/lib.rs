@@ -45,6 +45,7 @@
 
 use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 use error::RepositoryError;
+use itertools::Itertools;
 use signature::Signature;
 use std::result::Result;
 use std::{collections::HashSet, ops::Deref, str::FromStr};
@@ -55,6 +56,8 @@ pub mod distribution;
 pub mod error;
 #[cfg(feature = "keyserver")]
 pub mod keyserver;
+#[cfg(feature = "legacy")]
+pub mod legacy;
 pub mod ppa;
 pub mod signature;
 /// Module for managing APT source lists
@@ -101,7 +104,7 @@ impl std::fmt::Display for RepositoryType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 /// Enumeration for fields like `By-Hash` which have third value of `force`
 pub enum YesNoForce {
     /// True
@@ -120,7 +123,7 @@ impl FromStr for YesNoForce {
             "yes" => Ok(Self::Yes),
             "no" => Ok(Self::No),
             "force" => Ok(Self::Force),
-            _ => Err(RepositoryError::InvalidType),
+            _ => Err(RepositoryError::YesNoForceFieldInvalid),
         }
     }
 }
@@ -153,15 +156,7 @@ fn deserialize_types(text: &str) -> Result<HashSet<RepositoryType>, RepositoryEr
 }
 
 fn serialize_types(files: &HashSet<RepositoryType>) -> String {
-    use std::fmt::Write;
-    let mut result = String::new();
-    for (i, rt) in files.iter().enumerate() {
-        if i > 0 {
-            result.push('\n');
-        }
-        write!(&mut result, "{}", rt).unwrap();
-    }
-    result
+    files.into_iter().map(|rt| rt.to_string()).join("\n")
 }
 
 fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
@@ -173,14 +168,7 @@ fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
 }
 
 fn serialize_uris(uris: &[Url]) -> String {
-    let mut result = String::new();
-    for (i, uri) in uris.iter().enumerate() {
-        if i > 0 {
-            result.push(' ');
-        }
-        result.push_str(uri.as_str());
-    }
-    result
+    uris.into_iter().map(|u| u.as_str()).join(" ")
 }
 
 fn deserialize_string_chain(text: &str) -> Result<Vec<String>, String> {
@@ -188,12 +176,12 @@ fn deserialize_string_chain(text: &str) -> Result<Vec<String>, String> {
     Ok(text.split_whitespace().map(|x| x.to_string()).collect())
 }
 
-fn deserialize_yesno(text: &str) -> Result<bool, String> {
+fn deserialize_yesno(text: &str) -> Result<bool, RepositoryError> {
     // TODO: bad error type
     match text {
         "yes" => Ok(true),
         "no" => Ok(false),
-        _ => Err("Invalid value for yes/no field".to_owned()),
+        _ => Err(RepositoryError::YesNoFieldInvalid),
     }
 }
 
@@ -451,7 +439,7 @@ impl std::fmt::Display for Repositories {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        write!(f, "{}", result)
+        f.write_str(&result)
     }
 }
 
