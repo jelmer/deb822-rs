@@ -8,8 +8,11 @@ use super::Signature;
 use super::YesNoForce;
 use itertools::Itertools;
 use regex::Regex;
+use std::borrow::Cow;
 use std::collections::HashSet;
+use std::fmt::Display;
 use std::ops::Deref;
+use std::ops::Not;
 use std::path::PathBuf;
 use std::str::FromStr;
 use url::Url;
@@ -205,9 +208,9 @@ impl FromStr for LegacyRepositories {
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let re = Regex::new(
-            r"(?x)^
+            r"(?xm)^
             (?P<type>deb|deb-src)\s+                   # Catch repository type
-            (?P<options>\[[^]]*])?\s+                  # Catch options
+            (\[(?P<options>[^]]*)]\s+)?                  # Catch options
             (?P<uri>\S+)\s+                            # Catch repository URI
             (?P<suite>\S+)\s+                          # Catch suite/distribution
             (?P<components>(?:(?P<component>\w+)\s?)+) # Catch components (multiple)
@@ -219,13 +222,11 @@ impl FromStr for LegacyRepositories {
             .map(|caps| {
                 let mut repository = LegacyRepository::default();
                 repository.typ = RepositoryType::from_str(&caps["type"])?;
-                // repository.options = caps["options"]
-                //     .trim_matches(|c| c == '[' || c == ']')
-                //     .split_whitespace()
-                //     .map(|o| o.splitn(2, '=').collect_tuple::<(&str, &str)>().unwrap())
-                //     .map(|(k, v)| (k.to_deb822_option(), v.to_owned()))
-                //     .collect();
-                caps["options"]
+                let options = caps
+                    .name("options")
+                    .and_then(|o| Some(o.as_str()))
+                    .unwrap_or("");
+                options
                     .trim_matches(|c| c == '[' || c == ']')
                     .split_whitespace()
                     .map(|o| o.splitn(2, '=').collect_tuple::<(&str, &str)>().unwrap()) // TODO: can we do something about `unwrap()`?
@@ -311,6 +312,80 @@ impl From<LegacyRepositories> for super::Repositories {
     }
 }
 
+fn option_output<O: AsRef<str> + Display>(name: &str, option: &[O]) -> Cow<'static, str> {
+    option
+        .is_empty()
+        .then(|| Cow::Borrowed(""))
+        .unwrap_or_else(|| Cow::Owned(format!("{name}={}", option.iter().join(","))))
+}
+
+impl Display for LegacyRepository {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.typ)?;
+        // TODO: all options if any
+
+        let options = vec![
+            option_output("arch", &self.architectures),
+            option_output("lang", &self.languages),
+            option_output("lang", &self.targets),
+            self.pdiffs
+                .and_then(|p| {
+                    Some(Cow::Owned(format!(
+                        "pdiff={}",
+                        p.then_some("yes").unwrap_or("no")
+                    )))
+                })
+                .unwrap_or(Cow::Borrowed("")),
+            self.by_hash
+                .and_then(|p| Some(Cow::Owned(format!("by-hash={}", p))))
+                .unwrap_or(Cow::Borrowed("")),
+            self.allow_insecure
+                .then(|| Cow::Owned(format!("allow-insecure=yes")))
+                .unwrap_or(Cow::Borrowed("")),
+            self.allow_weak
+                .then(|| Cow::Owned(format!("allow-weak=yes")))
+                .unwrap_or(Cow::Borrowed("")),
+            self.allow_downgrade_to_insecure
+                .then(|| Cow::Owned(format!("allow_downgrade_to_insecure=yes")))
+                .unwrap_or(Cow::Borrowed("")),
+            self.trusted
+                .and_then(|t| {
+                    Some(Cow::Owned(format!(
+                        "trusted={}",
+                        t.then_some("yes").unwrap_or("no")
+                    )))
+                })
+                .unwrap_or(Cow::Borrowed("")),
+            self.signature
+                .as_ref()
+                .and_then(|s| {
+                    if let Signature::KeyPath(ref p) = s {
+                        Some(Cow::Owned(format!("signed-by={}", p.display())))
+                    } else {
+                        panic!("Short format not supported!") // TODO: design bug of LegacyRepository!
+                    }
+                })
+                .unwrap_or(Cow::Borrowed("")),
+            self.x_repolib_name
+                .as_ref()
+                .and_then(|x| Some(Cow::Owned(format!("x-repolib-name={}", x))))
+                .unwrap_or(Cow::Borrowed("")),
+            self.description
+                .as_ref()
+                .and_then(|x| Some(Cow::Owned(format!("description={}", x)))) // TODO: serious doubts about feasibility as this is undocumented extension
+                .unwrap_or(Cow::Borrowed("")),
+        ];
+        let options = options.iter().filter(|s| !s.is_empty()).join(" ");
+        options
+            .is_empty()
+            .not()
+            .then(|| write!(f, " [{}]", options));
+        write!(f, " {}", self.uri)?;
+        write!(f, " {}", self.suite)?;
+        write!(f, " {}", self.components.join(" "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Repository;
@@ -318,9 +393,15 @@ mod tests {
     use super::*;
     use indoc::indoc;
 
-    const SAMPLE: &str = indoc!("
+    const LONG_SAMPLE: &str = indoc!("
         deb [arch=arm64 signed-by=/usr/share/keyrings/rcn-ee-archive-keyring.gpg] http://debian.beagleboard.org/arm64/ jammy main
     ");
+    const SHORT_SAMPLE: &str = indoc!(
+        "
+        deb http://archive.ubuntu.com/ubuntu jammy main restricted
+        deb-src http://archive.ubuntu.com/ubuntu jammy main restricted
+    "
+    );
 
     fn golden_sample() -> Repository {
         // TODO: qualifies for lazy_static
@@ -344,8 +425,8 @@ mod tests {
 
     #[test]
     fn test_legacy_repositories_from_str() {
-        let repositories =
-            LegacyRepositories::from_str(SAMPLE).expect("Shall not fail for correct list entry!");
+        let repositories = LegacyRepositories::from_str(LONG_SAMPLE)
+            .expect("Shall not fail for correct list entry!");
 
         assert_eq!(repositories.len(), 1);
         let repository = repositories.iter().nth(0).unwrap();
@@ -364,23 +445,29 @@ mod tests {
         assert_eq!(repository.suite, "jammy".to_owned());
         assert_eq!(repository.components, vec!["main".to_owned()]);
         assert_eq!(repository.x_repolib_name, None);
-        // assert_eq!(
-        //     repository.options,
-        //     HashMap::from([
-        //         (
-        //             "Signed-By".to_owned(),
-        //             "/usr/share/keyrings/rcn-ee-archive-keyring.gpg".to_owned()
-        //         ),
-        //         ("Architectures".to_owned(), "arm64".to_owned())
-        //     ])
-        // );
-        // assert_eq!(repository.format, RepositoryFormat::List);
+    }
+
+    #[test]
+    fn test_short_legacy_repositories_from_str() {
+        let repositories = LegacyRepositories::from_str(SHORT_SAMPLE)
+            .expect("Shall not fail for correct list entry!");
+
+        assert_eq!(repositories.len(), 2);
+        let bin_repository = repositories.iter().nth(0).unwrap();
+        let src_repository = repositories.iter().nth(1).unwrap();
+
+        assert_eq!(bin_repository.typ, RepositoryType::Binary);
+        assert_eq!(src_repository.typ, RepositoryType::Source);
+        assert_eq!(bin_repository.architectures.len(), 0);
+        assert_eq!(src_repository.architectures.len(), 0);
+        assert_eq!(bin_repository.components.len(), 2);
+        assert_eq!(src_repository.components.len(), 2);
     }
 
     #[test]
     fn test_conversion_from_legacy_to_deb822() {
-        let repositories =
-            LegacyRepositories::from_str(SAMPLE).expect("Shall not fail for correct list entry!");
+        let repositories = LegacyRepositories::from_str(LONG_SAMPLE)
+            .expect("Shall not fail for correct list entry!");
 
         assert_eq!(repositories.len(), 1);
         let legacy_repository = repositories.iter().nth(0).unwrap();
@@ -393,8 +480,8 @@ mod tests {
 
     #[test]
     fn test_moving_conversion_from_legacy_to_deb822() {
-        let mut repositories =
-            LegacyRepositories::from_str(SAMPLE).expect("Shall not fail for correct list entry!");
+        let mut repositories = LegacyRepositories::from_str(LONG_SAMPLE)
+            .expect("Shall not fail for correct list entry!");
 
         assert_eq!(repositories.len(), 1);
         let legacy_repository = repositories.0.pop().unwrap(); // TODO: To make it work for user we'd need `DerefMut` but I'm reluctant
@@ -403,5 +490,65 @@ mod tests {
         let golden_sample = golden_sample();
 
         assert_eq!(golden_sample, deb822_repository);
+    }
+
+    #[test]
+    fn test_display_of_simple_legacy_repository() {
+        let sample = LegacyRepository {
+            enabled: true,
+            typ: RepositoryType::Binary,
+            uri: url!("http://debian.beagleboard.org/arm64/"),
+            suite: "jammy".to_string(),
+            components: vec!["main".to_string()],
+            architectures: vec![],
+            languages: vec![],
+            targets: vec![],
+            pdiffs: None,
+            by_hash: None,
+            allow_insecure: false,
+            allow_weak: false,
+            allow_downgrade_to_insecure: false,
+            trusted: None,
+            signature: None,
+            x_repolib_name: None,
+            description: None,
+        };
+        let list_text = sample.to_string();
+
+        assert_eq!(
+            list_text,
+            "deb http://debian.beagleboard.org/arm64/ jammy main"
+        )
+    }
+
+    #[test]
+    fn test_display_of_legacy_repository_with_options() {
+        let sample = LegacyRepository {
+            enabled: true,
+            typ: RepositoryType::Binary,
+            uri: url!("http://debian.beagleboard.org/arm64/"),
+            suite: "jammy".to_string(),
+            components: vec!["main".to_string()],
+            architectures: vec!["amd64".to_string()],
+            languages: vec![],
+            targets: vec![],
+            pdiffs: None,
+            by_hash: None,
+            allow_insecure: false,
+            allow_weak: false,
+            allow_downgrade_to_insecure: false,
+            trusted: None,
+            signature: Some(Signature::KeyPath(PathBuf::from(
+                "/usr/share/keyrings/rcn-ee-archive-keyring.gpg",
+            ))), // TODO: `.list` supports only key files, no way to fit PGP block
+            x_repolib_name: None,
+            description: None,
+        };
+        let list_text = sample.to_string();
+
+        assert_eq!(
+            list_text,
+            "deb [arch=amd64 signed-by=/usr/share/keyrings/rcn-ee-archive-keyring.gpg] http://debian.beagleboard.org/arm64/ jammy main"
+        )
     }
 }
