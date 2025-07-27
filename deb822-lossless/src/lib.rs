@@ -7,7 +7,8 @@
 mod common;
 mod lex;
 mod lossless;
-pub use lossless::{Deb822, Error, Paragraph, ParseError};
+pub use lossless::{Deb822, Entry, Error, Paragraph, ParseError};
+pub use rowan::TextRange;
 
 /// The indentation to use when writing a deb822 file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
