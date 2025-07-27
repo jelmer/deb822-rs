@@ -783,7 +783,7 @@ impl Paragraph {
     }
 
     /// Returns an iterator over all entries in the paragraph.
-    fn entries(&self) -> impl Iterator<Item = Entry> + '_ {
+    pub fn entries(&self) -> impl Iterator<Item = Entry> + '_ {
         self.0.children().filter_map(Entry::cast)
     }
 
@@ -920,6 +920,62 @@ impl pyo3::FromPyObject<'_> for Paragraph {
 }
 
 impl Entry {
+    /// Returns the text range of this entry in the source text.
+    pub fn text_range(&self) -> rowan::TextRange {
+        self.0.text_range()
+    }
+
+    /// Returns the text range of the key (field name) in this entry.
+    pub fn key_range(&self) -> Option<rowan::TextRange> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|it| it.kind() == KEY)
+            .map(|it| it.text_range())
+    }
+
+    /// Returns the text range of the colon separator in this entry.
+    pub fn colon_range(&self) -> Option<rowan::TextRange> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|it| it.kind() == COLON)
+            .map(|it| it.text_range())
+    }
+
+    /// Returns the text range of the value portion (excluding the key and colon) in this entry.
+    /// This includes all VALUE tokens and any continuation lines.
+    pub fn value_range(&self) -> Option<rowan::TextRange> {
+        let value_tokens: Vec<_> = self
+            .0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .filter(|it| it.kind() == VALUE)
+            .collect();
+
+        if value_tokens.is_empty() {
+            return None;
+        }
+
+        let first = value_tokens.first().unwrap();
+        let last = value_tokens.last().unwrap();
+        Some(rowan::TextRange::new(
+            first.text_range().start(),
+            last.text_range().end(),
+        ))
+    }
+
+    /// Returns the text ranges of all individual value lines in this entry.
+    /// Multi-line values will return multiple ranges.
+    pub fn value_line_ranges(&self) -> Vec<rowan::TextRange> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .filter(|it| it.kind() == VALUE)
+            .map(|it| it.text_range())
+            .collect()
+    }
+
     /// Create a new entry with the given key and value.
     pub fn new(key: &str, value: &str) -> Entry {
         let mut builder = GreenNodeBuilder::new();
@@ -1807,5 +1863,151 @@ Maintainer: Bar Foo <bar@example.com>"#
             p.get_all("Maintainer").collect::<Vec<_>>(),
             vec!["Foo Bar <foo@example.com>", "Bar Foo <bar@example.com>"]
         );
+    }
+
+    #[test]
+    fn test_entry_ranges() {
+        let input = r#"Package: test-package
+Maintainer: Test User <test@example.com>
+Description: A simple test package
+ with multiple lines
+ of description text"#;
+
+        let deb822 = super::Deb822::from_str(input).unwrap();
+        let paragraph = deb822.paragraphs().next().unwrap();
+        let entries: Vec<_> = paragraph.entries().collect();
+
+        // Test first entry (Package)
+        let package_entry = &entries[0];
+        assert_eq!(package_entry.key(), Some("Package".to_string()));
+
+        // Test key_range
+        let key_range = package_entry.key_range().unwrap();
+        assert_eq!(
+            &input[key_range.start().into()..key_range.end().into()],
+            "Package"
+        );
+
+        // Test colon_range
+        let colon_range = package_entry.colon_range().unwrap();
+        assert_eq!(
+            &input[colon_range.start().into()..colon_range.end().into()],
+            ":"
+        );
+
+        // Test value_range
+        let value_range = package_entry.value_range().unwrap();
+        assert_eq!(
+            &input[value_range.start().into()..value_range.end().into()],
+            "test-package"
+        );
+
+        // Test text_range covers the whole entry
+        let text_range = package_entry.text_range();
+        assert_eq!(
+            &input[text_range.start().into()..text_range.end().into()],
+            "Package: test-package\n"
+        );
+
+        // Test single-line value_line_ranges
+        let value_lines = package_entry.value_line_ranges();
+        assert_eq!(value_lines.len(), 1);
+        assert_eq!(
+            &input[value_lines[0].start().into()..value_lines[0].end().into()],
+            "test-package"
+        );
+    }
+
+    #[test]
+    fn test_multiline_entry_ranges() {
+        let input = r#"Description: Short description
+ Extended description line 1
+ Extended description line 2"#;
+
+        let deb822 = super::Deb822::from_str(input).unwrap();
+        let paragraph = deb822.paragraphs().next().unwrap();
+        let entry = paragraph.entries().next().unwrap();
+
+        assert_eq!(entry.key(), Some("Description".to_string()));
+
+        // Test value_range spans all lines
+        let value_range = entry.value_range().unwrap();
+        let full_value = &input[value_range.start().into()..value_range.end().into()];
+        assert!(full_value.contains("Short description"));
+        assert!(full_value.contains("Extended description line 1"));
+        assert!(full_value.contains("Extended description line 2"));
+
+        // Test value_line_ranges gives individual lines
+        let value_lines = entry.value_line_ranges();
+        assert_eq!(value_lines.len(), 3);
+
+        assert_eq!(
+            &input[value_lines[0].start().into()..value_lines[0].end().into()],
+            "Short description"
+        );
+        assert_eq!(
+            &input[value_lines[1].start().into()..value_lines[1].end().into()],
+            "Extended description line 1"
+        );
+        assert_eq!(
+            &input[value_lines[2].start().into()..value_lines[2].end().into()],
+            "Extended description line 2"
+        );
+    }
+
+    #[test]
+    fn test_entries_public_access() {
+        let input = r#"Package: test
+Version: 1.0"#;
+
+        let deb822 = super::Deb822::from_str(input).unwrap();
+        let paragraph = deb822.paragraphs().next().unwrap();
+
+        // Test that entries() method is now public
+        let entries: Vec<_> = paragraph.entries().collect();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].key(), Some("Package".to_string()));
+        assert_eq!(entries[1].key(), Some("Version".to_string()));
+    }
+
+    #[test]
+    fn test_empty_value_ranges() {
+        let input = r#"EmptyField: "#;
+
+        let deb822 = super::Deb822::from_str(input).unwrap();
+        let paragraph = deb822.paragraphs().next().unwrap();
+        let entry = paragraph.entries().next().unwrap();
+
+        assert_eq!(entry.key(), Some("EmptyField".to_string()));
+
+        // Empty value should still have ranges
+        assert!(entry.key_range().is_some());
+        assert!(entry.colon_range().is_some());
+
+        // Empty value might not have value tokens
+        let value_lines = entry.value_line_ranges();
+        // This depends on how the parser handles empty values
+        // but we should not panic
+        assert!(value_lines.len() <= 1);
+    }
+
+    #[test]
+    fn test_range_ordering() {
+        let input = r#"Field: value"#;
+
+        let deb822 = super::Deb822::from_str(input).unwrap();
+        let paragraph = deb822.paragraphs().next().unwrap();
+        let entry = paragraph.entries().next().unwrap();
+
+        let key_range = entry.key_range().unwrap();
+        let colon_range = entry.colon_range().unwrap();
+        let value_range = entry.value_range().unwrap();
+        let text_range = entry.text_range();
+
+        // Verify ranges are in correct order
+        assert!(key_range.end() <= colon_range.start());
+        assert!(colon_range.end() <= value_range.start());
+        assert!(key_range.start() >= text_range.start());
+        assert!(value_range.end() <= text_range.end());
     }
 }
