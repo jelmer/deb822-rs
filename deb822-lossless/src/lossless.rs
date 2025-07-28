@@ -44,7 +44,7 @@ use std::str::FromStr;
 
 /// List of encountered syntax errors.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ParseError(Vec<String>);
+pub struct ParseError(pub Vec<String>);
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -116,13 +116,13 @@ use rowan::GreenNodeBuilder;
 
 /// The parse results are stored as a "green tree".
 /// We'll discuss working with the results later
-struct Parse {
-    green_node: GreenNode,
+pub(crate) struct Parse {
+    pub(crate) green_node: GreenNode,
     #[allow(unused)]
-    errors: Vec<String>,
+    pub(crate) errors: Vec<String>,
 }
 
-fn parse(text: &str) -> Parse {
+pub(crate) fn parse(text: &str) -> Parse {
     struct Parser<'a> {
         /// input tokens, including whitespace,
         /// in *reverse* order.
@@ -363,6 +363,11 @@ impl Deb822 {
         builder.start_node(ROOT.into());
         builder.finish_node();
         Deb822(SyntaxNode::new_root_mut(builder.finish()))
+    }
+
+    /// Parse deb822 text, returning a Parse result
+    pub fn parse(text: &str) -> crate::Parse<Deb822> {
+        crate::Parse::parse_deb822(text)
     }
 
     /// Provide a formatter that can handle indentation and trailing separators
@@ -1142,12 +1147,7 @@ impl FromStr for Deb822 {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parsed = parse(s);
-        if parsed.errors.is_empty() {
-            Ok(parsed.root_mut())
-        } else {
-            Err(ParseError(parsed.errors))
-        }
+        Deb822::parse(s).to_result()
     }
 }
 

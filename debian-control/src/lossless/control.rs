@@ -35,6 +35,7 @@
 use crate::fields::{MultiArch, Priority};
 use crate::lossless::relations::Relations;
 use deb822_lossless::{Deb822, Paragraph};
+use rowan::ast::AstNode;
 
 fn format_field(name: &str, value: &str) -> String {
     match name {
@@ -80,6 +81,15 @@ impl Control {
     /// Return the underlying deb822 object
     pub fn as_deb822(&self) -> &Deb822 {
         &self.0
+    }
+
+    /// Parse control file text, returning a Parse result
+    pub fn parse(text: &str) -> deb822_lossless::Parse<Control> {
+        let deb822_parse = Deb822::parse(text);
+        // Transform Parse<Deb822> to Parse<Control>
+        let green = deb822_parse.green().clone();
+        let errors = deb822_parse.errors().to_vec();
+        deb822_lossless::Parse::new(green, errors)
     }
 
     /// Return the source package
@@ -234,7 +244,7 @@ impl std::str::FromStr for Control {
     type Err = deb822_lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Control(s.parse()?))
+        Control::parse(s).to_result()
     }
 }
 
@@ -606,6 +616,22 @@ impl pyo3::FromPyObject<'_> for Source {
 impl std::fmt::Display for Control {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl AstNode for Control {
+    type Language = deb822_lossless::Lang;
+
+    fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
+        Deb822::can_cast(kind)
+    }
+
+    fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
+        Deb822::cast(syntax).map(Control)
+    }
+
+    fn syntax(&self) -> &rowan::SyntaxNode<Self::Language> {
+        self.0.syntax()
     }
 }
 
