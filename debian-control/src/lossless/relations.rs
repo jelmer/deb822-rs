@@ -1307,7 +1307,7 @@ impl Relation {
 
         if let (Some(constraint), Some(version)) = (constraint, version) {
             let vc: VersionConstraint = constraint.to_string().parse().unwrap();
-            return Some((vc, (version.text().to_string()).parse().unwrap()));
+            Some((vc, (version.text().to_string()).parse().unwrap()))
         } else {
             None
         }
