@@ -65,6 +65,7 @@ fn format_field(name: &str, value: &str) -> String {
 }
 
 /// A Debian control file
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Control(Deb822);
 
 impl Control {
@@ -249,6 +250,7 @@ impl std::str::FromStr for Control {
 }
 
 /// A source package paragraph
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source(Paragraph);
 
 impl From<Source> for Paragraph {
@@ -636,6 +638,7 @@ impl AstNode for Control {
 }
 
 /// A binary package paragraph
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binary(Paragraph);
 
 impl From<Binary> for Paragraph {

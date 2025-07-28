@@ -3,6 +3,7 @@
 use rowan::ast::AstNode;
 
 /// Changes file
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Changes(deb822_lossless::Paragraph);
 
 /// Errors that can occur when parsing a Changes file.

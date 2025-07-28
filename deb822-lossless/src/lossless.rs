@@ -307,7 +307,7 @@ macro_rules! ast_node {
         #[doc = "An AST node representing a `"]
         #[doc = stringify!($ast)]
         #[doc = "`."]
-        #[derive(Debug, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         #[repr(transparent)]
         pub struct $ast(SyntaxNode);
         impl $ast {

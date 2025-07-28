@@ -6,6 +6,7 @@ use crate::lossless::relations::Relations;
 use rowan::ast::AstNode;
 
 /// A source package in the APT package manager.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source(deb822_lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
@@ -525,6 +526,7 @@ impl AstNode for Source {
 }
 
 /// A package in the APT package manager.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Package(deb822_lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
