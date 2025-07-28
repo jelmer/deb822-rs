@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "debian-control"
-version = "0.1.45"
+version = "0.1.46"
 dependencies = [
  "chrono",
  "deb822-fast",
