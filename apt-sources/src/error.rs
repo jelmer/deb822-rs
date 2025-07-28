@@ -2,7 +2,7 @@
 //! It intends to address error handling in meaningful manner, less vague than just passing
 //! `String` as error.
 
-/// Errors for APT sources parsing and conversion to `Repository`
+/// Errors for APT sources parsing and conversion to/from [`Repository`] or [`LegacyRepository`]
 #[derive(Debug)]
 pub enum RepositoryError {
     /// Invalid repository format
@@ -20,7 +20,7 @@ pub enum RepositoryError {
     /// The Yes/No field has invalid/unexpected value
     YesNoFieldInvalid,
     /// The field in the parsed data is not recognized (check `man sources.list`)
-    UnrecognizedFieldName,
+    UnrecognizedFieldName(String),
     /// Errors in lossy serializer or deserializer
     Lossy(deb822_fast::Error),
     /// I/O Error
@@ -56,7 +56,7 @@ impl std::fmt::Display for RepositoryError {
             Self::InvalidSignature => write!(f, "The field `Signed-By` is incorrect"),
             Self::YesNoForceFieldInvalid => f.write_str(YNFERRMSG),
             Self::YesNoFieldInvalid => f.write_str(YNERRMSG),
-            Self::UnrecognizedFieldName => f.write_str(UFNERRMSG),
+            Self::UnrecognizedFieldName(_) => f.write_str(UFNERRMSG), // TODO: dump the field name
             Self::Lossy(e) => write!(f, "Lossy parser error: {}", e),
             Self::Io(e) => write!(f, "IO error: {}", e),
             Self::Url(e) => write!(f, "URL parse error: {}", e),

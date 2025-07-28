@@ -66,8 +66,8 @@ impl SourcesManager {
 
     /// Write repositories to a file
     pub fn write_repositories(&self, path: &Path, repositories: &Repositories) -> io::Result<()> {
-        let content = repositories.to_string();
-        fs::write(path, content)
+        let mut file = fs::File::create(path)?;
+        write!(file, "{}", repositories)
     }
 
     /// Read repositories from a file

@@ -1,5 +1,5 @@
-//! A library for parsing and manipulating APT source files that
-//! use the DEB822 format to hold package repositories specifications.
+//! A module for parsing and manipulating APT source files that
+//! use the pre-DEB822 single line format to hold package repositories specifications.
 //!
 //! # Examples
 use super::RepositoryError;
@@ -18,41 +18,38 @@ use std::str::FromStr;
 use url::Url;
 use url_macro::url;
 
-/// A structure representing APT repository as declared by one-line-style `.list` file
-///
+/// A structure representing APT repository as declared by one-line-style `.list` file:
+/// ```text
+/// type [option=value option=value...] uri suite [component] [component] [...]
+/// ```
 /// According to `sources.list(5)` man pages, only four fields are mandatory:
-/// * `Types` either `deb` or/and `deb-src`
-/// * `URIs` to repositories holding valid APT structure (unclear if multiple are allowed)
-/// * `Suites` usually being distribution codenames
-/// * `Component` most of the time `main`, but it's a section of the repository
+/// * `type` either `deb` or `deb-src`
+/// * `uri` to repository holding valid APT structure
+/// * `suite` usually being distribution codename
+/// * `component` most of the time `main`, but it's a section of the repository; multiple values allowed
+///
+/// The disabled field is just commented out with `#` followed by whitespaces at the beginning of the valid line
 ///
 /// The manpage specifies following optional fields
-/// * `Enabled`        is a yes/no field, default yes
-/// * `Architectures`
-/// * `Languages`
-/// * `Targets`
-/// * `PDiffs`         is a yes/no field
-/// * `By-Hash`        is a yes/no/force field
-/// * `Allow-Insecure` is a yes/no field, default no
-/// * `Allow-Weak`     is a yes/no field, default no
-/// * `Allow-Downgrade-To-Insecure` is a yes/no field, default no
-/// * `Trusted`        us a yes/no field
-/// * `Signed-By`      is either path to the key or PGP key block
-/// * `Check-Valid-Until` is a yes/no field
-/// * `Valid-Until-Min`
-/// * `Valid-Until-Max`
-/// * `Check-Date`     is a yes/no field
-/// * `Date-Max-Future`
-/// * `InRelease-Path` relative path
-/// * `Snapshot`       either `enable` or a snapshot ID
+/// * `arch`           comma separated list of binary architectures
+/// * `lang`           comma separated list of supported natural languages
+/// * `target`
+/// * `pdiffs`         is a yes/no field
+/// * `by-hash`        is a yes/no/force field
+/// * `allow-insecure` is a yes/no field, default no
+/// * `allow-weak`     is a yes/no field, default no
+/// * `allow-downgrade-to-insecure` is a yes/no field, default no
+/// * `trusted`        us a yes/no field
+/// * `signed-by`      is a path to the key or fingerprint; optionally followed by exclamation mark
+/// * `check-valid-until` is a yes/no field
+/// * `valid-until-min`
+/// * `valid-until-max`
+/// * `check-date`     is a yes/no field
+/// * `date-max-future`
+/// * `inrelease-path` relative path
+/// * `snapshot`       either `enable` or a snapshot ID
 ///
-/// The unit tests of APT use:
-/// * `Description`
-///
-/// The RepoLib tool uses:
-/// * `X-Repolib-Name` identifier for own reference, meaningless for APT
-///
-/// Note: Multivalues `*-Add` & `*-Remove` semantics aren't supported.
+/// Note: this module doesn't support undocumented options.
 #[derive(Clone, PartialEq, /*Eq,*/ Debug)]
 pub struct LegacyRepository {
     /// This doesn't represent real field, but rather commented or uncommented line
@@ -89,11 +86,15 @@ pub struct LegacyRepository {
     /// I can't find example of using with fingerprints
     pub signature: Option<Signature>, // signed-by
 
-    /// (Optional) Field ignored by APT but used by RepoLib to identify repositories, Ubuntu sources contain them
+    #[cfg(target_os = "none")] // TODO: disabled for now
+    // (Optional) Field ignored by APT but used by RepoLib to identify repositories, Ubuntu sources contain them
     pub x_repolib_name: Option<String>, // this supports RepoLib still used by PopOS, even if removed from Debian/Ubuntu
 
-    /// (Optional) Field not present in the man page, but used in APT unit tests, potentially to hold the repository description
-    description: Option<String>, // options: HashMap<String, String> // [MF] My original parser kept remaining optional fields in the hash map, is this right approach?
+    #[cfg(target_os = "none")] // TODO: disabled for now
+    // (Optional) Field not present in the man page, but used in APT unit tests, potentially to hold the repository description
+    description: Option<String>,
+    // TODO: [MF] My original parser kept remaining optional fields in the hash map, is this right approach?
+    // options: HashMap<String, String>
 }
 
 impl Default for LegacyRepository {
@@ -114,8 +115,6 @@ impl Default for LegacyRepository {
             allow_downgrade_to_insecure: false,
             trusted: None,
             signature: None,
-            x_repolib_name: None,
-            description: None,
         }
     }
 }
@@ -137,9 +136,7 @@ impl LegacyRepository {
                 self.signature = Some(Signature::KeyPath(PathBuf::from_str(value).unwrap()))
                 // TODO: PathBuf::from_str() has `Infallible` as `Err` type
             }
-            "x_repo_lib_name" => self.x_repolib_name = Some(value.to_string()),
-            "description" => self.description = Some(value.to_string()),
-            _ => return Err(RepositoryError::UnrecognizedFieldName),
+            any => return Err(RepositoryError::UnrecognizedFieldName(any.to_string())),
         };
         Ok(())
     }
@@ -270,8 +267,8 @@ impl From<&LegacyRepository> for super::Repository {
             allow_downgrade_to_insecure: original.allow_downgrade_to_insecure.then_some(true),
             trusted: original.trusted,
             signature: original.signature.clone(),
-            x_repolib_name: original.x_repolib_name.clone(),
-            description: original.description.clone(),
+            x_repolib_name: None,
+            description: None,
         }
     }
 }
@@ -294,8 +291,8 @@ impl From<LegacyRepository> for super::Repository {
             allow_downgrade_to_insecure: original.allow_downgrade_to_insecure.then_some(true),
             trusted: original.trusted,
             signature: original.signature,
-            x_repolib_name: original.x_repolib_name,
-            description: original.description,
+            x_repolib_name: None,
+            description: None,
         }
     }
 }
@@ -366,14 +363,15 @@ impl Display for LegacyRepository {
                     }
                 })
                 .unwrap_or(Cow::Borrowed("")),
-            self.x_repolib_name
-                .as_ref()
-                .and_then(|x| Some(Cow::Owned(format!("x-repolib-name={}", x))))
-                .unwrap_or(Cow::Borrowed("")),
-            self.description
-                .as_ref()
-                .and_then(|x| Some(Cow::Owned(format!("description={}", x)))) // TODO: serious doubts about feasibility as this is undocumented extension
-                .unwrap_or(Cow::Borrowed("")),
+            // TODO: this stuff remain unsupported for now, doesn't fine `.lists` format well
+            // self.x_repolib_name
+            //     .as_ref()
+            //     .and_then(|x| Some(Cow::Owned(format!("x-repolib-name={}", x))))
+            //     .unwrap_or(Cow::Borrowed("")),
+            // self.description
+            //     .as_ref()
+            //     .and_then(|x| Some(Cow::Owned(format!("description={}", x)))) // TODO: serious doubts about feasibility as this is undocumented extension
+            //     .unwrap_or(Cow::Borrowed("")),
         ];
         let options = options.iter().filter(|s| !s.is_empty()).join(" ");
         options
@@ -400,6 +398,12 @@ mod tests {
         "
         deb http://archive.ubuntu.com/ubuntu jammy main restricted
         deb-src http://archive.ubuntu.com/ubuntu jammy main restricted
+    "
+    );
+    const COMMENTED_SAMPLE: &str = indoc!(
+        "
+        deb http://archive.ubuntu.com/ubuntu jammy main restricted
+        # deb-src http://archive.ubuntu.com/ubuntu jammy main restricted
     "
     );
 
@@ -444,7 +448,6 @@ mod tests {
         assert_eq!(repository.uri, url!("http://debian.beagleboard.org/arm64/"));
         assert_eq!(repository.suite, "jammy".to_owned());
         assert_eq!(repository.components, vec!["main".to_owned()]);
-        assert_eq!(repository.x_repolib_name, None);
     }
 
     #[test]
@@ -456,6 +459,26 @@ mod tests {
         let bin_repository = repositories.iter().nth(0).unwrap();
         let src_repository = repositories.iter().nth(1).unwrap();
 
+        assert_eq!(bin_repository.typ, RepositoryType::Binary);
+        assert_eq!(src_repository.typ, RepositoryType::Source);
+        assert_eq!(bin_repository.architectures.len(), 0);
+        assert_eq!(src_repository.architectures.len(), 0);
+        assert_eq!(bin_repository.components.len(), 2);
+        assert_eq!(src_repository.components.len(), 2);
+    }
+
+    #[test]
+    #[ignore = "commented lines support not yet implemented"]
+    fn test_commented_legacy_repositories_from_str() {
+        let repositories = LegacyRepositories::from_str(COMMENTED_SAMPLE)
+            .expect("Shall not fail for correct list entry!");
+
+        assert_eq!(repositories.len(), 2);
+        let bin_repository = repositories.iter().nth(0).unwrap();
+        let src_repository = repositories.iter().nth(1).unwrap();
+
+        assert_eq!(bin_repository.enabled, true);
+        assert_eq!(bin_repository.enabled, false);
         assert_eq!(bin_repository.typ, RepositoryType::Binary);
         assert_eq!(src_repository.typ, RepositoryType::Source);
         assert_eq!(bin_repository.architectures.len(), 0);
@@ -510,8 +533,6 @@ mod tests {
             allow_downgrade_to_insecure: false,
             trusted: None,
             signature: None,
-            x_repolib_name: None,
-            description: None,
         };
         let list_text = sample.to_string();
 
@@ -541,8 +562,6 @@ mod tests {
             signature: Some(Signature::KeyPath(PathBuf::from(
                 "/usr/share/keyrings/rcn-ee-archive-keyring.gpg",
             ))), // TODO: `.list` supports only key files, no way to fit PGP block
-            x_repolib_name: None,
-            description: None,
         };
         let list_text = sample.to_string();
 
