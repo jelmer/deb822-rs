@@ -6,6 +6,7 @@
 
 use crate::fields::{Md5Checksum, Sha1Checksum, Sha256Checksum};
 use crate::lossless::relations::Relations;
+use rowan::ast::AstNode;
 
 /// A buildinfo file
 pub struct Buildinfo(deb822_lossless::Paragraph);
@@ -28,6 +29,28 @@ impl Buildinfo {
     /// Create a new source package
     pub fn new() -> Self {
         Self(deb822_lossless::Paragraph::new())
+    }
+
+    /// Parse buildinfo text, returning a Parse result
+    ///
+    /// Note: This expects a single paragraph, not a full deb822 document
+    pub fn parse(text: &str) -> deb822_lossless::Parse<Buildinfo> {
+        let deb822_parse = deb822_lossless::Deb822::parse(text);
+        let green = deb822_parse.green().clone();
+        let mut errors = deb822_parse.errors().to_vec();
+
+        // Check if there's exactly one paragraph
+        if errors.is_empty() {
+            let deb822 = deb822_parse.tree();
+            let paragraph_count = deb822.paragraphs().count();
+            if paragraph_count == 0 {
+                errors.push("No paragraphs found".to_string());
+            } else if paragraph_count > 1 {
+                errors.push("Multiple paragraphs found, expected one".to_string());
+            }
+        }
+
+        deb822_lossless::Parse::new(green, errors)
     }
 
     /// Get the source name
@@ -246,7 +269,29 @@ impl std::str::FromStr for Buildinfo {
     type Err = deb822_lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.parse()?))
+        Buildinfo::parse(s).to_result()
+    }
+}
+
+impl AstNode for Buildinfo {
+    type Language = deb822_lossless::Lang;
+
+    fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
+        deb822_lossless::Paragraph::can_cast(kind) || deb822_lossless::Deb822::can_cast(kind)
+    }
+
+    fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
+        if let Some(para) = deb822_lossless::Paragraph::cast(syntax.clone()) {
+            Some(Buildinfo(para))
+        } else if let Some(deb822) = deb822_lossless::Deb822::cast(syntax) {
+            deb822.paragraphs().next().map(Buildinfo)
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> &rowan::SyntaxNode<Self::Language> {
+        self.0.syntax()
     }
 }
 #[cfg(test)]
