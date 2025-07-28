@@ -1,5 +1,7 @@
 //! Changes files
 
+use rowan::ast::AstNode;
+
 /// Changes file
 pub struct Changes(deb822_lossless::Paragraph);
 
@@ -80,6 +82,28 @@ impl std::str::FromStr for File {
 }
 
 impl Changes {
+    /// Parse changes text, returning a Parse result
+    ///
+    /// Note: This expects a single paragraph, not a full deb822 document
+    pub fn parse(text: &str) -> deb822_lossless::Parse<Changes> {
+        let deb822_parse = deb822_lossless::Deb822::parse(text);
+        let green = deb822_parse.green().clone();
+        let mut errors = deb822_parse.errors().to_vec();
+
+        // Check if there's exactly one paragraph
+        if errors.is_empty() {
+            let deb822 = deb822_parse.tree();
+            let paragraph_count = deb822.paragraphs().count();
+            if paragraph_count == 0 {
+                errors.push("No paragraphs found".to_string());
+            } else if paragraph_count > 1 {
+                errors.push("Multiple paragraphs found, expected one".to_string());
+            }
+        }
+
+        deb822_lossless::Parse::new(green, errors)
+    }
+
     /// Returns the format of the Changes file.
     pub fn format(&self) -> Option<String> {
         self.0.get("Format").map(|s| s.to_string())
@@ -284,6 +308,28 @@ impl pyo3::FromPyObject<'_> for Changes {
     fn extract_bound(ob: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
         use pyo3::prelude::*;
         Ok(Changes(ob.extract()?))
+    }
+}
+
+impl AstNode for Changes {
+    type Language = deb822_lossless::Lang;
+
+    fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
+        deb822_lossless::Paragraph::can_cast(kind) || deb822_lossless::Deb822::can_cast(kind)
+    }
+
+    fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
+        if let Some(para) = deb822_lossless::Paragraph::cast(syntax.clone()) {
+            Some(Changes(para))
+        } else if let Some(deb822) = deb822_lossless::Deb822::cast(syntax) {
+            deb822.paragraphs().next().map(Changes)
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> &rowan::SyntaxNode<Self::Language> {
+        self.0.syntax()
     }
 }
 
