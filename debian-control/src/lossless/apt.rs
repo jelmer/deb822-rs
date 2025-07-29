@@ -3,8 +3,10 @@ use crate::fields::{
     Md5Checksum, MultiArch, Priority, Sha1Checksum, Sha256Checksum, Sha512Checksum,
 };
 use crate::lossless::relations::Relations;
+use rowan::ast::AstNode;
 
 /// A source package in the APT package manager.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source(deb822_lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
@@ -65,6 +67,32 @@ impl Source {
     /// Create a new source package
     pub fn new() -> Self {
         Self(deb822_lossless::Paragraph::new())
+    }
+
+    /// Parse source package text, returning a Parse result
+    ///
+    /// Note: This expects a single paragraph, not a full deb822 document
+    pub fn parse(text: &str) -> deb822_lossless::Parse<Source> {
+        // We need to transform Parse<Deb822> to Parse<Source>
+        // Since Source wraps a single Paragraph, we need custom logic
+        let deb822_parse = deb822_lossless::Deb822::parse(text);
+
+        // For now, we'll use the same green node but the cast will extract the first paragraph
+        let green = deb822_parse.green().clone();
+        let mut errors = deb822_parse.errors().to_vec();
+
+        // Check if there's exactly one paragraph
+        if errors.is_empty() {
+            let deb822 = deb822_parse.tree();
+            let paragraph_count = deb822.paragraphs().count();
+            if paragraph_count == 0 {
+                errors.push("No paragraphs found".to_string());
+            } else if paragraph_count > 1 {
+                errors.push("Multiple paragraphs found, expected one".to_string());
+            }
+        }
+
+        deb822_lossless::Parse::new(green, errors)
     }
 
     /// Get the source name
@@ -468,11 +496,37 @@ impl std::str::FromStr for Source {
     type Err = deb822_lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.parse()?))
+        Source::parse(s).to_result()
+    }
+}
+
+impl AstNode for Source {
+    type Language = deb822_lossless::Lang;
+
+    fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
+        // Source can be cast from either a Paragraph or a Deb822 (taking first paragraph)
+        deb822_lossless::Paragraph::can_cast(kind) || deb822_lossless::Deb822::can_cast(kind)
+    }
+
+    fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
+        // Try to cast as Paragraph first
+        if let Some(para) = deb822_lossless::Paragraph::cast(syntax.clone()) {
+            Some(Source(para))
+        } else if let Some(deb822) = deb822_lossless::Deb822::cast(syntax) {
+            // If it's a Deb822, take the first paragraph
+            deb822.paragraphs().next().map(Source)
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> &rowan::SyntaxNode<Self::Language> {
+        self.0.syntax()
     }
 }
 
 /// A package in the APT package manager.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Package(deb822_lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
@@ -521,6 +575,28 @@ impl Package {
     /// Create a new package.
     pub fn new(paragraph: deb822_lossless::Paragraph) -> Self {
         Self(paragraph)
+    }
+
+    /// Parse package text, returning a Parse result
+    ///
+    /// Note: This expects a single paragraph, not a full deb822 document
+    pub fn parse(text: &str) -> deb822_lossless::Parse<Package> {
+        let deb822_parse = deb822_lossless::Deb822::parse(text);
+        let green = deb822_parse.green().clone();
+        let mut errors = deb822_parse.errors().to_vec();
+
+        // Check if there's exactly one paragraph
+        if errors.is_empty() {
+            let deb822 = deb822_parse.tree();
+            let paragraph_count = deb822.paragraphs().count();
+            if paragraph_count == 0 {
+                errors.push("No paragraphs found".to_string());
+            } else if paragraph_count > 1 {
+                errors.push("Multiple paragraphs found, expected one".to_string());
+            }
+        }
+
+        deb822_lossless::Parse::new(green, errors)
     }
 
     /// Get the name of the package.
@@ -790,7 +866,29 @@ impl std::str::FromStr for Package {
     type Err = deb822_lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.parse()?))
+        Package::parse(s).to_result()
+    }
+}
+
+impl AstNode for Package {
+    type Language = deb822_lossless::Lang;
+
+    fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
+        deb822_lossless::Paragraph::can_cast(kind) || deb822_lossless::Deb822::can_cast(kind)
+    }
+
+    fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
+        if let Some(para) = deb822_lossless::Paragraph::cast(syntax.clone()) {
+            Some(Package(para))
+        } else if let Some(deb822) = deb822_lossless::Deb822::cast(syntax) {
+            deb822.paragraphs().next().map(Package)
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> &rowan::SyntaxNode<Self::Language> {
+        self.0.syntax()
     }
 }
 
@@ -843,6 +941,28 @@ impl Release {
     /// Create a new release
     pub fn new(paragraph: deb822_lossless::Paragraph) -> Self {
         Self(paragraph)
+    }
+
+    /// Parse release text, returning a Parse result
+    ///
+    /// Note: This expects a single paragraph, not a full deb822 document
+    pub fn parse(text: &str) -> deb822_lossless::Parse<Release> {
+        let deb822_parse = deb822_lossless::Deb822::parse(text);
+        let green = deb822_parse.green().clone();
+        let mut errors = deb822_parse.errors().to_vec();
+
+        // Check if there's exactly one paragraph
+        if errors.is_empty() {
+            let deb822 = deb822_parse.tree();
+            let paragraph_count = deb822.paragraphs().count();
+            if paragraph_count == 0 {
+                errors.push("No paragraphs found".to_string());
+            } else if paragraph_count > 1 {
+                errors.push("Multiple paragraphs found, expected one".to_string());
+            }
+        }
+
+        deb822_lossless::Parse::new(green, errors)
     }
 
     /// Get the origin of the release
@@ -1104,7 +1224,29 @@ impl std::str::FromStr for Release {
     type Err = deb822_lossless::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.parse()?))
+        Release::parse(s).to_result()
+    }
+}
+
+impl AstNode for Release {
+    type Language = deb822_lossless::Lang;
+
+    fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
+        deb822_lossless::Paragraph::can_cast(kind) || deb822_lossless::Deb822::can_cast(kind)
+    }
+
+    fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
+        if let Some(para) = deb822_lossless::Paragraph::cast(syntax.clone()) {
+            Some(Release(para))
+        } else if let Some(deb822) = deb822_lossless::Deb822::cast(syntax) {
+            deb822.paragraphs().next().map(Release)
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> &rowan::SyntaxNode<Self::Language> {
+        self.0.syntax()
     }
 }
 

@@ -121,7 +121,7 @@ impl std::str::FromStr for Copyright {
         let mut files_paras = vec![];
         let mut license_paras = vec![];
 
-        while let Some(para) = paragraphs.next() {
+        for para in paragraphs {
             if para.get("Files").is_some() {
                 files_paras.push(FilesParagraph::from_paragraph(para)?);
             } else if para.get("License").is_some() {
@@ -219,7 +219,7 @@ impl Copyright {
     /// # Arguments
     /// * `path` - The path to the file to find the license for.
     pub fn find_files(&self, path: &std::path::Path) -> Option<&FilesParagraph> {
-        self.files.iter().filter(|f| f.matches(path)).last()
+        self.files.iter().filter(|f| f.matches(path)).next_back()
     }
 
     /// Returns the license for the given file.

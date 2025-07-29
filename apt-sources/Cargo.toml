@@ -13,7 +13,7 @@ categories = ["parser-implementations"]
 [features]
 default = ["lossless"]
 lossless = []
-keyserver = ["dep:sequoia-openpgp", "dep:sequoia-net", "dep:tokio"]
+key-management = ["dep:sequoia-openpgp", "dep:sequoia-net", "dep:tokio"]
 
 [dependencies]
 deb822-lossless = { version = ">=0.2.4", path = "../deb822-lossless" }

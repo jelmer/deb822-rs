@@ -10,4 +10,5 @@ pub mod changes;
 pub mod control;
 pub mod relations;
 pub use control::*;
+pub use deb822_lossless::Parse;
 pub use relations::*;

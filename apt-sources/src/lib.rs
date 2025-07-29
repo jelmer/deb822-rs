@@ -46,7 +46,10 @@ use url::Url;
 /// Distribution detection and utilities
 pub mod distribution;
 pub mod error;
-#[cfg(feature = "keyserver")]
+#[cfg(feature = "key-management")]
+/// Key management utilities for GPG keys
+pub mod key_management;
+#[cfg(feature = "key-management")]
 pub mod keyserver;
 #[cfg(feature = "lossless")]
 pub mod lossless;
@@ -867,13 +870,13 @@ mod tests {
     #[test]
     fn test_yesnoforce_to_string() {
         let yes = crate::YesNoForce::Yes;
-        assert_eq!((&yes).to_string(), "yes");
+        assert_eq!(yes.to_string(), "yes");
 
         let no = crate::YesNoForce::No;
-        assert_eq!((&no).to_string(), "no");
+        assert_eq!(no.to_string(), "no");
 
         let force = crate::YesNoForce::Force;
-        assert_eq!((&force).to_string(), "force");
+        assert_eq!(force.to_string(), "force");
     }
 
     #[test]
