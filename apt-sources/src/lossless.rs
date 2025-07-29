@@ -197,14 +197,11 @@ impl std::str::FromStr for Repositories {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
-
-    use indoc::indoc;
-
+    use super::Repositories;
     use crate::signature::Signature;
     use crate::traits::Repository as RepositoryTrait;
-
-    use super::Repositories;
+    use indoc::indoc;
+    use std::borrow::Cow;
 
     #[test]
     fn test_not_machine_readable() {
@@ -319,33 +316,33 @@ mod tests {
         ));
     }
 
-    // #[test]
-    // fn test_serialize() {
-    //     //let repos = Repositories::empty();
-    //     let repos = Repositories::new([
-    //         Repository {
-    //             enabled: Some(true), // TODO: looks odd, as only `Enabled: no` in meaningful
-    //             types: HashSet::from([RepositoryType::Binary]),
-    //             architectures: Some(vec!["arm64".to_owned()]),
-    //             uris: vec![Url::from_str("https://deb.debian.org/debian").unwrap()],
-    //             suites: vec!["jammy".to_owned()],
-    //             components: vec!["main". to_owned()],
-    //             signature: None,
-    //             x_repolib_name: None,
-    //             languages: None,
-    //             targets: None,
-    //             pdiffs: None,
-    //             ..Default::default()
-    //         }
-    //     ]);
-    //     let text = repos.to_string();
-    //     assert_eq!(text, indoc! {r#"
-    //         Enabled: yes
-    //         Types: deb
-    //         URIs: https://deb.debian.org/debian
-    //         Suites: jammy
-    //         Components: main
-    //         Architectures: arm64
-    //     "#});
-    // }
+    #[test]
+    fn test_paragraph_serialization() {
+        let repos = Repositories(
+            vec![vec![
+                ("Enabled", "yes"),
+                ("Types", "deb"),
+                ("URIs", "https://deb.debian.org/debian"),
+                ("Suites", "jammy"),
+                ("Components", "main"),
+                ("Architectures", "arm64"),
+            ]
+            .into_iter()
+            .collect()]
+            .into_iter()
+            .collect(),
+        );
+        let text = repos.0.to_string(); // TODO: fix this
+        assert_eq!(
+            text,
+            indoc! {r#"
+            Enabled: yes
+            Types: deb
+            URIs: https://deb.debian.org/debian
+            Suites: jammy
+            Components: main
+            Architectures: arm64
+        "#}
+        );
+    }
 }

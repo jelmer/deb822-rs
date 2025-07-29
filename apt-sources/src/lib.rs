@@ -35,7 +35,6 @@
 //! preserving formatting.
 
 use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
-//use deb822_lossless::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 use error::RepositoryError;
 use itertools::Itertools;
 use signature::Signature;
@@ -151,15 +150,6 @@ fn deserialize_types(text: &str) -> Result<HashSet<RepositoryType>, RepositoryEr
 
 fn serialize_types(files: &HashSet<RepositoryType>) -> String {
     files.iter().map(|rt| rt.to_string()).join("\n")
-    // use std::fmt::Write;
-    // let mut result = String::new();
-    // for (i, rt) in files.iter().enumerate() {
-    //     if i > 0 {
-    //         result.push('\n');
-    //     }
-    //     write!(&mut result, "{}", rt).unwrap();
-    // }
-    // result
 }
 
 fn deserialize_uris(text: &str) -> Result<Vec<Url>, RepositoryError> {
