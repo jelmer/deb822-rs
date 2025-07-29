@@ -100,7 +100,7 @@ impl std::fmt::Display for RepositoryType {
             RepositoryType::Binary => "deb",
             RepositoryType::Source => "deb-src",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -145,7 +145,7 @@ impl std::fmt::Display for YesNoForce {
             YesNoForce::No => "no",
             YesNoForce::Force => "force",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -156,7 +156,7 @@ fn deserialize_types(text: &str) -> Result<HashSet<RepositoryType>, RepositoryEr
 }
 
 fn serialize_types(files: &HashSet<RepositoryType>) -> String {
-    files.into_iter().map(|rt| rt.to_string()).join("\n")
+    files.iter().map(|rt| rt.to_string()).join("\n")
 }
 
 fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
@@ -168,7 +168,7 @@ fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
 }
 
 fn serialize_uris(uris: &[Url]) -> String {
-    uris.into_iter().map(|u| u.as_str()).join(" ")
+    uris.iter().map(|u| u.as_str()).join(" ")
 }
 
 fn deserialize_string_chain(text: &str) -> Result<Vec<String>, String> {

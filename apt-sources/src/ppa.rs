@@ -44,7 +44,7 @@ impl PpaInfo {
             "{}/{}/{}/ubuntu",
             LAUNCHPAD_PPA_URL, self.user, self.name
         ))
-        .map_err(|e| format!("Failed to construct PPA URL: {}", e))
+        .map_err(|e| format!("Failed to construct PPA URL: {e}"))
     }
 
     /// Generate a filename for this PPA

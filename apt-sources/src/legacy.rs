@@ -219,10 +219,7 @@ impl FromStr for LegacyRepositories {
             .map(|caps| {
                 let mut repository = LegacyRepository::default();
                 repository.typ = RepositoryType::from_str(&caps["type"])?;
-                let options = caps
-                    .name("options")
-                    .and_then(|o| Some(o.as_str()))
-                    .unwrap_or("");
+                let options = caps.name("options").map(|o| o.as_str()).unwrap_or("");
                 options
                     .trim_matches(|c| c == '[' || c == ']')
                     .split_whitespace()
@@ -312,7 +309,7 @@ impl From<LegacyRepositories> for super::Repositories {
 fn option_output<O: AsRef<str> + Display>(name: &str, option: &[O]) -> Cow<'static, str> {
     option
         .is_empty()
-        .then(|| Cow::Borrowed(""))
+        .then_some(Cow::Borrowed(""))
         .unwrap_or_else(|| Cow::Owned(format!("{name}={}", option.iter().join(","))))
 }
 
@@ -326,38 +323,28 @@ impl Display for LegacyRepository {
             option_output("lang", &self.languages),
             option_output("lang", &self.targets),
             self.pdiffs
-                .and_then(|p| {
-                    Some(Cow::Owned(format!(
-                        "pdiff={}",
-                        p.then_some("yes").unwrap_or("no")
-                    )))
-                })
+                .map(|p| Cow::Owned(format!("pdiff={}", p.then_some("yes").unwrap_or("no"))))
                 .unwrap_or(Cow::Borrowed("")),
             self.by_hash
-                .and_then(|p| Some(Cow::Owned(format!("by-hash={}", p))))
+                .map(|p| Cow::Owned(format!("by-hash={p}")))
                 .unwrap_or(Cow::Borrowed("")),
             self.allow_insecure
-                .then(|| Cow::Owned(format!("allow-insecure=yes")))
+                .then(|| Cow::Owned("allow-insecure=yes".to_string()))
                 .unwrap_or(Cow::Borrowed("")),
             self.allow_weak
-                .then(|| Cow::Owned(format!("allow-weak=yes")))
+                .then(|| Cow::Owned("allow-weak=yes".to_string()))
                 .unwrap_or(Cow::Borrowed("")),
             self.allow_downgrade_to_insecure
                 .then(|| Cow::Owned(format!("allow_downgrade_to_insecure=yes")))
                 .unwrap_or(Cow::Borrowed("")),
             self.trusted
-                .and_then(|t| {
-                    Some(Cow::Owned(format!(
-                        "trusted={}",
-                        t.then_some("yes").unwrap_or("no")
-                    )))
-                })
+                .map(|t| Cow::Owned(format!("trusted={}", t.then_some("yes").unwrap_or("no"))))
                 .unwrap_or(Cow::Borrowed("")),
             self.signature
                 .as_ref()
-                .and_then(|s| {
+                .map(|s| {
                     if let Signature::KeyPath(ref p) = s {
-                        Some(Cow::Owned(format!("signed-by={}", p.display())))
+                        Cow::Owned(format!("signed-by={}", p.display()))
                     } else {
                         panic!("Short format not supported!") // TODO: design bug of LegacyRepository!
                     }
@@ -374,10 +361,7 @@ impl Display for LegacyRepository {
             //     .unwrap_or(Cow::Borrowed("")),
         ];
         let options = options.iter().filter(|s| !s.is_empty()).join(" ");
-        options
-            .is_empty()
-            .not()
-            .then(|| write!(f, " [{}]", options));
+        options.is_empty().not().then(|| write!(f, " [{options}]"));
         write!(f, " {}", self.uri)?;
         write!(f, " {}", self.suite)?;
         write!(f, " {}", self.components.join(" "))

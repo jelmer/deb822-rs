@@ -57,9 +57,9 @@ impl std::fmt::Display for RepositoryError {
             Self::YesNoForceFieldInvalid => f.write_str(YNFERRMSG),
             Self::YesNoFieldInvalid => f.write_str(YNERRMSG),
             Self::UnrecognizedFieldName(_) => f.write_str(UFNERRMSG), // TODO: dump the field name
-            Self::Lossy(e) => write!(f, "Lossy parser error: {}", e),
-            Self::Io(e) => write!(f, "IO error: {}", e),
-            Self::Url(e) => write!(f, "URL parse error: {}", e),
+            Self::Lossy(e) => write!(f, "Lossy parser error: {e}"),
+            Self::Io(e) => write!(f, "IO error: {e}"),
+            Self::Url(e) => write!(f, "URL parse error: {e}"),
         }
     }
 }

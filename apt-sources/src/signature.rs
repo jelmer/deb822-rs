@@ -46,7 +46,7 @@ impl std::str::FromStr for Signature {
 impl std::fmt::Display for Signature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Signature::KeyBlock(text) => write!(f, "\n{}", text),
+            Signature::KeyBlock(text) => write!(f, "\n{text}"),
             Signature::KeyPath(path) => f.write_str(path.to_string_lossy().as_ref()),
         }
     }
