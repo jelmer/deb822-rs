@@ -390,7 +390,7 @@ mod tests {
         let err = Error::ExpectedEof;
         assert_eq!(err.to_string(), "Expected end-of-file");
 
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test error");
+        let io_err = std::io::Error::other("test error");
         let err = Error::Io(io_err);
         assert!(err.to_string().contains("IO error: test error"));
     }
@@ -628,11 +628,11 @@ Version: 2.10
         assert_eq!(para.get("Package"), Some("hello"));
 
         // Test with IO error
-        use std::io::{Error as IoError, ErrorKind};
+        use std::io::Error as IoError;
         struct FailingReader;
         impl std::io::Read for FailingReader {
             fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
-                Err(IoError::new(ErrorKind::Other, "test error"))
+                Err(IoError::other("test error"))
             }
         }
 
