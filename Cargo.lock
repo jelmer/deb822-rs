@@ -1275,15 +1275,9 @@ checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
 name = "libredox"
-<<<<<<< HEAD
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4488594b9328dee448adb906d8b126d9b7deb7cf5c22161ee591610bb1be83c0"
-=======
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "360e552c93fa0e8152ab463bc4c4837fce76a225df11dfaeea66c313de5e61f7"
->>>>>>> upstream/master
 dependencies = [
  "bitflags",
  "libc",
@@ -1768,15 +1762,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-<<<<<<< HEAD
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e8af0dde094006011e6a740d4879319439489813bd0bcdc7d821beaeeff48ec"
-=======
 version = "0.5.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5407465600fb0548f1442edf71dd20683c6ed326200ace4b1ef0763521bb3b77"
->>>>>>> upstream/master
 dependencies = [
  "bitflags",
 ]
@@ -1920,15 +1908,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-<<<<<<< HEAD
 version = "0.23.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2491382039b29b9b11ff08b76ff6c97cf287671dbb74f0be44bda389fffe9bd1"
-=======
-version = "0.23.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "069a8df149a16b1a12dcc31497c3396a173844be3cac4bd40c9e7671fef96671"
->>>>>>> upstream/master
 dependencies = [
  "once_cell",
  "rustls-pki-types",
@@ -2375,11 +2357,7 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "slab",
-<<<<<<< HEAD
- "socket2 0.5.10",
-=======
  "socket2 0.6.0",
->>>>>>> upstream/master
  "tokio-macros",
  "windows-sys 0.59.0",
 ]
@@ -2834,11 +2812,7 @@ version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2f500e4d28234f72040990ec9d39e3a6b950f9f22d3dba18416c35882612bcb"
 dependencies = [
-<<<<<<< HEAD
- "windows-targets 0.53.2",
-=======
  "windows-targets 0.53.3",
->>>>>>> upstream/master
 ]
 
 [[package]]
@@ -2874,18 +2848,11 @@ dependencies = [
 
 [[package]]
 name = "windows-targets"
-<<<<<<< HEAD
-version = "0.53.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c66f69fcc9ce11da9966ddb31a40968cad001c5bedeb5c2b82ede4253ab48aef"
-dependencies = [
-=======
 version = "0.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5fe6031c4041849d7c496a8ded650796e7b6ecc19df1a431c1a363342e5dc91"
 dependencies = [
  "windows-link",
->>>>>>> upstream/master
  "windows_aarch64_gnullvm 0.53.0",
  "windows_aarch64_msvc 0.53.0",
  "windows_i686_gnu 0.53.0",
