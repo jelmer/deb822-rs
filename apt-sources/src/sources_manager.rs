@@ -1,4 +1,3 @@
-use crate::legacy::LegacyRepositories;
 use crate::{Repositories, Repository, RepositoryType};
 use std::collections::HashSet;
 use std::fs;

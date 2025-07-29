@@ -305,7 +305,7 @@ impl Repository {
 }
 
 /// Container for multiple `Repository` specifications as single `.sources` file may contain as per specification
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Repositories(Vec<Repository>);
 
 impl Repositories {

@@ -143,7 +143,7 @@ impl LegacyRepository {
 }
 
 /// Container for multiple `LegacyRepository` specifications as single `.list` file may contain as per specification
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LegacyRepositories(Vec<LegacyRepository>);
 
 impl LegacyRepositories {
