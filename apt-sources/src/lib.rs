@@ -2,18 +2,10 @@
 //! A library for parsing and manipulating APT source files that
 //! use the DEB822 format to hold package repositories specifications.
 //!
-//! <div class="warning">
-//!
-//! Currently only lossy _serialization_ is implemented, lossless support
-//! retaining file sequence and comments would come at later date.
-//!
-//! </div>
-//!
 //! # Examples
 //!
 //! ```rust
-//!
-//! use apt_sources::Repositories;
+//! use apt_sources::{Repositories, traits::Repository};
 //! use std::path::Path;
 //!
 //! let text = r#"Types: deb
@@ -38,16 +30,17 @@
 //! assert_eq!(suites[0], "noble");
 //! ```
 //!
-// TODO: Not supported yet:
-// See the ``lossless`` module (behind the ``lossless`` feature) for a more forgiving parser that
-// allows partial parsing, parsing files with errors and unknown fields and editing while
-// preserving formatting.
+//! See the ``lossless`` module (behind the ``lossless`` feature) for a more forgiving parser that
+//! allows partial parsing, parsing files with errors and unknown fields and editing while
+//! preserving formatting.
 
 use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 use error::RepositoryError;
+use itertools::Itertools;
 use signature::Signature;
+use std::borrow::Borrow;
 use std::result::Result;
-use std::{collections::HashSet, ops::Deref, str::FromStr};
+use std::{borrow::Cow, collections::HashSet, fmt::Display, ops::Deref, str::FromStr};
 use url::Url;
 
 /// Distribution detection and utilities
@@ -58,10 +51,13 @@ pub mod error;
 pub mod key_management;
 #[cfg(feature = "key-management")]
 pub mod keyserver;
+#[cfg(feature = "lossless")]
+pub mod lossless;
 pub mod ppa;
 pub mod signature;
 /// Module for managing APT source lists
 pub mod sources_manager;
+pub mod traits;
 
 /// A representation of the repository type, by role of packages it can provide, either `Binary`
 /// (indicated by `deb`) or `Source` (indicated by `deb-src`).
@@ -94,7 +90,7 @@ impl From<&RepositoryType> for String {
     }
 }
 
-impl std::fmt::Display for RepositoryType {
+impl Display for RepositoryType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             RepositoryType::Binary => "deb",
@@ -104,7 +100,7 @@ impl std::fmt::Display for RepositoryType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 /// Enumeration for fields like `By-Hash` which have third value of `force`
 pub enum YesNoForce {
     /// True
@@ -145,7 +141,7 @@ impl std::fmt::Display for YesNoForce {
             YesNoForce::No => "no",
             YesNoForce::Force => "force",
         };
-        write!(f, "{}", s)
+        f.write_str(s)
     }
 }
 
@@ -156,39 +152,23 @@ fn deserialize_types(text: &str) -> Result<HashSet<RepositoryType>, RepositoryEr
 }
 
 fn serialize_types(files: &HashSet<RepositoryType>) -> String {
-    use std::fmt::Write;
-    let mut result = String::new();
-    for (i, rt) in files.iter().enumerate() {
-        if i > 0 {
-            result.push('\n');
-        }
-        write!(&mut result, "{}", rt).unwrap();
-    }
-    result
+    files.iter().map(|rt| rt.to_string()).join("\n")
 }
 
-fn deserialize_uris(text: &str) -> Result<Vec<Url>, String> {
-    // TODO: bad error type
+fn deserialize_uris(text: &str) -> Result<Vec<Url>, RepositoryError> {
     text.split_whitespace()
         .map(Url::from_str)
         .collect::<Result<Vec<Url>, _>>()
-        .map_err(|e| e.to_string()) // TODO: bad error type
+        .map_err(|e| e.into())
 }
 
 fn serialize_uris(uris: &[Url]) -> String {
-    let mut result = String::new();
-    for (i, uri) in uris.iter().enumerate() {
-        if i > 0 {
-            result.push(' ');
-        }
-        result.push_str(uri.as_str());
-    }
-    result
+    uris.iter().map(|u| u.as_str()).join(" ")
 }
 
-fn deserialize_string_chain(text: &str) -> Result<Vec<String>, String> {
+fn deserialize_string_chain(text: &str) -> Result<Vec<String>, RepositoryError> {
     // TODO: bad error type
-    Ok(text.split_whitespace().map(|x| x.to_string()).collect())
+    Ok(text.split_whitespace().map(|x| x.into()).collect())
 }
 
 fn deserialize_yesno(text: &str) -> Result<bool, String> {
@@ -252,7 +232,7 @@ pub struct Repository {
     /// If `no` (false) the repository is ignored by APT
     #[deb822(field = "Enabled", deserialize_with = deserialize_yesno, serialize_with = serializer_yesno)]
     // TODO: support for `default` if omitted is missing
-    pub enabled: Option<bool>,
+    enabled: Option<bool>,
 
     /// The value `RepositoryType::Binary` (`deb`) or/and `RepositoryType::Source` (`deb-src`)
     #[deb822(field = "Types", deserialize_with = deserialize_types, serialize_with = serialize_types)]
@@ -270,7 +250,7 @@ pub struct Repository {
 
     /// (Optional) Architectures binaries from this repository run on
     #[deb822(field = "Architectures", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    pub architectures: Vec<String>,
+    architectures: Option<Vec<String>>,
     /// (Optional) Translations support to download
     #[deb822(field = "Languages", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
     pub languages: Option<Vec<String>>, // TODO: Option is redundant to empty vectors
@@ -306,13 +286,31 @@ pub struct Repository {
 
     /// (Optional) Field not present in the man page, but used in APT unit tests, potentially to hold the repository description
     #[deb822(field = "Description")]
-    pub description: Option<String>, // options: HashMap<String, String> // My original parser kept remaining optional fields in the hash map, is this right approach?
+    description: Option<String>, // options: HashMap<String, String> // [MF] My original parser kept remaining optional fields in the hash map, is this right approach?
 }
 
 impl Repository {
-    /// Returns slice of strings containing suites for which this repository provides
-    pub fn suites(&self) -> &[String] {
-        self.suites.as_slice()
+    /// Creates empty instance of `Repository` which is a single entry for `Repositories`` (a _Paragraph_ in DEB822 sense)
+    pub fn empty() -> Self {
+        Self {
+            enabled: None,
+            types: HashSet::with_capacity(1), // [MF] Assuming some would like to set it to `Binary`
+            uris: vec![],
+            suites: vec![],
+            components: None,
+            architectures: None,
+            languages: None,
+            targets: None,
+            pdiffs: None,
+            by_hash: None,
+            allow_insecure: None,
+            allow_weak: None,
+            allow_downgrade_to_insecure: None,
+            trusted: None,
+            signature: None,
+            x_repolib_name: None,
+            description: None,
+        }
     }
 
     /// Generate legacy .list format lines for this repository
@@ -347,6 +345,7 @@ impl Repository {
     }
 
     /// Parse a legacy apt sources.list line (e.g., "deb http://example.com/debian stable main")
+    /// This is not complete support, doesn't parse options in square brackets like `[arch=amd64]`
     pub fn parse_legacy_line(line: &str) -> Result<Repository, String> {
         let parts: Vec<&str> = line.split_whitespace().collect();
 
@@ -371,10 +370,225 @@ impl Repository {
             uris: vec![uri],
             suites: vec![suite],
             components: Some(components),
-            architectures: vec![],
+            architectures: Some(vec![]),
             signature: None,
             ..Default::default()
         })
+    }
+}
+
+impl traits::Repository for Repository {
+    fn suites(&self) -> Cow<'_, [String]> {
+        Cow::Borrowed(self.suites.as_slice())
+    }
+
+    fn enabled(&self) -> bool {
+        self.enabled.is_none_or(|x| x)
+    }
+
+    fn types(&self) -> Cow<'_, HashSet<RepositoryType>> {
+        Cow::Borrowed(&self.types)
+    }
+
+    fn uris(&self) -> Cow<'_, [url::Url]> {
+        Cow::Borrowed(self.uris.as_slice())
+    }
+
+    fn components(&self) -> Cow<'_, [String]> {
+        Cow::Borrowed(self.components.as_ref().map_or(&[], |x| x.as_slice()))
+    }
+
+    fn architectures(&self) -> Cow<'_, [String]> {
+        Cow::Borrowed(self.architectures.as_ref().map_or(&[], |x| x.as_slice()))
+    }
+
+    fn languages(&self) -> Cow<'_, [String]> {
+        Cow::Borrowed(self.languages.as_ref().map_or(&[], |x| x.as_slice()))
+    }
+
+    fn targets(&self) -> Cow<'_, [String]> {
+        Cow::Borrowed(self.targets.as_ref().map_or(&[], |x| x.as_slice()))
+    }
+
+    fn pdiffs(&self) -> Option<bool> {
+        self.pdiffs
+    }
+
+    fn by_hash(&self) -> Option<YesNoForce> {
+        self.by_hash
+    }
+
+    fn allow_insecure(&self) -> Option<bool> {
+        self.allow_insecure
+    }
+
+    fn allow_weak(&self) -> Option<bool> {
+        self.allow_weak
+    }
+
+    fn allow_downgrade_to_insecure(&self) -> Option<bool> {
+        self.allow_downgrade_to_insecure
+    }
+
+    fn trusted(&self) -> Option<bool> {
+        self.trusted
+    }
+
+    fn signature(&self) -> Option<Cow<'_, Signature>> {
+        self.signature.as_ref().map(|v| Cow::Borrowed(v))
+    }
+
+    fn x_repolib_name(&self) -> Option<Cow<'_, str>> {
+        self.x_repolib_name
+            .as_ref()
+            .map(|v| Cow::Borrowed(v.as_str()))
+    }
+
+    fn description(&self) -> Option<Cow<'_, str>> {
+        self.description.as_ref().map(|v| Cow::Borrowed(v.as_str()))
+    }
+}
+
+impl traits::RepositoryMut for Repository {
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = match enabled {
+            true => None,
+            false => Some(false),
+        }
+    }
+
+    fn set_types<T>(&mut self, types: T)
+    where
+        T: IntoIterator<Item = RepositoryType>,
+    {
+        self.types = types.into_iter().collect();
+    }
+
+    fn set_uris(&mut self, uris: &[Url]) {
+        self.uris = uris.into_iter().map(|u| u.to_owned()).collect();
+    }
+
+    fn set_suites<T, I>(&mut self, suites: T)
+    where
+        T: IntoIterator<Item = I>,
+        I: AsRef<str>,
+    {
+        self.suites = suites.into_iter().map(|s| s.as_ref().to_owned()).collect();
+    }
+
+    fn set_components<T, A, I>(&mut self, components: T)
+    where
+        T: IntoIterator<Item = A, IntoIter = I>,
+        I: ExactSizeIterator<Item = A>,
+        A: AsRef<str>,
+    {
+        let iter = components.into_iter();
+        if iter.len() != 0 {
+            self.components = Some(iter.map(|s| s.as_ref().to_owned()).collect());
+        } else {
+            self.components = None;
+        }
+    }
+
+    fn set_architectures<T, A, I>(&mut self, architectures: T)
+    where
+        T: IntoIterator<Item = A, IntoIter = I>,
+        I: ExactSizeIterator<Item = A>,
+        A: AsRef<str>,
+    {
+        let iter = architectures.into_iter();
+        if iter.len() != 0 {
+            self.architectures = Some(iter.map(|s| s.as_ref().to_owned()).collect());
+        } else {
+            self.architectures = None;
+        }
+    }
+
+    fn set_languages<T, L, I>(&mut self, languages: T)
+    where
+        T: IntoIterator<Item = L, IntoIter = I>,
+        I: ExactSizeIterator<Item = L>,
+        L: AsRef<str>,
+    {
+        let iter = languages.into_iter();
+        if iter.len() != 0 {
+            self.languages = Some(iter.map(|s| s.as_ref().to_owned()).collect());
+        } else {
+            self.languages = None;
+        }
+    }
+
+    fn set_targets<T, G, I>(&mut self, targets: T)
+    where
+        T: IntoIterator<Item = G, IntoIter = I>,
+        I: ExactSizeIterator<Item = G>,
+        G: AsRef<str>,
+    {
+        let iter = targets.into_iter();
+        self.targets = if iter.len() != 0 {
+            Some(iter.map(|s| s.as_ref().to_owned()).collect())
+        } else {
+            None
+        }
+    }
+
+    fn set_pdiffs(&mut self, pdiffs: Option<bool>) {
+        self.pdiffs = pdiffs;
+    }
+
+    fn set_by_hash(&mut self, by_hash: Option<YesNoForce>) {
+        self.by_hash = by_hash;
+    }
+
+    fn set_allow_insecure(&mut self, allow_insecure: Option<bool>) {
+        self.allow_insecure = allow_insecure;
+    }
+
+    fn set_allow_weak(&mut self, allow_weak: Option<bool>) {
+        self.allow_weak = allow_weak;
+    }
+
+    fn set_allow_downgrade_to_insecure(&mut self, adti: Option<bool>) {
+        self.allow_downgrade_to_insecure = adti;
+    }
+
+    fn set_trusted(&mut self, trusted: Option<bool>) {
+        self.trusted = trusted;
+    }
+
+    fn set_signature<O, S>(&mut self, signature: O)
+    where
+        O: Borrow<Option<S>>,
+        S: Borrow<Signature>,
+    {
+        //println!("* signature = {:?}", signature);
+        self.signature = match signature.borrow() {
+            Some(x) => Some(x.borrow().to_owned()),
+            None => None,
+        }
+        //self.signature = signature.as_ref().to_owned();
+    }
+
+    fn set_x_repolib_name<N>(&mut self, x_repolib_name: N)
+    where
+        N: AsRef<str>,
+    {
+        if x_repolib_name.as_ref().len() != 0 {
+            self.x_repolib_name = Some(x_repolib_name.as_ref().to_owned());
+        } else {
+            self.x_repolib_name = None;
+        }
+    }
+
+    fn set_description<D>(&mut self, description: D)
+    where
+        D: AsRef<str>,
+    {
+        if description.as_ref().len() != 0 {
+            self.description = Some(description.as_ref().to_owned());
+        } else {
+            self.description = None;
+        }
     }
 }
 
@@ -394,6 +608,12 @@ impl Repositories {
         Container: Into<Vec<Repository>>,
     {
         Repositories(container.into())
+    }
+
+    /// Provides iterator over individual repositories in the whole file
+    pub fn repositories(&self) -> impl Iterator<Item = &Repository> {
+        // TODO: that's by ref, not compatible with lossless
+        self.0.iter()
     }
 
     /// Push a new repository
@@ -468,12 +688,15 @@ impl Deref for Repositories {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::{collections::HashSet, str::FromStr};
 
     use indoc::indoc;
     use url::Url;
 
     use crate::{signature::Signature, Repositories, Repository, RepositoryType};
+
+    use crate::traits::{Repository as RepositoryTrait, RepositoryMut};
 
     #[test]
     fn test_not_machine_readable() {
@@ -484,8 +707,39 @@ mod tests {
         );
         let ret = s.parse::<Repositories>();
         assert!(ret.is_err());
-        //assert_eq!(ret.unwrap_err(), "Not machine readable".to_string());
         assert_eq!(ret.unwrap_err(), "Unexpected token:  ".to_string());
+        //assert_eq!(ret.unwrap_err(), "Not machine readable".to_string());
+        //assert_eq!(
+        //    ret.unwrap_err(),
+        //    "expected ':', got Some(NEWLINE)\n".to_owned()
+        //);
+    }
+
+    #[test]
+    fn test_parse_trivial() {
+        let s = indoc!(
+            r#"
+            Types: deb
+            URIs: https://ports.ubuntu.com/
+            Suites: jammy
+            Components: main restricted universe multiverse
+        "#
+        );
+
+        let repos = s
+            .parse::<Repositories>()
+            .expect("Shall be parsed flawlessly");
+        assert!(repos[0].types.contains(&super::RepositoryType::Binary));
+        assert_eq!(
+            repos[0].components().as_ref(),
+            [
+                "main".to_owned(),
+                "restricted".to_owned(),
+                "universe".to_owned(),
+                "multiverse".to_owned()
+            ]
+        );
+        // assert_eq!(ret.unwrap_err(), "Unexpected token:  ".to_string());
     }
 
     #[test]
@@ -559,7 +813,7 @@ mod tests {
         let repos = Repositories::new([Repository {
             enabled: Some(true), // TODO: looks odd, as only `Enabled: no` in meaningful
             types: HashSet::from([RepositoryType::Binary]),
-            architectures: vec!["arm64".to_owned()],
+            architectures: Some(vec!["arm64".to_owned()]),
             uris: vec![Url::from_str("https://deb.debian.org/debian").unwrap()],
             suites: vec!["jammy".to_owned()],
             components: Some(vec!["main".to_owned()]),
@@ -581,6 +835,35 @@ mod tests {
             Components: main
             Architectures: arm64
         "#}
+        );
+    }
+
+    #[test]
+    fn test_mutable_trait_then_serialize() {
+        let mut r = Repository::empty();
+
+        r.set_types([RepositoryType::Binary]);
+        r.set_uris(&[Url::parse("https://packages.distro.rs/debian").expect("Right URL")]);
+        r.set_suites(vec!["stable"]);
+        r.set_components(vec!["main".to_owned()]);
+        r.set_architectures(["arm64"]);
+        let s = Signature::KeyPath(PathBuf::from("/usr/share/keyrings/jelmer.gpg"));
+        r.set_signature(Some(&s)); // TODO: this stuff doesn't build yet
+
+        let r = Repositories::new([r]);
+
+        let text = r.to_string();
+
+        assert_eq!(
+            text,
+            indoc! {r#"
+                Types: deb
+                URIs: https://packages.distro.rs/debian
+                Suites: stable
+                Components: main
+                Architectures: arm64
+                Signed-By: /usr/share/keyrings/jelmer.gpg
+            "#}
         );
     }
 

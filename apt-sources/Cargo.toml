@@ -2,7 +2,7 @@
 name = "apt-sources"
 authors = ["Michał Fita <4925040+michalfita@users.noreply.github.com>"]
 edition = "2021"
-version = "0.1.0"
+version = "0.2.0"
 license = "Apache-2.0"
 description = "A parser for APT source files (package repositories specification)"
 repository = { workspace = true }
@@ -11,15 +11,23 @@ keywords = ["debian", "deb822", "rfc822", "edit", "apt"]
 categories = ["parser-implementations"]
 
 [features]
-default = []
+default = ["lossless"]
+lossless = []
 key-management = ["dep:sequoia-openpgp", "dep:sequoia-net", "dep:tokio"]
 
 [dependencies]
-deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = ["derive"] }
+deb822-lossless = { version = ">=0.2.4", path = "../deb822-lossless" }
+deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = [
+    "derive",
+] }
 url = { version = "2.5.4", features = ["serde"] }
 sequoia-net = { version = "0.30", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt", "macros"], optional = true }
-sequoia-openpgp = { version = "2.0", default-features = false, features = ["compression-deflate", "crypto-openssl"], optional = true }
+sequoia-openpgp = { version = "2.0", default-features = false, features = [
+    "compression-deflate",
+    "crypto-openssl",
+], optional = true }
+itertools = { version = "0.14.0" }
 
 [dev-dependencies]
 indoc = { version = "2.0.6" }

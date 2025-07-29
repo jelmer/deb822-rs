@@ -19,11 +19,19 @@ pub enum RepositoryError {
     Lossy(deb822_fast::Error),
     /// I/O Error
     Io(std::io::Error),
+    /// Problem with URL validity
+    URLParsingFailure(url::ParseError),
 }
 
 impl From<std::io::Error> for RepositoryError {
     fn from(e: std::io::Error) -> Self {
         Self::Io(e)
+    }
+}
+
+impl From<url::ParseError> for RepositoryError {
+    fn from(e: url::ParseError) -> Self {
+        Self::URLParsingFailure(e)
     }
 }
 
@@ -37,6 +45,7 @@ impl std::fmt::Display for RepositoryError {
             Self::InvalidSignature => write!(f, "The field `Signed-By` is incorrect"),
             Self::Lossy(e) => write!(f, "Lossy parser error: {}", e),
             Self::Io(e) => write!(f, "IO error: {}", e),
+            Self::URLParsingFailure(e) => write!(f, "URL parsing failure: {}", e),
         }
     }
 }

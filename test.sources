@@ -1,0 +1,4 @@
+Types: deb
+URIs: https://packages.distro.rs/debian
+Suites: stable
+Components: main
