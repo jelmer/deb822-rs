@@ -221,6 +221,48 @@ impl Control {
             .0
             .wrap_and_sort(Some(&sort_paragraphs), Some(&wrap_paragraph));
     }
+
+    /// Iterate over fields that overlap with the given range
+    ///
+    /// This method returns all fields (entries) from all paragraphs that have any overlap
+    /// with the specified text range. This is useful for incremental parsing in LSP contexts
+    /// where you only want to process fields that were affected by a text change.
+    ///
+    /// # Arguments
+    /// * `range` - The text range to check for overlaps
+    ///
+    /// # Returns
+    /// An iterator over all Entry items that overlap with the given range
+    ///
+    /// # Example
+    /// ```rust
+    /// use debian_control::lossless::Control;
+    /// use deb822_lossless::TextRange;
+    ///
+    /// let control_text = "Source: foo\nMaintainer: test@example.com\n\nPackage: bar\nArchitecture: all\n";
+    /// let control: Control = control_text.parse().unwrap();
+    ///
+    /// // Get fields in a specific range (e.g., where a change occurred)
+    /// let change_range = TextRange::new(20.into(), 40.into());
+    /// for entry in control.fields_in_range(change_range) {
+    ///     if let Some(key) = entry.key() {
+    ///         println!("Field {} was in the changed range", key);
+    ///     }
+    /// }
+    /// ```
+    pub fn fields_in_range(
+        &self,
+        range: rowan::TextRange,
+    ) -> impl Iterator<Item = deb822_lossless::Entry> + '_ {
+        self.0
+            .paragraphs()
+            .flat_map(move |p| p.entries().collect::<Vec<_>>())
+            .filter(move |entry| {
+                let entry_range = entry.syntax().text_range();
+                // Check if ranges overlap
+                entry_range.start() < range.end() && range.start() < entry_range.end()
+            })
+    }
 }
 
 impl From<Control> for Deb822 {
@@ -582,6 +624,35 @@ impl Source {
     /// Set the Testsuite field
     pub fn set_testsuite(&mut self, testsuite: &str) {
         self.0.set("Testsuite", testsuite);
+    }
+
+    /// Check if this source paragraph's range overlaps with the given range
+    ///
+    /// # Arguments
+    /// * `range` - The text range to check for overlap
+    ///
+    /// # Returns
+    /// `true` if the paragraph overlaps with the given range, `false` otherwise
+    pub fn overlaps_range(&self, range: rowan::TextRange) -> bool {
+        let para_range = self.0.syntax().text_range();
+        para_range.start() < range.end() && range.start() < para_range.end()
+    }
+
+    /// Get fields in this source paragraph that overlap with the given range
+    ///
+    /// # Arguments
+    /// * `range` - The text range to check for overlaps
+    ///
+    /// # Returns
+    /// An iterator over Entry items that overlap with the given range
+    pub fn fields_in_range(
+        &self,
+        range: rowan::TextRange,
+    ) -> impl Iterator<Item = deb822_lossless::Entry> + '_ {
+        self.0.entries().filter(move |entry| {
+            let entry_range = entry.syntax().text_range();
+            entry_range.start() < range.end() && range.start() < entry_range.end()
+        })
     }
 }
 
@@ -964,6 +1035,35 @@ impl Binary {
     pub fn set_homepage(&mut self, url: &url::Url) {
         self.0.set("Homepage", url.as_str());
     }
+
+    /// Check if this binary paragraph's range overlaps with the given range
+    ///
+    /// # Arguments
+    /// * `range` - The text range to check for overlap
+    ///
+    /// # Returns
+    /// `true` if the paragraph overlaps with the given range, `false` otherwise
+    pub fn overlaps_range(&self, range: rowan::TextRange) -> bool {
+        let para_range = self.0.syntax().text_range();
+        para_range.start() < range.end() && range.start() < para_range.end()
+    }
+
+    /// Get fields in this binary paragraph that overlap with the given range
+    ///
+    /// # Arguments
+    /// * `range` - The text range to check for overlaps
+    ///
+    /// # Returns
+    /// An iterator over Entry items that overlap with the given range
+    pub fn fields_in_range(
+        &self,
+        range: rowan::TextRange,
+    ) -> impl Iterator<Item = deb822_lossless::Entry> + '_ {
+        self.0.entries().filter(move |entry| {
+            let entry_range = entry.syntax().text_range();
+            entry_range.start() < range.end() && range.start() < entry_range.end()
+        })
+    }
 }
 
 #[cfg(test)]
@@ -1181,5 +1281,221 @@ Section: libs
         let deb822: Deb822 = deb822_data.parse().unwrap();
         let control = Control::from(deb822);
         assert!(control.source().is_some());
+    }
+
+    #[test]
+    fn test_fields_in_range() {
+        let control_text = r#"Source: test-package
+Maintainer: Test User <test@example.com>
+Build-Depends: debhelper (>= 12)
+
+Package: test-binary
+Architecture: any
+Depends: ${shlibs:Depends}
+Description: Test package
+ This is a test package
+"#;
+        let control: Control = control_text.parse().unwrap();
+
+        // Test range that covers only the Source field
+        let source_start = 0;
+        let source_end = "Source: test-package".len();
+        let source_range =
+            rowan::TextRange::new((source_start as u32).into(), (source_end as u32).into());
+
+        let fields: Vec<_> = control.fields_in_range(source_range).collect();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].key(), Some("Source".to_string()));
+
+        // Test range that covers multiple fields in source paragraph
+        let maintainer_start = control_text.find("Maintainer:").unwrap();
+        let build_depends_end = control_text
+            .find("Build-Depends: debhelper (>= 12)")
+            .unwrap()
+            + "Build-Depends: debhelper (>= 12)".len();
+        let multi_range = rowan::TextRange::new(
+            (maintainer_start as u32).into(),
+            (build_depends_end as u32).into(),
+        );
+
+        let fields: Vec<_> = control.fields_in_range(multi_range).collect();
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].key(), Some("Maintainer".to_string()));
+        assert_eq!(fields[1].key(), Some("Build-Depends".to_string()));
+
+        // Test range that spans across paragraphs
+        let cross_para_start = control_text.find("Build-Depends:").unwrap();
+        let cross_para_end =
+            control_text.find("Architecture: any").unwrap() + "Architecture: any".len();
+        let cross_range = rowan::TextRange::new(
+            (cross_para_start as u32).into(),
+            (cross_para_end as u32).into(),
+        );
+
+        let fields: Vec<_> = control.fields_in_range(cross_range).collect();
+        assert_eq!(fields.len(), 3); // Build-Depends, Package, Architecture
+        assert_eq!(fields[0].key(), Some("Build-Depends".to_string()));
+        assert_eq!(fields[1].key(), Some("Package".to_string()));
+        assert_eq!(fields[2].key(), Some("Architecture".to_string()));
+
+        // Test empty range (should return no fields)
+        let empty_range = rowan::TextRange::new(1000.into(), 1001.into());
+        let fields: Vec<_> = control.fields_in_range(empty_range).collect();
+        assert_eq!(fields.len(), 0);
+    }
+
+    #[test]
+    fn test_source_overlaps_range() {
+        let control_text = r#"Source: test-package
+Maintainer: Test User <test@example.com>
+
+Package: test-binary
+Architecture: any
+"#;
+        let control: Control = control_text.parse().unwrap();
+        let source = control.source().unwrap();
+
+        // Test range that overlaps with source paragraph
+        let overlap_range = rowan::TextRange::new(10.into(), 30.into());
+        assert!(source.overlaps_range(overlap_range));
+
+        // Test range that doesn't overlap with source paragraph
+        let binary_start = control_text.find("Package:").unwrap();
+        let no_overlap_range = rowan::TextRange::new(
+            (binary_start as u32).into(),
+            ((binary_start + 20) as u32).into(),
+        );
+        assert!(!source.overlaps_range(no_overlap_range));
+
+        // Test range that starts before and ends within source paragraph
+        let partial_overlap = rowan::TextRange::new(0.into(), 15.into());
+        assert!(source.overlaps_range(partial_overlap));
+    }
+
+    #[test]
+    fn test_source_fields_in_range() {
+        let control_text = r#"Source: test-package
+Maintainer: Test User <test@example.com>
+Build-Depends: debhelper (>= 12)
+
+Package: test-binary
+"#;
+        let control: Control = control_text.parse().unwrap();
+        let source = control.source().unwrap();
+
+        // Test range covering Maintainer field
+        let maintainer_start = control_text.find("Maintainer:").unwrap();
+        let maintainer_end = maintainer_start + "Maintainer: Test User <test@example.com>".len();
+        let maintainer_range = rowan::TextRange::new(
+            (maintainer_start as u32).into(),
+            (maintainer_end as u32).into(),
+        );
+
+        let fields: Vec<_> = source.fields_in_range(maintainer_range).collect();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].key(), Some("Maintainer".to_string()));
+
+        // Test range covering multiple fields
+        let all_source_range = rowan::TextRange::new(0.into(), 100.into());
+        let fields: Vec<_> = source.fields_in_range(all_source_range).collect();
+        assert_eq!(fields.len(), 3); // Source, Maintainer, Build-Depends
+    }
+
+    #[test]
+    fn test_binary_overlaps_range() {
+        let control_text = r#"Source: test-package
+
+Package: test-binary
+Architecture: any
+Depends: ${shlibs:Depends}
+"#;
+        let control: Control = control_text.parse().unwrap();
+        let binary = control.binaries().next().unwrap();
+
+        // Test range that overlaps with binary paragraph
+        let package_start = control_text.find("Package:").unwrap();
+        let overlap_range = rowan::TextRange::new(
+            (package_start as u32).into(),
+            ((package_start + 30) as u32).into(),
+        );
+        assert!(binary.overlaps_range(overlap_range));
+
+        // Test range before binary paragraph
+        let no_overlap_range = rowan::TextRange::new(0.into(), 10.into());
+        assert!(!binary.overlaps_range(no_overlap_range));
+    }
+
+    #[test]
+    fn test_binary_fields_in_range() {
+        let control_text = r#"Source: test-package
+
+Package: test-binary
+Architecture: any
+Depends: ${shlibs:Depends}
+Description: Test binary
+ This is a test binary package
+"#;
+        let control: Control = control_text.parse().unwrap();
+        let binary = control.binaries().next().unwrap();
+
+        // Test range covering Architecture and Depends
+        let arch_start = control_text.find("Architecture:").unwrap();
+        let depends_end = control_text.find("Depends: ${shlibs:Depends}").unwrap()
+            + "Depends: ${shlibs:Depends}".len();
+        let range = rowan::TextRange::new((arch_start as u32).into(), (depends_end as u32).into());
+
+        let fields: Vec<_> = binary.fields_in_range(range).collect();
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].key(), Some("Architecture".to_string()));
+        assert_eq!(fields[1].key(), Some("Depends".to_string()));
+
+        // Test partial overlap with Description field
+        let desc_start = control_text.find("Description:").unwrap();
+        let partial_range = rowan::TextRange::new(
+            ((desc_start + 5) as u32).into(),
+            ((desc_start + 15) as u32).into(),
+        );
+        let fields: Vec<_> = binary.fields_in_range(partial_range).collect();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].key(), Some("Description".to_string()));
+    }
+
+    #[test]
+    fn test_incremental_parsing_use_case() {
+        // This test simulates a real LSP use case where only changed fields are processed
+        let control_text = r#"Source: example
+Maintainer: John Doe <john@example.com>
+Standards-Version: 4.6.0
+Build-Depends: debhelper-compat (= 13)
+
+Package: example-bin
+Architecture: all
+Depends: ${misc:Depends}
+Description: Example package
+ This is an example.
+"#;
+        let control: Control = control_text.parse().unwrap();
+
+        // Simulate a change to Standards-Version field
+        let change_start = control_text.find("Standards-Version:").unwrap();
+        let change_end = change_start + "Standards-Version: 4.6.0".len();
+        let change_range =
+            rowan::TextRange::new((change_start as u32).into(), (change_end as u32).into());
+
+        // Only process fields in the changed range
+        let affected_fields: Vec<_> = control.fields_in_range(change_range).collect();
+        assert_eq!(affected_fields.len(), 1);
+        assert_eq!(
+            affected_fields[0].key(),
+            Some("Standards-Version".to_string())
+        );
+
+        // Verify that we're not processing unrelated fields
+        for entry in &affected_fields {
+            let key = entry.key().unwrap();
+            assert_ne!(key, "Maintainer");
+            assert_ne!(key, "Build-Depends");
+            assert_ne!(key, "Architecture");
+        }
     }
 }
