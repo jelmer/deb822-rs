@@ -429,7 +429,7 @@ dependencies = [
 
 [[package]]
 name = "deb822-lossless"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "criterion",
  "deb822-fast",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "debian-control"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "chrono",
  "deb822-fast",
