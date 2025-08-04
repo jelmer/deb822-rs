@@ -14,7 +14,7 @@ categories = ["parser-implementations"]
 rowan = { version = "0.16", optional = true }
 debversion = ">=0.3"
 regex = "1"
-deb822-lossless = { version = ">=0.3.0", path = "../deb822-lossless", optional = true }
+deb822-lossless = { version = ">=0.3.1", path = "../deb822-lossless", optional = true }
 deb822-fast = { path = "../deb822-fast", features = ["derive"], version = ">=0.2.0" }
 url = "2"
 pyo3 = { workspace = true, optional = true }
