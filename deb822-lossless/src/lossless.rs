@@ -42,6 +42,25 @@ use rowan::ast::AstNode;
 use std::path::Path;
 use std::str::FromStr;
 
+/// A positioned parse error containing location information.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PositionedParseError {
+    /// The error message
+    pub message: String,
+    /// The text range where the error occurred
+    pub range: rowan::TextRange,
+    /// Optional error code for categorization
+    pub code: Option<String>,
+}
+
+impl std::fmt::Display for PositionedParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for PositionedParseError {}
+
 /// List of encountered syntax errors.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParseError(pub Vec<String>);
@@ -120,6 +139,7 @@ pub(crate) struct Parse {
     pub(crate) green_node: GreenNode,
     #[allow(unused)]
     pub(crate) errors: Vec<String>,
+    pub(crate) positioned_errors: Vec<PositionedParseError>,
 }
 
 pub(crate) fn parse(text: &str) -> Parse {
@@ -132,6 +152,12 @@ pub(crate) fn parse(text: &str) -> Parse {
         /// the list of syntax errors we've accumulated
         /// so far.
         errors: Vec<String>,
+        /// positioned errors with location information
+        positioned_errors: Vec<PositionedParseError>,
+        /// All tokens with their positions in forward order for position tracking
+        token_positions: Vec<(SyntaxKind, rowan::TextSize, rowan::TextSize)>,
+        /// current token index (counting from the end since tokens are in reverse)
+        current_token_index: usize,
     }
 
     impl<'a> Parser<'a> {
@@ -148,8 +174,11 @@ pub(crate) fn parse(text: &str) -> Parse {
                     }
                     Some(g) => {
                         self.builder.start_node(ERROR.into());
+                        self.add_positioned_error(
+                            format!("expected newline, got {g:?}"),
+                            Some("unexpected_token".to_string()),
+                        );
                         self.bump();
-                        self.errors.push(format!("expected newline, got {g:?}"));
                         self.builder.finish_node();
                     }
                 }
@@ -163,10 +192,13 @@ pub(crate) fn parse(text: &str) -> Parse {
                 self.skip_ws();
             } else {
                 self.builder.start_node(ERROR.into());
+                self.add_positioned_error(
+                    "expected key".to_string(),
+                    Some("missing_key".to_string()),
+                );
                 if self.current().is_some() {
                     self.bump();
                 }
-                self.errors.push("expected key".to_string());
                 self.builder.finish_node();
             }
             if self.current() == Some(COLON) {
@@ -174,11 +206,13 @@ pub(crate) fn parse(text: &str) -> Parse {
                 self.skip_ws();
             } else {
                 self.builder.start_node(ERROR.into());
+                self.add_positioned_error(
+                    format!("expected ':', got {:?}", self.current()),
+                    Some("missing_colon".to_string()),
+                );
                 if self.current().is_some() {
                     self.bump();
                 }
-                self.errors
-                    .push(format!("expected ':', got {:?}", self.current()));
                 self.builder.finish_node();
             }
             loop {
@@ -195,8 +229,11 @@ pub(crate) fn parse(text: &str) -> Parse {
                     }
                     Some(g) => {
                         self.builder.start_node(ERROR.into());
+                        self.add_positioned_error(
+                            format!("expected newline, got {g:?}"),
+                            Some("unexpected_token".to_string()),
+                        );
                         self.bump();
-                        self.errors.push(format!("expected newline, got {g:?}"));
                         self.builder.finish_node();
                     }
                 }
@@ -236,16 +273,43 @@ pub(crate) fn parse(text: &str) -> Parse {
             Parse {
                 green_node: self.builder.finish(),
                 errors: self.errors,
+                positioned_errors: self.positioned_errors,
             }
         }
         /// Advance one token, adding it to the current branch of the tree builder.
         fn bump(&mut self) {
             let (kind, text) = self.tokens.pop().unwrap();
             self.builder.token(kind.into(), text);
+            if self.current_token_index > 0 {
+                self.current_token_index -= 1;
+            }
         }
         /// Peek at the first unprocessed token
         fn current(&self) -> Option<SyntaxKind> {
             self.tokens.last().map(|(kind, _)| *kind)
+        }
+
+        /// Add a positioned error at the current position
+        fn add_positioned_error(&mut self, message: String, code: Option<String>) {
+            let range = if self.current_token_index < self.token_positions.len() {
+                let (_, start, end) = self.token_positions[self.current_token_index];
+                rowan::TextRange::new(start, end)
+            } else {
+                // Default to end of text if no current token
+                let end = self
+                    .token_positions
+                    .last()
+                    .map(|(_, _, end)| *end)
+                    .unwrap_or_else(|| rowan::TextSize::from(0));
+                rowan::TextRange::new(end, end)
+            };
+
+            self.positioned_errors.push(PositionedParseError {
+                message: message.clone(),
+                range,
+                code,
+            });
+            self.errors.push(message);
         }
         fn skip_ws(&mut self) {
             while self.current() == Some(WHITESPACE) || self.current() == Some(COMMENT) {
@@ -270,11 +334,28 @@ pub(crate) fn parse(text: &str) -> Parse {
     }
 
     let mut tokens = lex(text).collect::<Vec<_>>();
+
+    // Build token positions in forward order
+    let mut token_positions = Vec::new();
+    let mut position = rowan::TextSize::from(0);
+    for (kind, text) in &tokens {
+        let start = position;
+        let end = start + rowan::TextSize::of(*text);
+        token_positions.push((*kind, start, end));
+        position = end;
+    }
+
+    // Reverse tokens for parsing (but keep positions in forward order)
     tokens.reverse();
+    let current_token_index = tokens.len().saturating_sub(1);
+
     Parser {
         tokens,
         builder: GreenNodeBuilder::new(),
         errors: Vec::new(),
+        positioned_errors: Vec::new(),
+        token_positions,
+        current_token_index,
     }
     .parse()
 }
@@ -1841,6 +1922,19 @@ C: D
     #[test]
     fn test_format_parse_error() {
         assert_eq!(ParseError(vec!["foo".to_string()]).to_string(), "foo\n");
+    }
+
+    #[test]
+    fn test_positioned_parse_error() {
+        let error = PositionedParseError {
+            message: "test error".to_string(),
+            range: rowan::TextRange::new(rowan::TextSize::from(5), rowan::TextSize::from(10)),
+            code: Some("test_code".to_string()),
+        };
+        assert_eq!(error.to_string(), "test error");
+        assert_eq!(error.range.start(), rowan::TextSize::from(5));
+        assert_eq!(error.range.end(), rowan::TextSize::from(10));
+        assert_eq!(error.code, Some("test_code".to_string()));
     }
 
     #[test]
