@@ -90,7 +90,8 @@ impl Control {
         // Transform Parse<Deb822> to Parse<Control>
         let green = deb822_parse.green().clone();
         let errors = deb822_parse.errors().to_vec();
-        deb822_lossless::Parse::new(green, errors)
+        let positioned_errors = deb822_parse.positioned_errors().to_vec();
+        deb822_lossless::Parse::new_with_positioned_errors(green, errors, positioned_errors)
     }
 
     /// Return the source package
@@ -1497,5 +1498,45 @@ Description: Example package
             assert_ne!(key, "Build-Depends");
             assert_ne!(key, "Architecture");
         }
+    }
+
+    #[test]
+    fn test_positioned_parse_errors() {
+        // Test case from the requirements document
+        let input = "Invalid: field\nBroken field without colon";
+        let parsed = Control::parse(input);
+
+        // Should have positioned errors accessible
+        let positioned_errors = parsed.positioned_errors();
+        assert!(
+            !positioned_errors.is_empty(),
+            "Should have positioned errors"
+        );
+
+        // Test that we can access error properties
+        for error in positioned_errors {
+            let start_offset: u32 = error.range.start().into();
+            let end_offset: u32 = error.range.end().into();
+
+            // Verify we have meaningful error messages
+            assert!(!error.message.is_empty());
+
+            // Verify ranges are valid
+            assert!(start_offset <= end_offset);
+            assert!(end_offset <= input.len() as u32);
+
+            // Error should have a code
+            assert!(error.code.is_some());
+
+            println!(
+                "Error at {:?}: {} (code: {:?})",
+                error.range, error.message, error.code
+            );
+        }
+
+        // Should also be able to get string errors for backward compatibility
+        let string_errors = parsed.errors();
+        assert!(!string_errors.is_empty());
+        assert_eq!(string_errors.len(), positioned_errors.len());
     }
 }
