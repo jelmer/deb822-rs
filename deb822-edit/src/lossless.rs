@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```rust
-//! use deb822_lossless::Deb822;
+//! use deb822_edit::Deb822;
 //! use std::str::FromStr;
 //!
 //! let input = r###"Package: deb822-lossless
@@ -601,7 +601,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::{Deb822, Paragraph};
+    /// use deb822_edit::{Deb822, Paragraph};
     /// let mut d: Deb822 = vec![
     ///     vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
     ///     vec![("A", "B"), ("C", "D")].into_iter().collect(),
@@ -624,7 +624,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     /// let mut d: Deb822 = vec![
     ///     vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
     ///     vec![("A", "B"), ("C", "D")].into_iter().collect(),
