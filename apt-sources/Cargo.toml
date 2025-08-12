@@ -13,10 +13,12 @@ categories = ["parser-implementations"]
 [features]
 default = []
 key-management = ["dep:sequoia-openpgp", "dep:sequoia-net", "dep:tokio"]
+tracing = ["dep:tracing"]
 
 [dependencies]
 deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = ["derive"] }
 url = { version = "2.5.4", features = ["serde"] }
+tracing = { version = "0.1", optional = true }
 sequoia-net = { version = "0.30", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt", "macros"], optional = true }
 sequoia-openpgp = { version = "2.0", default-features = false, features = ["compression-deflate", "crypto-openssl"], optional = true }

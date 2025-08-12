@@ -69,6 +69,7 @@ dependencies = [
  "sequoia-openpgp",
  "tempfile",
  "tokio",
+ "tracing",
  "url",
 ]
 
