@@ -315,6 +315,26 @@ impl Repository {
         self.suites.as_slice()
     }
 
+    /// Returns the repository types (deb/deb-src)
+    pub fn types(&self) -> &HashSet<RepositoryType> {
+        &self.types
+    }
+
+    /// Returns the repository URIs
+    pub fn uris(&self) -> &[Url] {
+        &self.uris
+    }
+
+    /// Returns the repository components
+    pub fn components(&self) -> Option<&[String]> {
+        self.components.as_deref()
+    }
+
+    /// Returns the repository architectures
+    pub fn architectures(&self) -> &[String] {
+        &self.architectures
+    }
+
     /// Generate legacy .list format lines for this repository
     pub fn to_legacy_format(&self) -> String {
         let mut lines = Vec::new();
@@ -407,6 +427,11 @@ impl Repositories {
         F: FnMut(&Repository) -> bool,
     {
         self.0.retain(f);
+    }
+
+    /// Get iterator over repositories
+    pub fn iter(&self) -> std::slice::Iter<Repository> {
+        self.0.iter()
     }
 
     /// Get mutable iterator over repositories
@@ -748,5 +773,67 @@ mod tests {
         let mut repos = Repositories::empty();
         repos.push(Repository::default());
         assert!(!repos.is_empty());
+    }
+
+    #[test]
+    fn test_repository_getters() {
+        let repo = Repository {
+            types: HashSet::from([RepositoryType::Binary, RepositoryType::Source]),
+            uris: vec![Url::parse("http://example.com/debian").unwrap()],
+            suites: vec!["stable".to_string()],
+            components: Some(vec!["main".to_string(), "contrib".to_string()]),
+            architectures: vec!["amd64".to_string(), "arm64".to_string()],
+            ..Default::default()
+        };
+
+        // Test types getter
+        assert_eq!(
+            repo.types(),
+            &HashSet::from([RepositoryType::Binary, RepositoryType::Source])
+        );
+
+        // Test uris getter
+        assert_eq!(repo.uris().len(), 1);
+        assert_eq!(repo.uris()[0].to_string(), "http://example.com/debian");
+
+        // Test suites getter (existing)
+        assert_eq!(repo.suites(), vec!["stable"]);
+
+        // Test components getter
+        assert_eq!(
+            repo.components(),
+            Some(vec!["main".to_string(), "contrib".to_string()].as_slice())
+        );
+
+        // Test architectures getter
+        assert_eq!(repo.architectures(), vec!["amd64", "arm64"]);
+    }
+
+    #[test]
+    fn test_repositories_iter() {
+        let mut repos = Repositories::empty();
+        repos.push(Repository {
+            suites: vec!["stable".to_string()],
+            ..Default::default()
+        });
+        repos.push(Repository {
+            suites: vec!["testing".to_string()],
+            ..Default::default()
+        });
+
+        // Test iter()
+        let suites: Vec<_> = repos.iter().map(|r| r.suites()).collect();
+        assert_eq!(suites.len(), 2);
+        assert_eq!(suites[0], vec!["stable"]);
+        assert_eq!(suites[1], vec!["testing"]);
+
+        // Test iter_mut() - modifying through mutable iterator
+        for repo in repos.iter_mut() {
+            repo.enabled = Some(false);
+        }
+
+        for repo in repos.iter() {
+            assert_eq!(repo.enabled, Some(false));
+        }
     }
 }
