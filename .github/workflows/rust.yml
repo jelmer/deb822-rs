@@ -20,7 +20,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install OpenSSL on macOS
         if: matrix.os == 'macos-latest'
         run: brew install openssl@3
