@@ -1,8 +1,8 @@
 [package]
 name = "apt-sources"
-authors = ["Michał Fita <4925040+michalfita@users.noreply.github.com>"]
+authors = ["Michał Fita <4925040+michalfita@users.noreply.github.com>", "Jelmer Vernooĳ <jelmer@jelmer.uk>"]
 edition = "2021"
-version = "0.1.0"
+version = "0.1.1"
 license = "Apache-2.0"
 description = "A parser for APT source files (package repositories specification)"
 repository = { workspace = true }
