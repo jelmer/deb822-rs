@@ -4,7 +4,7 @@ Parsers and editors for deb822 style files
 This repository contains parsers and editors for RFC822 style file as used in
 Debian. There are two core crates:
 
-* ``deb822-lossless``: parser that preserves formatting, whitespace and comments as well as allowing syntax errors.
+* ``deb822-edit``: parser that preserves formatting, whitespace and comments as well as allowing syntax errors.
 * ``deb822-fast``: a fast parser that does not preserve formatting, whitespace and comments.
 
 Four related crates that build on these two crates are:

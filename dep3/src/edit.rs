@@ -3,7 +3,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use dep3::lossless::PatchHeader;
+//! use dep3::edit::PatchHeader;
 //! use std::str::FromStr;
 //! let text = r#"From: John Doe <john.doe@example>
 //! Date: Mon, 1 Jan 2000 00:00:00 +0000
@@ -17,7 +17,7 @@
 //! assert_eq!(patch_header.description(), Some("[PATCH] fix a bug".to_string()));
 //! assert_eq!(patch_header.vendor_bugs("Debian").collect::<Vec<_>>(), vec!["https://bugs.debian.org/123456".to_string()]);
 //! ```
-use deb822_lossless::Paragraph;
+use deb822_edit::Paragraph;
 
 use crate::fields::*;
 
@@ -234,7 +234,7 @@ impl Default for PatchHeader {
 }
 
 impl std::str::FromStr for PatchHeader {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_edit::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(PatchHeader(Paragraph::from_str(s)?))

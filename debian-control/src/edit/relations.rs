@@ -2,7 +2,7 @@
 //!
 //! # Example
 //! ```
-//! use debian_control::lossless::relations::{Relations, Relation};
+//! use debian_control::edit::relations::{Relations, Relation};
 //! use debian_control::relations::VersionConstraint;
 //!
 //! let mut relations: Relations = r"python3-dulwich (>= 0.19.0), python3-requests, python3-urllib3 (<< 1.26.0)".parse().unwrap();
@@ -836,7 +836,7 @@ impl Entry {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation,Entry};
+    /// use debian_control::edit::relations::{Relation,Entry};
     /// let mut entry: Entry = r"python3-dulwich (>= 0.19.0) | python3-requests".parse().unwrap();
     /// entry.remove_relation(1);
     /// assert_eq!(entry.to_string(), "python3-dulwich (>= 0.19.0)");
@@ -854,7 +854,7 @@ impl Entry {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation,Entry};
+    /// use debian_control::edit::relations::{Relation,Entry};
     /// let entry = Entry::from(vec!["samba (>= 2.0)".parse::<Relation>().unwrap()]);
     /// assert!(entry.satisfied_by(|name: &str| -> Option<debversion::Version> {
     ///    match name {
@@ -887,7 +887,7 @@ impl Entry {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relations,Entry};
+    /// use debian_control::edit::relations::{Relations,Entry};
     /// let mut relations: Relations = r"python3-dulwich (>= 0.19.0), python3-urllib3 (<< 1.26.0)".parse().unwrap();
     /// let mut entry = relations.get_entry(0).unwrap();
     /// entry.remove();
@@ -951,7 +951,7 @@ impl Entry {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation,Entry};
+    /// use debian_control::edit::relations::{Relation,Entry};
     /// let mut entry: Entry = "samba (>= 2.0)".parse().unwrap();
     /// entry.push("python3-requests".parse().unwrap());
     /// assert_eq!(entry.to_string(), "samba (>= 2.0) | python3-requests");
@@ -1061,7 +1061,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation};
+    /// use debian_control::edit::relations::{Relation};
     /// use debian_control::relations::VersionConstraint;
     /// let relation = Relation::new("samba", Some((VersionConstraint::GreaterThanEqual, "2.0".parse().unwrap())));
     /// assert_eq!(relation.to_string(), "samba (>= 2.0)");
@@ -1105,7 +1105,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation = "  samba  (  >= 2.0) ".parse::<Relation>().unwrap();
     /// assert_eq!(relation.wrap_and_sort().to_string(), "samba (>= 2.0)");
     /// ```
@@ -1181,7 +1181,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation = Relation::simple("samba");
     /// assert_eq!(relation.to_string(), "samba");
     /// ```
@@ -1193,7 +1193,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation};
+    /// use debian_control::edit::relations::{Relation};
     /// use debian_control::relations::VersionConstraint;
     /// let mut relation = Relation::new("samba", Some((VersionConstraint::GreaterThanEqual, "2.0".parse().unwrap())));
     /// relation.drop_constraint();
@@ -1221,7 +1221,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation = Relation::simple("samba");
     /// assert_eq!(relation.name(), "samba");
     /// ```
@@ -1241,7 +1241,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation: Relation = "samba:any".parse().unwrap();
     /// assert_eq!(relation.archqual(), Some("any".to_string()));
     /// ```
@@ -1262,7 +1262,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let mut relation = Relation::simple("samba");
     /// relation.set_archqual("any");
     /// assert_eq!(relation.to_string(), "samba:any");
@@ -1317,7 +1317,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation};
+    /// use debian_control::edit::relations::{Relation};
     /// use debian_control::relations::VersionConstraint;
     /// let mut relation = Relation::simple("samba");
     /// relation.set_version(Some((VersionConstraint::GreaterThanEqual, "2.0".parse().unwrap())));
@@ -1405,7 +1405,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation: Relation = "samba [amd64]".parse().unwrap();
     /// assert_eq!(relation.architectures().unwrap().collect::<Vec<_>>(), vec!["amd64".to_string()]);
     /// ```
@@ -1426,7 +1426,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation};
+    /// use debian_control::edit::relations::{Relation};
     /// use debian_control::relations::{BuildProfile};
     /// let relation: Relation = "samba <!nocheck>".parse().unwrap();
     /// assert_eq!(relation.profiles().collect::<Vec<_>>(), vec![vec![BuildProfile::Disabled("nocheck".to_string())]]);
@@ -1463,7 +1463,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation,Entry};
+    /// use debian_control::edit::relations::{Relation,Entry};
     /// let mut entry: Entry = r"python3-dulwich (>= 0.19.0) | python3-urllib3 (<< 1.26.0)".parse().unwrap();
     /// let mut relation = entry.get_relation(0).unwrap();
     /// relation.remove();
@@ -1533,7 +1533,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let mut relation = Relation::simple("samba");
     /// relation.set_architectures(vec!["amd64", "i386"].into_iter());
     /// assert_eq!(relation.to_string(), "samba [amd64 i386]");
@@ -1591,7 +1591,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// use debian_control::relations::BuildProfile;
     /// let mut relation = Relation::simple("samba");
     /// relation.add_profile(&[BuildProfile::Disabled("nocheck".to_string())]);
@@ -1659,7 +1659,7 @@ impl Relation {
 ///
 /// # Example
 /// ```
-/// use debian_control::lossless::relations::{Relation};
+/// use debian_control::edit::relations::{Relation};
 /// use debian_control::relations::VersionConstraint;
 /// let relation = Relation::build("samba")
 ///    .version_constraint(VersionConstraint::GreaterThanEqual, "2.0".parse().unwrap())
