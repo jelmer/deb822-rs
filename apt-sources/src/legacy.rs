@@ -85,16 +85,6 @@ pub struct LegacyRepository {
     /// (Optional) Contains either absolute path to GPG keyring or embedded GPG public key block, if not set APT uses all trusted keys;
     /// I can't find example of using with fingerprints
     pub signature: Option<Signature>, // signed-by
-
-    #[cfg(target_os = "none")] // TODO: disabled for now
-    // (Optional) Field ignored by APT but used by RepoLib to identify repositories, Ubuntu sources contain them
-    pub x_repolib_name: Option<String>, // this supports RepoLib still used by PopOS, even if removed from Debian/Ubuntu
-
-    #[cfg(target_os = "none")] // TODO: disabled for now
-    // (Optional) Field not present in the man page, but used in APT unit tests, potentially to hold the repository description
-    description: Option<String>,
-    // TODO: [MF] My original parser kept remaining optional fields in the hash map, is this right approach?
-    // options: HashMap<String, String>
 }
 
 impl Default for LegacyRepository {
@@ -350,15 +340,6 @@ impl Display for LegacyRepository {
                     }
                 })
                 .unwrap_or(Cow::Borrowed("")),
-            // TODO: this stuff remain unsupported for now, doesn't fine `.lists` format well
-            // self.x_repolib_name
-            //     .as_ref()
-            //     .and_then(|x| Some(Cow::Owned(format!("x-repolib-name={}", x))))
-            //     .unwrap_or(Cow::Borrowed("")),
-            // self.description
-            //     .as_ref()
-            //     .and_then(|x| Some(Cow::Owned(format!("description={}", x)))) // TODO: serious doubts about feasibility as this is undocumented extension
-            //     .unwrap_or(Cow::Borrowed("")),
         ];
         let options = options.iter().filter(|s| !s.is_empty()).join(" ");
         options.is_empty().not().then(|| write!(f, " [{options}]"));
