@@ -1,0 +1,23 @@
+[package]
+name = "debian-copyright-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.debian-copyright]
+path = ".."
+
+[[bin]]
+name = "parse_copyright"
+path = "fuzz_targets/parse_copyright.rs"
+test = false
+doc = false
+bench = false

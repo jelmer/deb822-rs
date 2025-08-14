@@ -1,0 +1,23 @@
+[package]
+name = "dep3-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.dep3]
+path = ".."
+
+[[bin]]
+name = "parse_dep3"
+path = "fuzz_targets/parse_dep3.rs"
+test = false
+doc = false
+bench = false

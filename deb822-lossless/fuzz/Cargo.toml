@@ -1,0 +1,30 @@
+[package]
+name = "deb822-lossless-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.deb822-lossless]
+path = ".."
+
+[[bin]]
+name = "parse_deb822"
+path = "fuzz_targets/parse_deb822.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "modify_deb822"
+path = "fuzz_targets/modify_deb822.rs"
+test = false
+doc = false
+bench = false
