@@ -321,7 +321,7 @@ impl Display for LegacyRepository {
         let options = vec![
             option_output("arch", &self.architectures),
             option_output("lang", &self.languages),
-            option_output("lang", &self.targets),
+            option_output("target", &self.targets),
             self.pdiffs
                 .map(|p| Cow::Owned(format!("pdiff={}", p.then_some("yes").unwrap_or("no"))))
                 .unwrap_or(Cow::Borrowed("")),
