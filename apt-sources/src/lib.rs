@@ -594,12 +594,12 @@ impl Repositories {
     }
 
     /// Get iterator over repositories
-    pub fn iter(&self) -> std::slice::Iter<Repository> {
+    pub fn iter(&self) -> std::slice::Iter<'_, Repository> {
         self.0.iter()
     }
 
     /// Get mutable iterator over repositories
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<Repository> {
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Repository> {
         self.0.iter_mut()
     }
 
