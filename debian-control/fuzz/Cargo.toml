@@ -1,8 +1,10 @@
 [package]
-name = "deb822-lossless-fuzz"
+name = "debian-control-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
+
+[workspace]
 
 [package.metadata]
 cargo-fuzz = true
@@ -10,12 +12,26 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
-[dependencies.deb822-lossless]
+[dependencies.debian-control]
 path = ".."
 
 [[bin]]
-name = "fuzz_target_1"
-path = "fuzz_targets/fuzz_target_1.rs"
+name = "parse_control"
+path = "fuzz_targets/parse_control.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_lossless_control"
+path = "fuzz_targets/parse_lossless_control.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_relations"
+path = "fuzz_targets/parse_relations.rs"
 test = false
 doc = false
 bench = false
