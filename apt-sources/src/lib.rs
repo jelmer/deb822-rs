@@ -44,9 +44,11 @@
 // preserving formatting.
 
 use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
-use error::RepositoryError;
+use error::{LoadError, RepositoryError};
 use itertools::Itertools;
+use legacy::LegacyRepositories;
 use signature::Signature;
+use std::path::Path;
 use std::result::Result;
 use std::{collections::HashSet, ops::Deref, str::FromStr};
 use url::Url;
@@ -302,11 +304,53 @@ impl Repository {
     pub fn suites(&self) -> &[String] {
         self.suites.as_slice()
     }
+
+    /// Returns the repository types (deb/deb-src)
+    pub fn types(&self) -> &HashSet<RepositoryType> {
+        &self.types
+    }
+
+    /// Returns the repository URIs
+    pub fn uris(&self) -> &[Url] {
+        &self.uris
+    }
+
+    /// Returns the repository components
+    pub fn components(&self) -> Option<&[String]> {
+        self.components.as_deref()
+    }
+
+    /// Returns the repository architectures
+    pub fn architectures(&self) -> &[String] {
+        &self.architectures
+    }
 }
 
 /// Container for multiple `Repository` specifications as single `.sources` file may contain as per specification
 #[derive(Debug, Clone, PartialEq)]
 pub struct Repositories(Vec<Repository>);
+
+impl Default for Repositories {
+    /// Creates a default instance by loading repositories from /etc/apt/
+    ///
+    /// Errors are logged as warnings (if the `tracing` feature is enabled) but
+    /// don't prevent loading valid repositories (like APT does)
+    fn default() -> Self {
+        let (repos, errors) = Self::load_from_directory(std::path::Path::new("/etc/apt"));
+
+        // Log any errors encountered, but continue (like APT)
+        #[cfg(feature = "tracing")]
+        for error in errors {
+            tracing::warn!("Failed to load APT source: {}", error);
+        }
+
+        // Without tracing feature, errors are silently ignored
+        #[cfg(not(feature = "tracing"))]
+        let _ = errors;
+
+        repos
+    }
+}
 
 impl Repositories {
     /// Creates empty container of repositories
@@ -322,6 +366,142 @@ impl Repositories {
         Repositories(container.into())
     }
 
+    /// Load repositories from a directory (e.g., /etc/apt/)
+    ///
+    /// This will load:
+    /// - sources.list file from the directory
+    /// - All *.list files from sources.list.d/ subdirectory (in lexicographical order)
+    /// - All *.sources files from sources.list.d/ subdirectory (in lexicographical order)
+    ///
+    /// Returns a tuple of (successfully loaded repositories, errors encountered).
+    /// This method is resilient like APT - errors in individual files don't prevent
+    /// loading other valid repositories.
+    ///
+    /// <div class="warning">
+    /// This loads all repositories from all files, but information about which file they're
+    /// loaded from is **lost** in the process.u
+    /// </div>
+    pub fn load_from_directory(path: &Path) -> (Self, Vec<LoadError>) {
+        use std::fs;
+
+        let mut all_repositories = Repositories::empty();
+        let mut errors = Vec::new();
+
+        // Process main sources.list file if it exists
+        let main_sources = path.join("sources.list");
+        if main_sources.exists() {
+            match fs::read_to_string(&main_sources) {
+                Ok(content) => {
+                    match LegacyRepositories::from_str(&content)/*Self::parse_legacy_format(&content)*/ {
+                        Ok(repos) => {
+                           // let legacy_repos = .collect::<Vec<Repository>, _>>();
+                            all_repositories.extend(repos.repositories().map(|l| l.into()))
+                        },
+                        Err(e) => errors.push(LoadError::Parse {
+                            path: main_sources,
+                            error: e.to_string(), // TODO [MF]: doesn't look right, we shall have error type for every kind
+                        }),
+                    }
+                }
+                Err(e) => errors.push(LoadError::Io {
+                    path: main_sources,
+                    error: e,
+                }),
+            }
+        }
+
+        // Process files from sources.list.d/ directory
+        let sources_d = path.join("sources.list.d");
+        if !sources_d.is_dir() {
+            return (all_repositories, errors);
+        }
+
+        let entries = match fs::read_dir(&sources_d) {
+            Ok(entries) => entries,
+            Err(e) => {
+                errors.push(LoadError::DirectoryRead {
+                    path: sources_d,
+                    error: e,
+                });
+                return (all_repositories, errors);
+            }
+        };
+
+        // Collect and sort entries lexicographically like APT does
+        let mut entry_paths: Vec<_> = entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|p| p.is_file())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.ends_with(".list") || n.ends_with(".sources"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        entry_paths.sort();
+
+        for file_path in entry_paths {
+            let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+            let content = match fs::read_to_string(&file_path) {
+                Ok(content) => content,
+                Err(e) => {
+                    errors.push(LoadError::Io {
+                        path: file_path,
+                        error: e,
+                    });
+                    continue;
+                }
+            };
+
+            let parse_result = if file_name.ends_with(".list") {
+                LegacyRepositories::from_str(&content)
+                    .map(|repos| repos.repositories().map(|l| l.into()).collect())
+                    .map_err(|e| LoadError::Parse {
+                        path: file_path,
+                        error: e.to_string(), // TODO [MF]: looks like it's time for `thiserror`
+                    })
+                // Self::parse_legacy_format(&content)
+                //     .map(|repos| repos.0)
+                //     .map_err(|e| LoadError::Parse {
+                //         path: file_path,
+                //         error: e, // TODO [MF]: looks like it's time for `thiserror`
+                //     })
+            } else if file_name.ends_with(".sources") {
+                content
+                    .parse::<Repositories>()
+                    .map(|repos| repos.0)
+                    .map_err(|e| LoadError::Parse {
+                        path: file_path,
+                        error: e,
+                    })
+            } else {
+                continue;
+            };
+
+            match parse_result {
+                Ok(repos) => all_repositories.extend(repos),
+                Err(e) => errors.push(e),
+            }
+        }
+
+        (all_repositories, errors)
+    }
+
+    /// Load repositories from a directory, failing on first error
+    ///
+    /// Use this when you want strict error handling and need the loading
+    /// to stop at the first problem encountered.
+    pub fn load_from_directory_strict(path: &Path) -> Result<Self, LoadError> {
+        let (repos, errors) = Self::load_from_directory(path);
+        if let Some(error) = errors.into_iter().next() {
+            Err(error)
+        } else {
+            Ok(repos)
+        }
+    }
+
     /// Push a new repository
     pub fn push(&mut self, repo: Repository) {
         self.0.push(repo);
@@ -335,8 +515,13 @@ impl Repositories {
         self.0.retain(f);
     }
 
+    /// Get iterator over repositories
+    pub fn iter(&self) -> std::slice::Iter<'_, Repository> {
+        self.0.iter()
+    }
+
     /// Get mutable iterator over repositories
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<Repository> {
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Repository> {
         self.0.iter_mut()
     }
 
@@ -543,5 +728,67 @@ mod tests {
         let mut repos = Repositories::empty();
         repos.push(Repository::default());
         assert!(!repos.is_empty());
+    }
+
+    #[test]
+    fn test_repository_getters() {
+        let repo = Repository {
+            types: HashSet::from([RepositoryType::Binary, RepositoryType::Source]),
+            uris: vec![Url::parse("http://example.com/debian").unwrap()],
+            suites: vec!["stable".to_string()],
+            components: Some(vec!["main".to_string(), "contrib".to_string()]),
+            architectures: vec!["amd64".to_string(), "arm64".to_string()],
+            ..Default::default()
+        };
+
+        // Test types getter
+        assert_eq!(
+            repo.types(),
+            &HashSet::from([RepositoryType::Binary, RepositoryType::Source])
+        );
+
+        // Test uris getter
+        assert_eq!(repo.uris().len(), 1);
+        assert_eq!(repo.uris()[0].to_string(), "http://example.com/debian");
+
+        // Test suites getter (existing)
+        assert_eq!(repo.suites(), vec!["stable"]);
+
+        // Test components getter
+        assert_eq!(
+            repo.components(),
+            Some(vec!["main".to_string(), "contrib".to_string()].as_slice())
+        );
+
+        // Test architectures getter
+        assert_eq!(repo.architectures(), vec!["amd64", "arm64"]);
+    }
+
+    #[test]
+    fn test_repositories_iter() {
+        let mut repos = Repositories::empty();
+        repos.push(Repository {
+            suites: vec!["stable".to_string()],
+            ..Default::default()
+        });
+        repos.push(Repository {
+            suites: vec!["testing".to_string()],
+            ..Default::default()
+        });
+
+        // Test iter()
+        let suites: Vec<_> = repos.iter().map(|r| r.suites()).collect();
+        assert_eq!(suites.len(), 2);
+        assert_eq!(suites[0], vec!["stable"]);
+        assert_eq!(suites[1], vec!["testing"]);
+
+        // Test iter_mut() - modifying through mutable iterator
+        for repo in repos.iter_mut() {
+            repo.enabled = Some(false);
+        }
+
+        for repo in repos.iter() {
+            assert_eq!(repo.enabled, Some(false));
+        }
     }
 }

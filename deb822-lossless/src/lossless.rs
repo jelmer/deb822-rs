@@ -42,6 +42,25 @@ use rowan::ast::AstNode;
 use std::path::Path;
 use std::str::FromStr;
 
+/// A positioned parse error containing location information.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PositionedParseError {
+    /// The error message
+    pub message: String,
+    /// The text range where the error occurred
+    pub range: rowan::TextRange,
+    /// Optional error code for categorization
+    pub code: Option<String>,
+}
+
+impl std::fmt::Display for PositionedParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for PositionedParseError {}
+
 /// List of encountered syntax errors.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParseError(pub Vec<String>);
@@ -120,6 +139,7 @@ pub(crate) struct Parse {
     pub(crate) green_node: GreenNode,
     #[allow(unused)]
     pub(crate) errors: Vec<String>,
+    pub(crate) positioned_errors: Vec<PositionedParseError>,
 }
 
 pub(crate) fn parse(text: &str) -> Parse {
@@ -132,10 +152,56 @@ pub(crate) fn parse(text: &str) -> Parse {
         /// the list of syntax errors we've accumulated
         /// so far.
         errors: Vec<String>,
+        /// positioned errors with location information
+        positioned_errors: Vec<PositionedParseError>,
+        /// All tokens with their positions in forward order for position tracking
+        token_positions: Vec<(SyntaxKind, rowan::TextSize, rowan::TextSize)>,
+        /// current token index (counting from the end since tokens are in reverse)
+        current_token_index: usize,
     }
 
     impl<'a> Parser<'a> {
+        /// Skip to next paragraph boundary for error recovery
+        fn skip_to_paragraph_boundary(&mut self) {
+            while self.current().is_some() {
+                match self.current() {
+                    Some(NEWLINE) => {
+                        self.bump();
+                        // Check if next line starts a new paragraph (key at start of line)
+                        if self.at_paragraph_start() {
+                            break;
+                        }
+                    }
+                    _ => {
+                        self.bump();
+                    }
+                }
+            }
+        }
+
+        /// Check if we're at the start of a new paragraph
+        fn at_paragraph_start(&self) -> bool {
+            match self.current() {
+                Some(KEY) => true,
+                Some(COMMENT) => true,
+                None => true, // EOF is a valid paragraph boundary
+                _ => false,
+            }
+        }
+
+        /// Attempt to recover from entry parsing errors
+        fn recover_entry(&mut self) {
+            // Skip to end of current line
+            while self.current().is_some() && self.current() != Some(NEWLINE) {
+                self.bump();
+            }
+            // Consume the newline if present
+            if self.current() == Some(NEWLINE) {
+                self.bump();
+            }
+        }
         fn parse_entry(&mut self) {
+            // Handle leading comments
             while self.current() == Some(COMMENT) {
                 self.bump();
 
@@ -148,39 +214,121 @@ pub(crate) fn parse(text: &str) -> Parse {
                     }
                     Some(g) => {
                         self.builder.start_node(ERROR.into());
+                        self.add_positioned_error(
+                            format!("expected newline after comment, got {g:?}"),
+                            Some("unexpected_token_after_comment".to_string()),
+                        );
                         self.bump();
-                        self.errors.push(format!("expected newline, got {g:?}"));
                         self.builder.finish_node();
+                        self.recover_entry();
+                        return;
                     }
                 }
             }
 
             self.builder.start_node(ENTRY.into());
+            let mut entry_has_errors = false;
 
-            // First, parse the key and colon
+            // Parse the key
             if self.current() == Some(KEY) {
                 self.bump();
                 self.skip_ws();
             } else {
+                entry_has_errors = true;
                 self.builder.start_node(ERROR.into());
-                if self.current().is_some() {
-                    self.bump();
+
+                // Enhanced error recovery for malformed keys
+                match self.current() {
+                    Some(VALUE) | Some(WHITESPACE) => {
+                        self.add_positioned_error(
+                            "field name cannot start with whitespace or special characters"
+                                .to_string(),
+                            Some("invalid_field_name".to_string()),
+                        );
+                        // Try to consume what might be an intended key
+                        while self.current() == Some(VALUE) || self.current() == Some(WHITESPACE) {
+                            self.bump();
+                        }
+                    }
+                    Some(COLON) => {
+                        self.add_positioned_error(
+                            "field name missing before colon".to_string(),
+                            Some("missing_field_name".to_string()),
+                        );
+                    }
+                    Some(NEWLINE) => {
+                        self.add_positioned_error(
+                            "empty line where field expected".to_string(),
+                            Some("empty_field_line".to_string()),
+                        );
+                        self.builder.finish_node();
+                        self.builder.finish_node();
+                        return;
+                    }
+                    _ => {
+                        self.add_positioned_error(
+                            format!("expected field name, got {:?}", self.current()),
+                            Some("missing_key".to_string()),
+                        );
+                        if self.current().is_some() {
+                            self.bump();
+                        }
+                    }
                 }
-                self.errors.push("expected key".to_string());
                 self.builder.finish_node();
             }
+
+            // Parse the colon
             if self.current() == Some(COLON) {
                 self.bump();
                 self.skip_ws();
             } else {
+                entry_has_errors = true;
                 self.builder.start_node(ERROR.into());
-                if self.current().is_some() {
-                    self.bump();
+
+                // Enhanced error recovery for missing colon
+                match self.current() {
+                    Some(VALUE) => {
+                        self.add_positioned_error(
+                            "missing colon ':' after field name".to_string(),
+                            Some("missing_colon".to_string()),
+                        );
+                        // Don't consume the value, let it be parsed as the field value
+                    }
+                    Some(NEWLINE) => {
+                        self.add_positioned_error(
+                            "field name without value (missing colon and value)".to_string(),
+                            Some("incomplete_field".to_string()),
+                        );
+                        self.builder.finish_node();
+                        self.builder.finish_node();
+                        return;
+                    }
+                    Some(KEY) => {
+                        self.add_positioned_error(
+                            "field name followed by another field name (missing colon and value)"
+                                .to_string(),
+                            Some("consecutive_field_names".to_string()),
+                        );
+                        // Don't consume the next key, let it be parsed as a new entry
+                        self.builder.finish_node();
+                        self.builder.finish_node();
+                        return;
+                    }
+                    _ => {
+                        self.add_positioned_error(
+                            format!("expected colon ':', got {:?}", self.current()),
+                            Some("missing_colon".to_string()),
+                        );
+                        if self.current().is_some() {
+                            self.bump();
+                        }
+                    }
                 }
-                self.errors
-                    .push(format!("expected ':', got {:?}", self.current()));
                 self.builder.finish_node();
             }
+
+            // Parse the value (potentially multi-line)
             loop {
                 while self.current() == Some(WHITESPACE) || self.current() == Some(VALUE) {
                     self.bump();
@@ -193,13 +341,22 @@ pub(crate) fn parse(text: &str) -> Parse {
                     Some(NEWLINE) => {
                         self.bump();
                     }
+                    Some(KEY) => {
+                        // We've hit another field, this entry is complete
+                        break;
+                    }
                     Some(g) => {
                         self.builder.start_node(ERROR.into());
+                        self.add_positioned_error(
+                            format!("unexpected token in field value: {g:?}"),
+                            Some("unexpected_value_token".to_string()),
+                        );
                         self.bump();
-                        self.errors.push(format!("expected newline, got {g:?}"));
                         self.builder.finish_node();
                     }
                 }
+
+                // Check for continuation lines
                 if self.current() == Some(INDENT) {
                     self.bump();
                     self.skip_ws();
@@ -207,14 +364,91 @@ pub(crate) fn parse(text: &str) -> Parse {
                     break;
                 }
             }
+
             self.builder.finish_node();
+
+            // If the entry had errors, we might want to recover
+            if entry_has_errors && !self.at_paragraph_start() && self.current().is_some() {
+                self.recover_entry();
+            }
         }
 
         fn parse_paragraph(&mut self) {
             self.builder.start_node(PARAGRAPH.into());
+
+            let mut consecutive_errors = 0;
+            const MAX_CONSECUTIVE_ERRORS: usize = 5;
+
             while self.current() != Some(NEWLINE) && self.current().is_some() {
-                self.parse_entry();
+                let error_count_before = self.positioned_errors.len();
+
+                // Check if we're at a valid entry start
+                if self.current() == Some(KEY) || self.current() == Some(COMMENT) {
+                    self.parse_entry();
+
+                    // Reset consecutive error count if we successfully parsed something
+                    if self.positioned_errors.len() == error_count_before {
+                        consecutive_errors = 0;
+                    } else {
+                        consecutive_errors += 1;
+                    }
+                } else {
+                    // We're not at a valid entry start, this is an error
+                    consecutive_errors += 1;
+
+                    self.builder.start_node(ERROR.into());
+                    match self.current() {
+                        Some(VALUE) => {
+                            self.add_positioned_error(
+                                "orphaned text without field name".to_string(),
+                                Some("orphaned_text".to_string()),
+                            );
+                            // Consume the orphaned text
+                            while self.current() == Some(VALUE)
+                                || self.current() == Some(WHITESPACE)
+                            {
+                                self.bump();
+                            }
+                        }
+                        Some(COLON) => {
+                            self.add_positioned_error(
+                                "orphaned colon without field name".to_string(),
+                                Some("orphaned_colon".to_string()),
+                            );
+                            self.bump();
+                        }
+                        Some(INDENT) => {
+                            self.add_positioned_error(
+                                "unexpected indentation without field".to_string(),
+                                Some("unexpected_indent".to_string()),
+                            );
+                            self.bump();
+                        }
+                        _ => {
+                            self.add_positioned_error(
+                                format!(
+                                    "unexpected token at paragraph level: {:?}",
+                                    self.current()
+                                ),
+                                Some("unexpected_paragraph_token".to_string()),
+                            );
+                            self.bump();
+                        }
+                    }
+                    self.builder.finish_node();
+                }
+
+                // If we have too many consecutive errors, skip to paragraph boundary
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    self.add_positioned_error(
+                        "too many consecutive parse errors, skipping to next paragraph".to_string(),
+                        Some("parse_recovery".to_string()),
+                    );
+                    self.skip_to_paragraph_boundary();
+                    break;
+                }
             }
+
             self.builder.finish_node();
         }
 
@@ -236,16 +470,43 @@ pub(crate) fn parse(text: &str) -> Parse {
             Parse {
                 green_node: self.builder.finish(),
                 errors: self.errors,
+                positioned_errors: self.positioned_errors,
             }
         }
         /// Advance one token, adding it to the current branch of the tree builder.
         fn bump(&mut self) {
             let (kind, text) = self.tokens.pop().unwrap();
             self.builder.token(kind.into(), text);
+            if self.current_token_index > 0 {
+                self.current_token_index -= 1;
+            }
         }
         /// Peek at the first unprocessed token
         fn current(&self) -> Option<SyntaxKind> {
             self.tokens.last().map(|(kind, _)| *kind)
+        }
+
+        /// Add a positioned error at the current position
+        fn add_positioned_error(&mut self, message: String, code: Option<String>) {
+            let range = if self.current_token_index < self.token_positions.len() {
+                let (_, start, end) = self.token_positions[self.current_token_index];
+                rowan::TextRange::new(start, end)
+            } else {
+                // Default to end of text if no current token
+                let end = self
+                    .token_positions
+                    .last()
+                    .map(|(_, _, end)| *end)
+                    .unwrap_or_else(|| rowan::TextSize::from(0));
+                rowan::TextRange::new(end, end)
+            };
+
+            self.positioned_errors.push(PositionedParseError {
+                message: message.clone(),
+                range,
+                code,
+            });
+            self.errors.push(message);
         }
         fn skip_ws(&mut self) {
             while self.current() == Some(WHITESPACE) || self.current() == Some(COMMENT) {
@@ -270,11 +531,28 @@ pub(crate) fn parse(text: &str) -> Parse {
     }
 
     let mut tokens = lex(text).collect::<Vec<_>>();
+
+    // Build token positions in forward order
+    let mut token_positions = Vec::new();
+    let mut position = rowan::TextSize::from(0);
+    for (kind, text) in &tokens {
+        let start = position;
+        let end = start + rowan::TextSize::of(*text);
+        token_positions.push((*kind, start, end));
+        position = end;
+    }
+
+    // Reverse tokens for parsing (but keep positions in forward order)
     tokens.reverse();
+    let current_token_index = tokens.len().saturating_sub(1);
+
     Parser {
         tokens,
         builder: GreenNodeBuilder::new(),
         errors: Vec::new(),
+        positioned_errors: Vec::new(),
+        token_positions,
+        current_token_index,
     }
     .parse()
 }
@@ -1844,6 +2122,19 @@ C: D
     }
 
     #[test]
+    fn test_positioned_parse_error() {
+        let error = PositionedParseError {
+            message: "test error".to_string(),
+            range: rowan::TextRange::new(rowan::TextSize::from(5), rowan::TextSize::from(10)),
+            code: Some("test_code".to_string()),
+        };
+        assert_eq!(error.to_string(), "test error");
+        assert_eq!(error.range.start(), rowan::TextSize::from(5));
+        assert_eq!(error.range.end(), rowan::TextSize::from(10));
+        assert_eq!(error.code, Some("test_code".to_string()));
+    }
+
+    #[test]
     fn test_format_error() {
         assert_eq!(
             super::Error::ParseError(ParseError(vec!["foo".to_string()])).to_string(),
@@ -2009,5 +2300,249 @@ Version: 1.0"#;
         assert!(colon_range.end() <= value_range.start());
         assert!(key_range.start() >= text_range.start());
         assert!(value_range.end() <= text_range.end());
+    }
+
+    #[test]
+    fn test_error_recovery_missing_colon() {
+        let input = r#"Source foo
+Maintainer: Test User <test@example.com>
+"#;
+        let (deb822, errors) = super::Deb822::from_str_relaxed(input);
+
+        // Should still parse successfully with errors
+        assert!(!errors.is_empty());
+        assert!(errors.iter().any(|e| e.contains("missing colon")));
+
+        // Should still have a paragraph with the valid field
+        let paragraph = deb822.paragraphs().next().unwrap();
+        assert_eq!(
+            paragraph.get("Maintainer").as_deref(),
+            Some("Test User <test@example.com>")
+        );
+    }
+
+    #[test]
+    fn test_error_recovery_missing_field_name() {
+        let input = r#": orphaned value
+Package: test
+"#;
+
+        let (deb822, errors) = super::Deb822::from_str_relaxed(input);
+
+        // Should have errors about missing field name
+        assert!(!errors.is_empty());
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("field name") || e.contains("missing")));
+
+        // The valid field should be in one of the paragraphs
+        let paragraphs: Vec<_> = deb822.paragraphs().collect();
+        let mut found_package = false;
+        for paragraph in paragraphs.iter() {
+            if paragraph.get("Package").is_some() {
+                found_package = true;
+                assert_eq!(paragraph.get("Package").as_deref(), Some("test"));
+            }
+        }
+        assert!(found_package, "Package field not found in any paragraph");
+    }
+
+    #[test]
+    fn test_error_recovery_orphaned_text() {
+        let input = r#"Package: test
+some orphaned text without field name
+Version: 1.0
+"#;
+        let (deb822, errors) = super::Deb822::from_str_relaxed(input);
+
+        // Should have errors about orphaned text
+        assert!(!errors.is_empty());
+        assert!(errors.iter().any(|e| e.contains("orphaned")
+            || e.contains("unexpected")
+            || e.contains("field name")));
+
+        // Should still parse the valid fields (may be split across paragraphs)
+        let mut all_fields = std::collections::HashMap::new();
+        for paragraph in deb822.paragraphs() {
+            for (key, value) in paragraph.items() {
+                all_fields.insert(key, value);
+            }
+        }
+
+        assert_eq!(all_fields.get("Package"), Some(&"test".to_string()));
+        assert_eq!(all_fields.get("Version"), Some(&"1.0".to_string()));
+    }
+
+    #[test]
+    fn test_error_recovery_consecutive_field_names() {
+        let input = r#"Package: test
+Description
+Maintainer: Another field without proper value
+Version: 1.0
+"#;
+        let (deb822, errors) = super::Deb822::from_str_relaxed(input);
+
+        // Should have errors about missing values
+        assert!(!errors.is_empty());
+        assert!(errors.iter().any(|e| e.contains("consecutive")
+            || e.contains("missing")
+            || e.contains("incomplete")));
+
+        // Should still parse valid fields (may be split across paragraphs due to errors)
+        let mut all_fields = std::collections::HashMap::new();
+        for paragraph in deb822.paragraphs() {
+            for (key, value) in paragraph.items() {
+                all_fields.insert(key, value);
+            }
+        }
+
+        assert_eq!(all_fields.get("Package"), Some(&"test".to_string()));
+        assert_eq!(
+            all_fields.get("Maintainer"),
+            Some(&"Another field without proper value".to_string())
+        );
+        assert_eq!(all_fields.get("Version"), Some(&"1.0".to_string()));
+    }
+
+    #[test]
+    fn test_error_recovery_malformed_multiline() {
+        let input = r#"Package: test
+Description: Short desc
+  Proper continuation
+invalid continuation without indent
+ Another proper continuation
+Version: 1.0
+"#;
+        let (deb822, errors) = super::Deb822::from_str_relaxed(input);
+
+        // Should recover from malformed continuation
+        assert!(!errors.is_empty());
+
+        // Should still parse other fields correctly
+        let paragraph = deb822.paragraphs().next().unwrap();
+        assert_eq!(paragraph.get("Package").as_deref(), Some("test"));
+        assert_eq!(paragraph.get("Version").as_deref(), Some("1.0"));
+    }
+
+    #[test]
+    fn test_error_recovery_mixed_errors() {
+        let input = r#"Package test without colon
+: orphaned colon
+Description: Valid field
+some orphaned text
+Another-Field: Valid too
+"#;
+        let (deb822, errors) = super::Deb822::from_str_relaxed(input);
+
+        // Should have multiple different errors
+        assert!(!errors.is_empty());
+        assert!(errors.len() >= 2);
+
+        // Should still parse the valid fields
+        let paragraph = deb822.paragraphs().next().unwrap();
+        assert_eq!(paragraph.get("Description").as_deref(), Some("Valid field"));
+        assert_eq!(paragraph.get("Another-Field").as_deref(), Some("Valid too"));
+    }
+
+    #[test]
+    fn test_error_recovery_paragraph_boundary() {
+        let input = r#"Package: first-package
+Description: First paragraph
+
+corrupted data here
+: more corruption
+completely broken line
+
+Package: second-package
+Version: 1.0
+"#;
+        let (deb822, errors) = super::Deb822::from_str_relaxed(input);
+
+        // Should have errors from the corrupted section
+        assert!(!errors.is_empty());
+
+        // Should still parse both paragraphs correctly
+        let paragraphs: Vec<_> = deb822.paragraphs().collect();
+        assert_eq!(paragraphs.len(), 2);
+
+        assert_eq!(
+            paragraphs[0].get("Package").as_deref(),
+            Some("first-package")
+        );
+        assert_eq!(
+            paragraphs[1].get("Package").as_deref(),
+            Some("second-package")
+        );
+        assert_eq!(paragraphs[1].get("Version").as_deref(), Some("1.0"));
+    }
+
+    #[test]
+    fn test_error_recovery_with_positioned_errors() {
+        let input = r#"Package test
+Description: Valid
+"#;
+        let parsed = super::parse(input);
+
+        // Should have positioned errors with proper ranges
+        assert!(!parsed.positioned_errors.is_empty());
+
+        let first_error = &parsed.positioned_errors[0];
+        assert!(!first_error.message.is_empty());
+        assert!(first_error.range.start() <= first_error.range.end());
+        assert!(first_error.code.is_some());
+
+        // Error should point to the problematic location
+        let error_text = &input[first_error.range.start().into()..first_error.range.end().into()];
+        assert!(!error_text.is_empty());
+    }
+
+    #[test]
+    fn test_error_recovery_preserves_whitespace() {
+        let input = r#"Source: package
+Maintainer   Test User <test@example.com>
+Section:    utils
+
+"#;
+        let (deb822, errors) = super::Deb822::from_str_relaxed(input);
+
+        // Should have error about missing colon
+        assert!(!errors.is_empty());
+
+        // Should preserve original formatting in output
+        let output = deb822.to_string();
+        assert!(output.contains("Section:    utils"));
+
+        // Should still extract valid fields
+        let paragraph = deb822.paragraphs().next().unwrap();
+        assert_eq!(paragraph.get("Source").as_deref(), Some("package"));
+        assert_eq!(paragraph.get("Section").as_deref(), Some("utils"));
+    }
+
+    #[test]
+    fn test_error_recovery_empty_fields() {
+        let input = r#"Package: test
+Description:
+Maintainer: Valid User
+EmptyField: 
+Version: 1.0
+"#;
+        let (deb822, _errors) = super::Deb822::from_str_relaxed(input);
+
+        // Empty fields should parse without major errors - collect all fields from all paragraphs
+        let mut all_fields = std::collections::HashMap::new();
+        for paragraph in deb822.paragraphs() {
+            for (key, value) in paragraph.items() {
+                all_fields.insert(key, value);
+            }
+        }
+
+        assert_eq!(all_fields.get("Package"), Some(&"test".to_string()));
+        assert_eq!(all_fields.get("Description"), Some(&"".to_string()));
+        assert_eq!(
+            all_fields.get("Maintainer"),
+            Some(&"Valid User".to_string())
+        );
+        assert_eq!(all_fields.get("EmptyField"), Some(&"".to_string()));
+        assert_eq!(all_fields.get("Version"), Some(&"1.0".to_string()));
     }
 }

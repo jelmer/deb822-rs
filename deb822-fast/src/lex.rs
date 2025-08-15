@@ -50,11 +50,13 @@ pub(crate) fn lex(mut input: &str) -> impl Iterator<Item = (SyntaxKind, &str)> {
             match c {
                 ':' if colon_count == 0 => {
                     colon_count += 1;
-                    input = &input[1..];
+                    let char_len = c.len_utf8();
+                    input = &input[char_len..];
                     Some((SyntaxKind::COLON, ":"))
                 }
                 _ if is_newline(c) => {
-                    let (nl, remaining) = input.split_at(1);
+                    let char_len = c.len_utf8();
+                    let (nl, remaining) = input.split_at(char_len);
                     input = remaining;
                     start_of_line = true;
                     colon_count = 0;
@@ -94,7 +96,8 @@ pub(crate) fn lex(mut input: &str) -> impl Iterator<Item = (SyntaxKind, &str)> {
                     Some((SyntaxKind::VALUE, value))
                 }
                 _ => {
-                    let (text, remaining) = input.split_at(1);
+                    let char_len = c.len_utf8();
+                    let (text, remaining) = input.split_at(char_len);
                     input = remaining;
                     Some((SyntaxKind::ERROR, text))
                 }
