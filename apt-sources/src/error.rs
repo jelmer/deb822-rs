@@ -2,7 +2,7 @@
 //! It intends to address error handling in meaningful manner, less vague than just passing
 //! `String` as error.
 
-/// Errors for APT sources parsing and conversion to/from [`Repository`] or [`LegacyRepository`]
+/// Errors for APT sources parsing and conversion to/from [`super::Repository`] or [`super::legacy::LegacyRepository`]
 #[derive(Debug)]
 pub enum RepositoryError {
     /// Invalid repository format

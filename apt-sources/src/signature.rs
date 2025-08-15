@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::error::RepositoryError;
 
-/// A type to store variants of cryptographic public key to validate the [`Repository`].
+/// A type to store variants of cryptographic public key to validate the [`super::Repository`].
 #[derive(Debug, PartialEq, Clone)]
 pub enum Signature {
     /// The PGP key is stored inside the `.sources` files

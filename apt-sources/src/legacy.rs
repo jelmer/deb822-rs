@@ -2,6 +2,14 @@
 //! use the pre-DEB822 single line format to hold package repositories specifications.
 //!
 //! # Examples
+//! ```
+//! let single_line = "deb http://archive.ubuntu.com/ubuntu jammy main restricted";
+//! let repositories = LegacyRepositories::from_str(single_line)
+//!     .expect("Shall not fail for correct list entry!");
+//! assert_eq!(repositories.len(), 1);
+//! let repository = repositories.iter().nth(0).expect("Shall not fail for first line");
+//! assert_eq!(repository.uri, url!("http://archive.ubuntu.com/ubuntu"));
+//! ```
 use super::RepositoryError;
 use super::RepositoryType;
 use super::Signature;
@@ -61,7 +69,7 @@ pub struct LegacyRepository {
     /// The distribution name as codename or suite type (like `stable` or `testing`)
     pub suite: String,
     /// (Optional) Section of the repository, usually `main`, `contrib` or `non-free`
-    /// return `None` if repository is Flat Repository Format (https://wiki.debian.org/DebianRepository/Format#Flat_Repository_Format)
+    /// return `None` if repository is Flat Repository Format (<https://wiki.debian.org/DebianRepository/Format#Flat_Repository_Format>)
     pub components: Vec<String>,
 
     /// (Optional) Architectures binaries from this repository run on

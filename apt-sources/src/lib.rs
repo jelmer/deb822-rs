@@ -255,7 +255,7 @@ pub struct Repository {
     #[deb822(field = "Suites", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
     pub suites: Vec<String>,
     /// (Optional) Section of the repository, usually `main`, `contrib` or `non-free`
-    /// return `None` if repository is Flat Repository Format (https://wiki.debian.org/DebianRepository/Format#Flat_Repository_Format)
+    /// return `None` if repository is Flat Repository Format (<https://wiki.debian.org/DebianRepository/Format#Flat_Repository_Format>)
     #[deb822(field = "Components", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
     pub components: Option<Vec<String>>,
 
