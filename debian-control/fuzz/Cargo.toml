@@ -1,0 +1,37 @@
+[package]
+name = "debian-control-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.debian-control]
+path = ".."
+
+[[bin]]
+name = "parse_control"
+path = "fuzz_targets/parse_control.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_lossless_control"
+path = "fuzz_targets/parse_lossless_control.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_relations"
+path = "fuzz_targets/parse_relations.rs"
+test = false
+doc = false
+bench = false

@@ -1,0 +1,30 @@
+[package]
+name = "deb822-fast-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.deb822-fast]
+path = ".."
+
+[[bin]]
+name = "parse_fast"
+path = "fuzz_targets/parse_fast.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "modify_fast"
+path = "fuzz_targets/modify_fast.rs"
+test = false
+doc = false
+bench = false
