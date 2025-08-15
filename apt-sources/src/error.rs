@@ -53,6 +53,9 @@ pub enum LoadError {
         /// The underlying I/O error
         error: std::io::Error,
     },
+    #[cfg(not(feature = "legacy"))]
+    /// The support for `legacy` format hadn't been enabled at build time
+    UnsupportedLegacyFormat,
 }
 
 impl From<std::io::Error> for RepositoryError {
@@ -99,6 +102,13 @@ impl std::fmt::Display for LoadError {
             }
             Self::DirectoryRead { path, error } => {
                 write!(f, "Failed to read directory {}: {}", path.display(), error)
+            }
+            #[cfg(not(feature = "legacy"))]
+            Self::UnsupportedLegacyFormat => {
+                write!(
+                    f,
+                    "The support for `legacy` format hadn't been enabled at build time"
+                )
             }
         }
     }

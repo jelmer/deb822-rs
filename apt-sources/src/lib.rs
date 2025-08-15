@@ -46,6 +46,7 @@
 use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 use error::{LoadError, RepositoryError};
 use itertools::Itertools;
+#[cfg(feature = "legacy")]
 use legacy::LegacyRepositories;
 use signature::Signature;
 use std::path::Path;
@@ -389,6 +390,12 @@ impl Repositories {
 
         // Process main sources.list file if it exists
         let main_sources = path.join("sources.list");
+        #[cfg(not(feature = "legacy"))]
+        eprintln!(
+            "WARNING! `{}` hasn't been read as `legacy` support hadn't been enabled during build.",
+            main_sources.display()
+        );
+        #[cfg(feature = "legacy")]
         if main_sources.exists() {
             match fs::read_to_string(&main_sources) {
                 Ok(content) => {
@@ -456,18 +463,18 @@ impl Repositories {
             };
 
             let parse_result = if file_name.ends_with(".list") {
+                #[cfg(not(feature = "legacy"))]
+                {
+                    eprintln!("WARNING! `{file_name}` hasn't been read as `legacy` support hadn't been enabled during build.");
+                    Err(LoadError::UnsupportedLegacyFormat)
+                }
+                #[cfg(feature = "legacy")]
                 LegacyRepositories::from_str(&content)
                     .map(|repos| repos.repositories().map(|l| l.into()).collect())
                     .map_err(|e| LoadError::Parse {
                         path: file_path,
                         error: e.to_string(), // TODO [MF]: looks like it's time for `thiserror`
                     })
-                // Self::parse_legacy_format(&content)
-                //     .map(|repos| repos.0)
-                //     .map_err(|e| LoadError::Parse {
-                //         path: file_path,
-                //         error: e, // TODO [MF]: looks like it's time for `thiserror`
-                //     })
             } else if file_name.ends_with(".sources") {
                 content
                     .parse::<Repositories>()
