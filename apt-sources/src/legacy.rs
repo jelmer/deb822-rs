@@ -26,6 +26,7 @@ use std::ops::Deref;
 use std::ops::Not;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::LazyLock;
 use url::Url;
 use url_macro::url;
 
@@ -199,23 +200,26 @@ impl LegacyRepositories {
     }
 }
 
+static RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?xm)^
+        (?P<type>deb|deb-src)\s+                   # Catch repository type
+        (\[(?P<options>[^]]*)]\s+)?                  # Catch options
+        (?P<uri>\S+)\s+                            # Catch repository URI
+        (?P<suite>\S+)\s+                          # Catch suite/distribution
+        (?P<components>(?:(?P<component>\w+)\s?)+) # Catch components (multiple)
+        $",
+    )
+    .expect("Tested correct regular expression shall not fail!")
+});
+
 /// It only make sense to convert multiple lines at once as typical `.list` file has one uncommented
 /// and one commented (`deb-src`) entry
 impl FromStr for LegacyRepositories {
     type Err = RepositoryError;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        let re = Regex::new(
-            r"(?xm)^
-            (?P<type>deb|deb-src)\s+                   # Catch repository type
-            (\[(?P<options>[^]]*)]\s+)?                  # Catch options
-            (?P<uri>\S+)\s+                            # Catch repository URI
-            (?P<suite>\S+)\s+                          # Catch suite/distribution
-            (?P<components>(?:(?P<component>\w+)\s?)+) # Catch components (multiple)
-            $",
-        )
-        .unwrap(); // TODO: Make this lazy static for efficient reuse.
-        let elements = re
+        let elements = RE
             .captures_iter(text)
             .map(|caps| {
                 let mut repository = LegacyRepository::default();
