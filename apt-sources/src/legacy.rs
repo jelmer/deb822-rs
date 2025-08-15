@@ -3,6 +3,9 @@
 //!
 //! # Examples
 //! ```
+//! # use url_macro::url;
+//! # use apt_sources::legacy::LegacyRepositories;
+//! # use std::str::FromStr;
 //! let single_line = "deb http://archive.ubuntu.com/ubuntu jammy main restricted";
 //! let repositories = LegacyRepositories::from_str(single_line)
 //!     .expect("Shall not fail for correct list entry!");
