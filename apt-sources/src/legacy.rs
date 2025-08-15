@@ -170,7 +170,7 @@ impl LegacyRepositories {
     }
 
     /// Get mutable iterator over repositories
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<LegacyRepository> {
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, LegacyRepository> {
         self.0.iter_mut()
     }
 
