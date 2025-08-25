@@ -1253,7 +1253,7 @@ impl Paragraph {
                             }
                             // Neither field is in canonical order, maintain alphabetical
                             (None, None) => {
-                                if key < &existing_key {
+                                if key < existing_key.as_str() {
                                     insertion_index = i;
                                     break;
                                 }
