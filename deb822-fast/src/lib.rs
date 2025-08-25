@@ -11,6 +11,57 @@ pub mod convert;
 pub use convert::{FromDeb822Paragraph, ToDeb822Paragraph};
 mod lex;
 
+/// Canonical field order for source paragraphs in debian/control files
+pub const SOURCE_FIELD_ORDER: &[&str] = &[
+    "Source",
+    "Section",
+    "Priority",
+    "Maintainer",
+    "Uploaders",
+    "Build-Depends",
+    "Build-Depends-Indep",
+    "Build-Depends-Arch",
+    "Build-Conflicts",
+    "Build-Conflicts-Indep",
+    "Build-Conflicts-Arch",
+    "Standards-Version",
+    "Vcs-Browser",
+    "Vcs-Git",
+    "Vcs-Svn",
+    "Vcs-Bzr",
+    "Vcs-Hg",
+    "Vcs-Darcs",
+    "Vcs-Cvs",
+    "Vcs-Arch",
+    "Vcs-Mtn",
+    "Homepage",
+    "Rules-Requires-Root",
+    "Testsuite",
+    "Testsuite-Triggers",
+];
+
+/// Canonical field order for binary packages in debian/control files
+pub const BINARY_FIELD_ORDER: &[&str] = &[
+    "Package",
+    "Architecture",
+    "Section",
+    "Priority",
+    "Multi-Arch",
+    "Essential",
+    "Build-Profiles",
+    "Built-Using",
+    "Pre-Depends",
+    "Depends",
+    "Recommends",
+    "Suggests",
+    "Enhances",
+    "Conflicts",
+    "Breaks",
+    "Replaces",
+    "Provides",
+    "Description",
+];
+
 /// Error type for the parser.
 #[derive(Debug)]
 pub enum Error {
@@ -109,18 +160,127 @@ impl Paragraph {
         });
     }
 
-    /// Set the value of a field.
+    /// Set the value of a field, inserting at the appropriate location if new.
     ///
-    /// If a field with the same name already exists, its value
-    /// will be updated.
+    /// If a field with the same name already exists, its value will be updated.
+    /// If the field doesn't exist, it will be inserted at the appropriate position
+    /// based on canonical field ordering.
     pub fn set(&mut self, name: &str, value: &str) {
+        // Check if field already exists and update it
         for field in &mut self.fields {
             if field.name == name {
                 field.value = value.to_string();
                 return;
             }
         }
-        self.insert(name, value);
+
+        // Field doesn't exist, insert at appropriate location
+        // Try to detect if this is a source or binary package paragraph
+        let field_order = if self.fields.iter().any(|f| f.name == "Source") {
+            SOURCE_FIELD_ORDER
+        } else if self.fields.iter().any(|f| f.name == "Package") {
+            BINARY_FIELD_ORDER
+        } else {
+            // Default based on what we're inserting
+            if name == "Source" {
+                SOURCE_FIELD_ORDER
+            } else if name == "Package" {
+                BINARY_FIELD_ORDER
+            } else {
+                // Try to determine based on existing fields
+                let has_source_fields = self.fields.iter().any(|f| {
+                    SOURCE_FIELD_ORDER.contains(&f.name.as_str())
+                        && !BINARY_FIELD_ORDER.contains(&f.name.as_str())
+                });
+                if has_source_fields {
+                    SOURCE_FIELD_ORDER
+                } else {
+                    BINARY_FIELD_ORDER
+                }
+            }
+        };
+
+        let insertion_index = self.find_insertion_index(name, field_order);
+        self.fields.insert(
+            insertion_index,
+            Field {
+                name: name.to_string(),
+                value: value.to_string(),
+            },
+        );
+    }
+
+    /// Set a field using a specific field ordering.
+    pub fn set_with_field_order(&mut self, name: &str, value: &str, field_order: &[&str]) {
+        // Check if field already exists and update it
+        for field in &mut self.fields {
+            if field.name == name {
+                field.value = value.to_string();
+                return;
+            }
+        }
+
+        let insertion_index = self.find_insertion_index(name, field_order);
+        self.fields.insert(
+            insertion_index,
+            Field {
+                name: name.to_string(),
+                value: value.to_string(),
+            },
+        );
+    }
+
+    /// Find the appropriate insertion index for a new field based on field ordering.
+    fn find_insertion_index(&self, name: &str, field_order: &[&str]) -> usize {
+        // Find position of the new field in the canonical order
+        let new_field_position = field_order.iter().position(|&field| field == name);
+
+        let mut insertion_index = self.fields.len();
+
+        // Find the right position based on canonical field order
+        for (i, field) in self.fields.iter().enumerate() {
+            let existing_position = field_order.iter().position(|&f| f == field.name);
+
+            match (new_field_position, existing_position) {
+                // Both fields are in the canonical order
+                (Some(new_pos), Some(existing_pos)) => {
+                    if new_pos < existing_pos {
+                        insertion_index = i;
+                        break;
+                    }
+                }
+                // New field is in canonical order, existing is not
+                (Some(_), None) => {
+                    // Continue looking - unknown fields go after known ones
+                }
+                // New field is not in canonical order, existing is
+                (None, Some(_)) => {
+                    // Continue until we find all known fields
+                }
+                // Neither field is in canonical order, maintain alphabetical
+                (None, None) => {
+                    if name < &field.name {
+                        insertion_index = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // If we have a position in canonical order but haven't found where to insert yet,
+        // we need to insert after all known fields that come before it
+        if new_field_position.is_some() && insertion_index == self.fields.len() {
+            // Look for the position after the last known field that comes before our field
+            for (i, field) in self.fields.iter().enumerate().rev() {
+                if field_order.iter().position(|&f| f == field.name).is_some() {
+                    // Found a known field, insert after it
+                    insertion_index = i + 1;
+                    break;
+                }
+            }
+        }
+
+        insertion_index
     }
 
     /// Remove a field from the paragraph.
