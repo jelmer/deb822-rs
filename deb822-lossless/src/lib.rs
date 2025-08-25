@@ -8,7 +8,10 @@ mod common;
 mod lex;
 mod lossless;
 mod parse;
-pub use lossless::{Deb822, Entry, Error, Lang, Paragraph, ParseError, PositionedParseError};
+pub use lossless::{
+    Deb822, Entry, Error, Lang, Paragraph, ParseError, PositionedParseError, BINARY_FIELD_ORDER,
+    SOURCE_FIELD_ORDER,
+};
 pub use parse::Parse;
 pub use rowan::TextRange;
 

@@ -42,6 +42,57 @@ use rowan::ast::AstNode;
 use std::path::Path;
 use std::str::FromStr;
 
+/// Canonical field order for source paragraphs in debian/control files
+pub const SOURCE_FIELD_ORDER: &[&str] = &[
+    "Source",
+    "Section",
+    "Priority",
+    "Maintainer",
+    "Uploaders",
+    "Build-Depends",
+    "Build-Depends-Indep",
+    "Build-Depends-Arch",
+    "Build-Conflicts",
+    "Build-Conflicts-Indep",
+    "Build-Conflicts-Arch",
+    "Standards-Version",
+    "Vcs-Browser",
+    "Vcs-Git",
+    "Vcs-Svn",
+    "Vcs-Bzr",
+    "Vcs-Hg",
+    "Vcs-Darcs",
+    "Vcs-Cvs",
+    "Vcs-Arch",
+    "Vcs-Mtn",
+    "Homepage",
+    "Rules-Requires-Root",
+    "Testsuite",
+    "Testsuite-Triggers",
+];
+
+/// Canonical field order for binary packages in debian/control files
+pub const BINARY_FIELD_ORDER: &[&str] = &[
+    "Package",
+    "Architecture",
+    "Section",
+    "Priority",
+    "Multi-Arch",
+    "Essential",
+    "Build-Profiles",
+    "Built-Using",
+    "Pre-Depends",
+    "Depends",
+    "Recommends",
+    "Suggests",
+    "Enhances",
+    "Conflicts",
+    "Breaks",
+    "Replaces",
+    "Provides",
+    "Description",
+];
+
 /// A positioned parse error containing location information.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PositionedParseError {
@@ -1103,10 +1154,11 @@ impl Paragraph {
         self.0.splice_children(count..count, vec![entry.0.into()]);
     }
 
-    /// Set a field in the paragraph
+    /// Set a field in the paragraph, inserting at the appropriate location if new
     pub fn set(&mut self, key: &str, value: &str) {
         let new_entry = Entry::new(key, value);
 
+        // Check if the field already exists and replace it
         for entry in self.entries() {
             if entry.key().as_deref() == Some(key) {
                 self.0.splice_children(
@@ -1116,9 +1168,128 @@ impl Paragraph {
                 return;
             }
         }
-        let count = self.0.children_with_tokens().count();
+
+        // Field doesn't exist, insert at appropriate location
+        // Try to detect if this is a source or binary package paragraph
+        let field_order = if self.contains_key("Source") {
+            SOURCE_FIELD_ORDER
+        } else if self.contains_key("Package") {
+            BINARY_FIELD_ORDER
+        } else {
+            // Default to trying both, preferring source if the new field is "Source"
+            if key == "Source" {
+                SOURCE_FIELD_ORDER
+            } else if key == "Package" {
+                BINARY_FIELD_ORDER
+            } else {
+                // Try to determine based on existing fields
+                let has_source_fields = self.keys().any(|k| {
+                    SOURCE_FIELD_ORDER.contains(&k.as_str())
+                        && !BINARY_FIELD_ORDER.contains(&k.as_str())
+                });
+                if has_source_fields {
+                    SOURCE_FIELD_ORDER
+                } else {
+                    BINARY_FIELD_ORDER
+                }
+            }
+        };
+
+        let insertion_index = self.find_insertion_index(key, field_order);
         self.0
-            .splice_children(count..count, vec![new_entry.0.into()]);
+            .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
+    }
+
+    /// Set a field using a specific field ordering
+    pub fn set_with_field_order(&mut self, key: &str, value: &str, field_order: &[&str]) {
+        let new_entry = Entry::new(key, value);
+
+        // Check if the field already exists and replace it
+        for entry in self.entries() {
+            if entry.key().as_deref() == Some(key) {
+                self.0.splice_children(
+                    entry.0.index()..entry.0.index() + 1,
+                    vec![new_entry.0.into()],
+                );
+                return;
+            }
+        }
+
+        let insertion_index = self.find_insertion_index(key, field_order);
+        self.0
+            .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
+    }
+
+    /// Find the appropriate insertion index for a new field based on field ordering
+    fn find_insertion_index(&self, key: &str, field_order: &[&str]) -> usize {
+        // Find position of the new field in the canonical order
+        let new_field_position = field_order.iter().position(|&field| field == key);
+
+        let mut insertion_index = self.0.children_with_tokens().count();
+
+        // Find the right position based on canonical field order
+        for (i, child) in self.0.children_with_tokens().enumerate() {
+            if let Some(node) = child.as_node() {
+                if let Some(entry) = Entry::cast(node.clone()) {
+                    if let Some(existing_key) = entry.key() {
+                        let existing_position =
+                            field_order.iter().position(|&field| field == existing_key);
+
+                        match (new_field_position, existing_position) {
+                            // Both fields are in the canonical order
+                            (Some(new_pos), Some(existing_pos)) => {
+                                if new_pos < existing_pos {
+                                    insertion_index = i;
+                                    break;
+                                }
+                            }
+                            // New field is in canonical order, existing is not
+                            (Some(_), None) => {
+                                // Continue looking - unknown fields go after known ones
+                            }
+                            // New field is not in canonical order, existing is
+                            (None, Some(_)) => {
+                                // Continue until we find all known fields
+                            }
+                            // Neither field is in canonical order, maintain alphabetical
+                            (None, None) => {
+                                if key < existing_key.as_str() {
+                                    insertion_index = i;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we have a position in canonical order but haven't found where to insert yet,
+        // we need to insert after all known fields that come before it
+        if new_field_position.is_some() && insertion_index == self.0.children_with_tokens().count()
+        {
+            // Look for the position after the last known field that comes before our field
+            let children: Vec<_> = self.0.children_with_tokens().enumerate().collect();
+            for (i, child) in children.into_iter().rev() {
+                if let Some(node) = child.as_node() {
+                    if let Some(entry) = Entry::cast(node.clone()) {
+                        if let Some(existing_key) = entry.key() {
+                            if field_order
+                                .iter()
+                                .position(|&f| f == existing_key)
+                                .is_some()
+                            {
+                                // Found a known field, insert after it
+                                insertion_index = i + 1;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        insertion_index
     }
 
     /// Rename the given field in the paragraph.
@@ -2119,6 +2290,83 @@ C: D
     #[test]
     fn test_format_parse_error() {
         assert_eq!(ParseError(vec!["foo".to_string()]).to_string(), "foo\n");
+    }
+
+    #[test]
+    fn test_set_field_ordering_source() {
+        let mut p = super::Paragraph::new();
+
+        // Add fields in random order
+        p.set("Homepage", "https://example.com");
+        p.set("Source", "mypackage");
+        p.set("Build-Depends", "debhelper");
+        p.set("Maintainer", "Test <test@example.com>");
+        p.set("Standards-Version", "4.5.0");
+
+        // Check that fields are in the expected order
+        let keys: Vec<_> = p.keys().collect();
+        assert_eq!(keys[0], "Source");
+        assert_eq!(keys[1], "Maintainer");
+        assert_eq!(keys[2], "Build-Depends");
+        assert_eq!(keys[3], "Standards-Version");
+        assert_eq!(keys[4], "Homepage");
+    }
+
+    #[test]
+    fn test_set_field_ordering_binary() {
+        let mut p = super::Paragraph::new();
+
+        // Add fields in random order
+        p.set("Description", "A test package");
+        p.set("Package", "mypackage");
+        p.set("Depends", "libc6");
+        p.set("Architecture", "amd64");
+        p.set("Section", "utils");
+
+        // Check that fields are in the expected order
+        let keys: Vec<_> = p.keys().collect();
+        assert_eq!(keys[0], "Package");
+        assert_eq!(keys[1], "Architecture");
+        assert_eq!(keys[2], "Section");
+        assert_eq!(keys[3], "Depends");
+        assert_eq!(keys[4], "Description");
+    }
+
+    #[test]
+    fn test_set_field_ordering_mixed() {
+        let mut p = super::Paragraph::new();
+
+        // Add some known fields and some unknown fields
+        p.set("Package", "mypackage");
+        p.set("X-Custom-Field", "custom");
+        p.set("Architecture", "all");
+        p.set("Another-Custom", "value");
+        p.set("Description", "Test");
+
+        // Check that known fields are ordered correctly and unknown fields are alphabetical
+        let keys: Vec<_> = p.keys().collect();
+        assert_eq!(keys[0], "Package");
+        assert_eq!(keys[1], "Architecture");
+        assert_eq!(keys[2], "Description");
+        assert_eq!(keys[3], "Another-Custom"); // Unknown fields alphabetically sorted
+        assert_eq!(keys[4], "X-Custom-Field");
+    }
+
+    #[test]
+    fn test_set_with_field_order() {
+        let mut p = super::Paragraph::new();
+        let custom_order = &["Foo", "Bar", "Baz"];
+
+        p.set_with_field_order("Baz", "3", custom_order);
+        p.set_with_field_order("Foo", "1", custom_order);
+        p.set_with_field_order("Bar", "2", custom_order);
+        p.set_with_field_order("Unknown", "4", custom_order);
+
+        let keys: Vec<_> = p.keys().collect();
+        assert_eq!(keys[0], "Foo");
+        assert_eq!(keys[1], "Bar");
+        assert_eq!(keys[2], "Baz");
+        assert_eq!(keys[3], "Unknown");
     }
 
     #[test]
