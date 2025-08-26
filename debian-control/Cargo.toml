@@ -37,7 +37,7 @@ name = "incremental_parse"
 required-features = ["lossless"]
 
 [dev-dependencies]
-serde_json = "1.0.140"
+serde_json = "1.0.143"
 
 [badges]
 maintenance = { status = "actively-maintained" }
