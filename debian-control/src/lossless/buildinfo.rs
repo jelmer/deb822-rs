@@ -1,7 +1,7 @@
 //! Parser for Debian buildinfo files
 //!
 //! The buildinfo file format is a Debian-specific format that is used to store
-//! information about the build environment of a package. See https://wiki.debian.org/Buildinfo for
+//! information about the build environment of a package. See <https://wiki.debian.org/Buildinfo> for
 //! more information.
 
 use crate::fields::{Md5Checksum, Sha1Checksum, Sha256Checksum};
