@@ -29,10 +29,10 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Build
-        run: cargo build-all-features --verbose --all
+        run: cargo build-all-features -- --workspace
         env:
           RUSTFLAGS: -Dwarnings
       - name: Run tests
-        run: cargo test-all-features --verbose --all
+        run: cargo test-all-features -- --workspace
         env:
           RUSTFLAGS: -Dwarnings
