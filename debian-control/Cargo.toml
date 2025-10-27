@@ -12,7 +12,7 @@ categories = ["parser-implementations"]
 
 [dependencies]
 rowan = { version = "0.16", optional = true }
-debversion = ">=0.3"
+debversion = ">=0.4.7"
 regex = "1"
 deb822-lossless = { version = ">=0.3.2", path = "../deb822-lossless", optional = true }
 deb822-fast = { path = "../deb822-fast", features = ["derive"], version = ">=0.2.0" }

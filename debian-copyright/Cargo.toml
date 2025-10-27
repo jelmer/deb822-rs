@@ -11,7 +11,7 @@ keywords = ["debian", "copyright", "edit", "dep5"]
 categories = ["parser-implementations"]
 
 [dependencies]
-debversion = "0.4"
+debversion = ">=0.4.7"
 regex = ">=1.10"
 deb822-lossless = { version = ">=0.2", path = "../deb822-lossless", optional = true }
 deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = ["derive"] }
