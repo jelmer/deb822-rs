@@ -36,3 +36,7 @@ jobs:
         run: cargo test-all-features -- --workspace
         env:
           RUSTFLAGS: -Dwarnings
+      - name: Install cargo-minimal-versions and cargo-hack
+        run: cargo install cargo-minimal-versions cargo-hack
+      - name: Test with minimal versions
+        run: cargo minimal-versions test --workspace
