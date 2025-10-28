@@ -1364,12 +1364,14 @@ impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Paragraph {
 }
 
 #[cfg(feature = "python-debian")]
-impl pyo3::FromPyObject<'_> for Paragraph {
-    fn extract_bound(obj: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        use pyo3::prelude::*;
+impl<'py> pyo3::FromPyObject<'_, 'py> for Paragraph {
+    type Error = pyo3::PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'_, 'py, pyo3::PyAny>) -> Result<Self, Self::Error> {
+        use pyo3::types::PyAnyMethods;
         let d = obj.call_method0("__str__")?.extract::<String>()?;
-        Ok(Paragraph::from_str(&d)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err((e.to_string(),)))?)
+        Paragraph::from_str(&d)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err((e.to_string(),)))
     }
 }
 
