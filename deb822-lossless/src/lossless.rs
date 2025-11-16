@@ -1154,6 +1154,44 @@ impl Paragraph {
         self.0.splice_children(count..count, vec![entry.0.into()]);
     }
 
+    /// Insert a comment line before this paragraph.
+    ///
+    /// The comment should not include the leading '#' character or newline,
+    /// these will be added automatically.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// let mut d: Deb822 = vec![
+    ///     vec![("Foo", "Bar")].into_iter().collect(),
+    /// ]
+    /// .into_iter()
+    /// .collect();
+    /// let mut para = d.paragraphs().next().unwrap();
+    /// para.insert_comment_before("This is a comment");
+    /// assert_eq!(d.to_string(), "# This is a comment\nFoo: Bar\n");
+    /// ```
+    pub fn insert_comment_before(&mut self, comment: &str) {
+        use rowan::GreenNodeBuilder;
+
+        // Create an EMPTY_LINE node containing the comment tokens
+        // This matches the structure used elsewhere in the parser
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(EMPTY_LINE.into());
+        builder.token(COMMENT.into(), &format!("# {}", comment));
+        builder.token(NEWLINE.into(), "\n");
+        builder.finish_node();
+        let green = builder.finish();
+
+        // Convert to syntax node and insert before this paragraph
+        let comment_node = SyntaxNode::new_root_mut(green);
+
+        let index = self.0.index();
+        let parent = self.0.parent().expect("Paragraph must have a parent");
+        parent.splice_children(index..index, vec![comment_node.into()]);
+    }
+
     /// Set a field in the paragraph, inserting at the appropriate location if new
     pub fn set(&mut self, key: &str, value: &str) {
         let new_entry = Entry::new(key, value);
@@ -2773,7 +2811,7 @@ Section:    utils
         let input = r#"Package: test
 Description:
 Maintainer: Valid User
-EmptyField: 
+EmptyField:
 Version: 1.0
 "#;
         let (deb822, _errors) = super::Deb822::from_str_relaxed(input);
@@ -2794,5 +2832,40 @@ Version: 1.0
         );
         assert_eq!(all_fields.get("EmptyField"), Some(&"".to_string()));
         assert_eq!(all_fields.get("Version"), Some(&"1.0".to_string()));
+    }
+
+    #[test]
+    fn test_insert_comment_before() {
+        let d: super::Deb822 = vec![
+            vec![("Source", "foo"), ("Maintainer", "Bar <bar@example.com>")]
+                .into_iter()
+                .collect(),
+            vec![("Package", "foo"), ("Architecture", "all")]
+                .into_iter()
+                .collect(),
+        ]
+        .into_iter()
+        .collect();
+
+        // Insert comment before first paragraph
+        let mut p1 = d.paragraphs().next().unwrap();
+        p1.insert_comment_before("This is the source paragraph");
+
+        // Insert comment before second paragraph
+        let mut p2 = d.paragraphs().nth(1).unwrap();
+        p2.insert_comment_before("This is the binary paragraph");
+
+        let output = d.to_string();
+        assert_eq!(
+            output,
+            r#"# This is the source paragraph
+Source: foo
+Maintainer: Bar <bar@example.com>
+
+# This is the binary paragraph
+Package: foo
+Architecture: all
+"#
+        );
     }
 }
