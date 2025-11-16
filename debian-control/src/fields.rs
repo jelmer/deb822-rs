@@ -427,6 +427,49 @@ impl std::fmt::Display for MultiArch {
     }
 }
 
+/// Format a Debian package description according to Debian policy.
+///
+/// Package descriptions consist of a short description (synopsis) and a long description.
+/// The long description lines are indented with a single space, and empty lines are
+/// represented as " ." (space followed by a period).
+///
+/// # Arguments
+///
+/// * `short` - The short description (synopsis), typically one line
+/// * `long` - The long description, can be multiple lines
+///
+/// # Returns
+///
+/// A formatted description string suitable for use in a Debian control file.
+///
+/// # Examples
+///
+/// ```
+/// use debian_control::fields::format_description;
+///
+/// let formatted = format_description("A great package", "This package does amazing things.\nIt is very useful.");
+/// assert_eq!(formatted, "A great package\n This package does amazing things.\n It is very useful.");
+///
+/// // Empty lines become " ."
+/// let with_empty = format_description("Summary", "First paragraph.\n\nSecond paragraph.");
+/// assert_eq!(with_empty, "Summary\n First paragraph.\n .\n Second paragraph.");
+/// ```
+pub fn format_description(short: &str, long: &str) -> String {
+    let mut result = short.to_string();
+
+    for line in long.lines() {
+        result.push('\n');
+        if line.trim().is_empty() {
+            result.push_str(" .");
+        } else {
+            result.push(' ');
+            result.push_str(line);
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,5 +512,54 @@ mod tests {
             filename: "test.deb".to_string(),
         };
         assert_eq!(checksum.filename(), "test.deb".to_string());
+    }
+
+    #[test]
+    fn test_format_description_basic() {
+        let formatted = format_description(
+            "A great package",
+            "This package does amazing things.\nIt is very useful.",
+        );
+        assert_eq!(
+            formatted,
+            "A great package\n This package does amazing things.\n It is very useful."
+        );
+    }
+
+    #[test]
+    fn test_format_description_empty_lines() {
+        let formatted = format_description("Summary", "First paragraph.\n\nSecond paragraph.");
+        assert_eq!(
+            formatted,
+            "Summary\n First paragraph.\n .\n Second paragraph."
+        );
+    }
+
+    #[test]
+    fn test_format_description_short_only() {
+        let formatted = format_description("Short description", "");
+        assert_eq!(formatted, "Short description");
+    }
+
+    #[test]
+    fn test_format_description_multiple_empty_lines() {
+        let formatted = format_description("Test", "Line 1\n\n\nLine 2");
+        assert_eq!(formatted, "Test\n Line 1\n .\n .\n Line 2");
+    }
+
+    #[test]
+    fn test_format_description_whitespace_only_line() {
+        let formatted = format_description("Test", "Line 1\n   \nLine 2");
+        assert_eq!(formatted, "Test\n Line 1\n .\n Line 2");
+    }
+
+    #[test]
+    fn test_format_description_complex() {
+        let long_desc = "This is a test package.\n\nIt has multiple paragraphs.\n\nAnd even lists:\n - Item 1\n - Item 2";
+        let formatted = format_description("Test package", long_desc);
+        assert_eq!(
+            formatted,
+            "Test package\n This is a test package.\n .\n It has multiple paragraphs.\n .\n And even lists:\n  - Item 1\n  - Item 2"
+        );
     }
 }
