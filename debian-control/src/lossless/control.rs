@@ -223,6 +223,75 @@ impl Control {
             .wrap_and_sort(Some(&sort_paragraphs), Some(&wrap_paragraph));
     }
 
+    /// Sort binary package paragraphs alphabetically by package name.
+    ///
+    /// This method reorders the binary package paragraphs in alphabetical order
+    /// based on their Package field value. The source paragraph always remains first.
+    ///
+    /// # Arguments
+    /// * `keep_first` - If true, keeps the first binary package in place and only
+    ///   sorts the remaining binary packages. If false, sorts all binary packages.
+    ///
+    /// # Example
+    /// ```rust
+    /// use debian_control::lossless::Control;
+    ///
+    /// let input = r#"Source: foo
+    ///
+    /// Package: libfoo
+    /// Architecture: all
+    ///
+    /// Package: libbar
+    /// Architecture: all
+    /// "#;
+    ///
+    /// let mut control: Control = input.parse().unwrap();
+    /// control.sort_binaries(false);
+    ///
+    /// // Binary packages are now sorted: libbar comes before libfoo
+    /// let binaries: Vec<_> = control.binaries().collect();
+    /// assert_eq!(binaries[0].name(), Some("libbar".to_string()));
+    /// assert_eq!(binaries[1].name(), Some("libfoo".to_string()));
+    /// ```
+    pub fn sort_binaries(&mut self, keep_first: bool) {
+        let mut paragraphs: Vec<_> = self.0.paragraphs().collect();
+
+        if paragraphs.len() <= 1 {
+            return; // Only source paragraph, nothing to sort
+        }
+
+        // Find the index where binary packages start (after source)
+        let source_idx = paragraphs.iter().position(|p| p.get("Source").is_some());
+        let binary_start = source_idx.map(|i| i + 1).unwrap_or(0);
+
+        // Determine where to start sorting
+        let sort_start = if keep_first && paragraphs.len() > binary_start + 1 {
+            binary_start + 1
+        } else {
+            binary_start
+        };
+
+        if sort_start >= paragraphs.len() {
+            return; // Nothing to sort
+        }
+
+        // Sort binary packages by package name
+        paragraphs[sort_start..].sort_by(|a, b| {
+            let a_name = a.get("Package");
+            let b_name = b.get("Package");
+            a_name.cmp(&b_name)
+        });
+
+        // Rebuild the Deb822 with sorted paragraphs
+        let sort_paragraphs = |a: &Paragraph, b: &Paragraph| -> std::cmp::Ordering {
+            let a_pos = paragraphs.iter().position(|p| p == a);
+            let b_pos = paragraphs.iter().position(|p| p == b);
+            a_pos.cmp(&b_pos)
+        };
+
+        self.0 = self.0.wrap_and_sort(Some(&sort_paragraphs), None);
+    }
+
     /// Iterate over fields that overlap with the given range
     ///
     /// This method returns all fields (entries) from all paragraphs that have any overlap
@@ -1733,5 +1802,136 @@ Description: Example package
         let string_errors = parsed.errors();
         assert!(!string_errors.is_empty());
         assert_eq!(string_errors.len(), positioned_errors.len());
+    }
+
+    #[test]
+    fn test_sort_binaries_basic() {
+        let input = r#"Source: foo
+
+Package: libfoo
+Architecture: all
+
+Package: libbar
+Architecture: all
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(false);
+
+        let binaries: Vec<_> = control.binaries().collect();
+        assert_eq!(binaries.len(), 2);
+        assert_eq!(binaries[0].name(), Some("libbar".to_string()));
+        assert_eq!(binaries[1].name(), Some("libfoo".to_string()));
+    }
+
+    #[test]
+    fn test_sort_binaries_keep_first() {
+        let input = r#"Source: foo
+
+Package: zzz-first
+Architecture: all
+
+Package: libbar
+Architecture: all
+
+Package: libaaa
+Architecture: all
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(true);
+
+        let binaries: Vec<_> = control.binaries().collect();
+        assert_eq!(binaries.len(), 3);
+        // First binary should remain in place
+        assert_eq!(binaries[0].name(), Some("zzz-first".to_string()));
+        // The rest should be sorted
+        assert_eq!(binaries[1].name(), Some("libaaa".to_string()));
+        assert_eq!(binaries[2].name(), Some("libbar".to_string()));
+    }
+
+    #[test]
+    fn test_sort_binaries_already_sorted() {
+        let input = r#"Source: foo
+
+Package: aaa
+Architecture: all
+
+Package: bbb
+Architecture: all
+
+Package: ccc
+Architecture: all
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(false);
+
+        let binaries: Vec<_> = control.binaries().collect();
+        assert_eq!(binaries.len(), 3);
+        assert_eq!(binaries[0].name(), Some("aaa".to_string()));
+        assert_eq!(binaries[1].name(), Some("bbb".to_string()));
+        assert_eq!(binaries[2].name(), Some("ccc".to_string()));
+    }
+
+    #[test]
+    fn test_sort_binaries_no_binaries() {
+        let input = r#"Source: foo
+Maintainer: test@example.com
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(false);
+
+        // Should not crash, just do nothing
+        assert_eq!(control.binaries().count(), 0);
+    }
+
+    #[test]
+    fn test_sort_binaries_one_binary() {
+        let input = r#"Source: foo
+
+Package: bar
+Architecture: all
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(false);
+
+        let binaries: Vec<_> = control.binaries().collect();
+        assert_eq!(binaries.len(), 1);
+        assert_eq!(binaries[0].name(), Some("bar".to_string()));
+    }
+
+    #[test]
+    fn test_sort_binaries_preserves_fields() {
+        let input = r#"Source: foo
+
+Package: zzz
+Architecture: any
+Depends: libc6
+Description: ZZZ package
+
+Package: aaa
+Architecture: all
+Depends: ${misc:Depends}
+Description: AAA package
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(false);
+
+        let binaries: Vec<_> = control.binaries().collect();
+        assert_eq!(binaries.len(), 2);
+
+        // First binary should be aaa
+        assert_eq!(binaries[0].name(), Some("aaa".to_string()));
+        assert_eq!(binaries[0].architecture(), Some("all".to_string()));
+        assert_eq!(binaries[0].description(), Some("AAA package".to_string()));
+
+        // Second binary should be zzz
+        assert_eq!(binaries[1].name(), Some("zzz".to_string()));
+        assert_eq!(binaries[1].architecture(), Some("any".to_string()));
+        assert_eq!(binaries[1].description(), Some("ZZZ package".to_string()));
     }
 }
