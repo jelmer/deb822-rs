@@ -427,6 +427,149 @@ impl std::fmt::Display for MultiArch {
     }
 }
 
+/// Standards-Version field value
+///
+/// Represents a Debian standards version as a tuple of up to 4 components.
+/// Commonly used versions include "3.9.8", "4.6.2", etc.
+///
+/// # Examples
+///
+/// ```
+/// use debian_control::fields::StandardsVersion;
+/// use std::str::FromStr;
+///
+/// let version = StandardsVersion::from_str("4.6.2").unwrap();
+/// assert_eq!(version.major(), 4);
+/// assert_eq!(version.minor(), 6);
+/// assert_eq!(version.patch(), 2);
+/// assert_eq!(version.to_string(), "4.6.2");
+///
+/// // Versions can be compared
+/// let v1 = StandardsVersion::from_str("4.6.2").unwrap();
+/// let v2 = StandardsVersion::from_str("4.5.1").unwrap();
+/// assert!(v1 > v2);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StandardsVersion {
+    major: u8,
+    minor: u8,
+    patch: u8,
+    micro: u8,
+}
+
+impl StandardsVersion {
+    /// Create a new standards version
+    pub fn new(major: u8, minor: u8, patch: u8, micro: u8) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+            micro,
+        }
+    }
+
+    /// Get the major version component
+    pub fn major(&self) -> u8 {
+        self.major
+    }
+
+    /// Get the minor version component
+    pub fn minor(&self) -> u8 {
+        self.minor
+    }
+
+    /// Get the patch version component
+    pub fn patch(&self) -> u8 {
+        self.patch
+    }
+
+    /// Get the micro version component
+    pub fn micro(&self) -> u8 {
+        self.micro
+    }
+
+    /// Convert to a tuple (major, minor, patch, micro)
+    pub fn as_tuple(&self) -> (u8, u8, u8, u8) {
+        (self.major, self.minor, self.patch, self.micro)
+    }
+}
+
+impl std::fmt::Display for StandardsVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.micro != 0 {
+            write!(
+                f,
+                "{}.{}.{}.{}",
+                self.major, self.minor, self.patch, self.micro
+            )
+        } else if self.patch != 0 {
+            write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+        } else if self.minor != 0 {
+            write!(f, "{}.{}", self.major, self.minor)
+        } else {
+            write!(f, "{}", self.major)
+        }
+    }
+}
+
+impl std::str::FromStr for StandardsVersion {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split('.').collect();
+        if parts.is_empty() || parts.len() > 4 {
+            return Err(format!(
+                "Invalid standards version format: {} (expected 1-4 dot-separated components)",
+                s
+            ));
+        }
+
+        let major = parts[0]
+            .parse()
+            .map_err(|_| format!("Invalid major version: {}", parts[0]))?;
+        let minor = if parts.len() > 1 {
+            parts[1]
+                .parse()
+                .map_err(|_| format!("Invalid minor version: {}", parts[1]))?
+        } else {
+            0
+        };
+        let patch = if parts.len() > 2 {
+            parts[2]
+                .parse()
+                .map_err(|_| format!("Invalid patch version: {}", parts[2]))?
+        } else {
+            0
+        };
+        let micro = if parts.len() > 3 {
+            parts[3]
+                .parse()
+                .map_err(|_| format!("Invalid micro version: {}", parts[3]))?
+        } else {
+            0
+        };
+
+        Ok(Self {
+            major,
+            minor,
+            patch,
+            micro,
+        })
+    }
+}
+
+impl PartialOrd for StandardsVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for StandardsVersion {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_tuple().cmp(&other.as_tuple())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,5 +612,93 @@ mod tests {
             filename: "test.deb".to_string(),
         };
         assert_eq!(checksum.filename(), "test.deb".to_string());
+    }
+
+    #[test]
+    fn test_standards_version_parse() {
+        let v = "4.6.2".parse::<StandardsVersion>().unwrap();
+        assert_eq!(v.major(), 4);
+        assert_eq!(v.minor(), 6);
+        assert_eq!(v.patch(), 2);
+        assert_eq!(v.micro(), 0);
+        assert_eq!(v.as_tuple(), (4, 6, 2, 0));
+    }
+
+    #[test]
+    fn test_standards_version_parse_two_components() {
+        let v = "3.9".parse::<StandardsVersion>().unwrap();
+        assert_eq!(v.major(), 3);
+        assert_eq!(v.minor(), 9);
+        assert_eq!(v.patch(), 0);
+        assert_eq!(v.micro(), 0);
+    }
+
+    #[test]
+    fn test_standards_version_parse_four_components() {
+        let v = "4.6.2.1".parse::<StandardsVersion>().unwrap();
+        assert_eq!(v.major(), 4);
+        assert_eq!(v.minor(), 6);
+        assert_eq!(v.patch(), 2);
+        assert_eq!(v.micro(), 1);
+    }
+
+    #[test]
+    fn test_standards_version_parse_single_component() {
+        let v = "4".parse::<StandardsVersion>().unwrap();
+        assert_eq!(v.major(), 4);
+        assert_eq!(v.minor(), 0);
+        assert_eq!(v.patch(), 0);
+        assert_eq!(v.micro(), 0);
+    }
+
+    #[test]
+    fn test_standards_version_display() {
+        let v = StandardsVersion::new(4, 6, 2, 0);
+        assert_eq!(v.to_string(), "4.6.2");
+
+        let v = StandardsVersion::new(3, 9, 8, 0);
+        assert_eq!(v.to_string(), "3.9.8");
+
+        let v = StandardsVersion::new(4, 6, 2, 1);
+        assert_eq!(v.to_string(), "4.6.2.1");
+
+        let v = StandardsVersion::new(3, 9, 0, 0);
+        assert_eq!(v.to_string(), "3.9");
+
+        let v = StandardsVersion::new(4, 0, 0, 0);
+        assert_eq!(v.to_string(), "4");
+    }
+
+    #[test]
+    fn test_standards_version_comparison() {
+        let v1 = "4.6.2".parse::<StandardsVersion>().unwrap();
+        let v2 = "4.5.1".parse::<StandardsVersion>().unwrap();
+        assert!(v1 > v2);
+
+        let v3 = "4.6.2".parse::<StandardsVersion>().unwrap();
+        assert_eq!(v1, v3);
+
+        let v4 = "3.9.8".parse::<StandardsVersion>().unwrap();
+        assert!(v1 > v4);
+
+        let v5 = "4.6.2.1".parse::<StandardsVersion>().unwrap();
+        assert!(v5 > v1);
+    }
+
+    #[test]
+    fn test_standards_version_roundtrip() {
+        let versions = vec!["4.6.2", "3.9.8", "4.6.2.1", "3.9", "4"];
+        for version_str in versions {
+            let v = version_str.parse::<StandardsVersion>().unwrap();
+            assert_eq!(v.to_string(), version_str);
+        }
+    }
+
+    #[test]
+    fn test_standards_version_invalid() {
+        assert!("".parse::<StandardsVersion>().is_err());
+        assert!("a.b.c".parse::<StandardsVersion>().is_err());
+        assert!("1.2.3.4.5".parse::<StandardsVersion>().is_err());
+        assert!("1.2.3.-1".parse::<StandardsVersion>().is_err());
     }
 }
