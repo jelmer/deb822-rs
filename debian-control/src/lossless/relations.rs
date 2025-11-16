@@ -672,6 +672,232 @@ impl Relations {
     pub fn len(&self) -> usize {
         self.entries().count()
     }
+
+    /// Ensure that a package has at least a minimum version constraint.
+    ///
+    /// If the package already exists with a version constraint that satisfies
+    /// the minimum version, it is left unchanged. Otherwise, the constraint
+    /// is updated or added.
+    ///
+    /// # Arguments
+    /// * `package` - The package name
+    /// * `minimum_version` - The minimum version required
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "debhelper (>= 9)".parse().unwrap();
+    /// relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+    /// assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    ///
+    /// let mut relations: Relations = "python3".parse().unwrap();
+    /// relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+    /// assert!(relations.to_string().contains("debhelper (>= 12)"));
+    /// ```
+    pub fn ensure_minimum_version(&mut self, package: &str, minimum_version: &Version) {
+        let mut found = false;
+        let mut obsolete_indices = vec![];
+        let mut update_idx = None;
+
+        let entries: Vec<_> = self.entries().collect();
+        for (idx, entry) in entries.iter().enumerate() {
+            let relations: Vec<_> = entry.relations().collect();
+
+            // Check if this entry has multiple alternatives with our package
+            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+            if names.len() > 1 && names.contains(&package.to_string()) {
+                // This is a complex alternative relation, mark for removal if obsolete
+                let is_obsolete = relations.iter().any(|r| {
+                    if r.name() != package {
+                        return false;
+                    }
+                    if let Some((vc, ver)) = r.version() {
+                        matches!(vc, VersionConstraint::GreaterThan if &ver < minimum_version)
+                            || matches!(vc, VersionConstraint::GreaterThanEqual if &ver <= minimum_version)
+                    } else {
+                        false
+                    }
+                });
+                if is_obsolete {
+                    obsolete_indices.push(idx);
+                }
+                continue;
+            }
+
+            // Single package entry
+            if names.len() == 1 && names[0] == package {
+                found = true;
+                let relation = relations.into_iter().next().unwrap();
+
+                // Check if update is needed
+                let should_update = if let Some((vc, ver)) = relation.version() {
+                    match vc {
+                        VersionConstraint::GreaterThanEqual | VersionConstraint::GreaterThan => {
+                            &ver < minimum_version
+                        }
+                        _ => false,
+                    }
+                } else {
+                    true
+                };
+
+                if should_update {
+                    update_idx = Some(idx);
+                }
+                break;
+            }
+        }
+
+        // Perform updates after iteration
+        if let Some(idx) = update_idx {
+            let relation = Relation::new(
+                package,
+                Some((VersionConstraint::GreaterThanEqual, minimum_version.clone())),
+            );
+            self.replace(idx, Entry::from(relation));
+        }
+
+        // Remove obsolete entries
+        for idx in obsolete_indices.into_iter().rev() {
+            self.remove_entry(idx);
+        }
+
+        // Add if not found
+        if !found {
+            let relation = Relation::new(
+                package,
+                Some((VersionConstraint::GreaterThanEqual, minimum_version.clone())),
+            );
+            self.push(Entry::from(relation));
+        }
+    }
+
+    /// Ensure that a package has an exact version constraint.
+    ///
+    /// # Arguments
+    /// * `package` - The package name
+    /// * `version` - The exact version required
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "debhelper (>= 9)".parse().unwrap();
+    /// relations.ensure_exact_version("debhelper", &"12".parse().unwrap());
+    /// assert_eq!(relations.to_string(), "debhelper (= 12)");
+    /// ```
+    pub fn ensure_exact_version(&mut self, package: &str, version: &Version) {
+        let mut found = false;
+        let mut update_idx = None;
+
+        let entries: Vec<_> = self.entries().collect();
+        for (idx, entry) in entries.iter().enumerate() {
+            let relations: Vec<_> = entry.relations().collect();
+            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+
+            if names.len() > 1 && names[0] == package {
+                panic!("Complex rule for {}, aborting", package);
+            }
+
+            if names.len() == 1 && names[0] == package {
+                found = true;
+                let relation = relations.into_iter().next().unwrap();
+
+                let should_update = if let Some((vc, ver)) = relation.version() {
+                    vc != VersionConstraint::Equal || &ver != version
+                } else {
+                    true
+                };
+
+                if should_update {
+                    update_idx = Some(idx);
+                }
+                break;
+            }
+        }
+
+        // Perform update after iteration
+        if let Some(idx) = update_idx {
+            let relation =
+                Relation::new(package, Some((VersionConstraint::Equal, version.clone())));
+            self.replace(idx, Entry::from(relation));
+        }
+
+        if !found {
+            let relation =
+                Relation::new(package, Some((VersionConstraint::Equal, version.clone())));
+            self.push(Entry::from(relation));
+        }
+    }
+
+    /// Ensure that a package dependency exists, without specifying a version.
+    ///
+    /// If the package already exists (with or without a version constraint),
+    /// the relations field is left unchanged. Otherwise, the package is added
+    /// without a version constraint.
+    ///
+    /// # Arguments
+    /// * `package` - The package name
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "python3".parse().unwrap();
+    /// relations.ensure_some_version("debhelper");
+    /// assert!(relations.to_string().contains("debhelper"));
+    /// ```
+    pub fn ensure_some_version(&mut self, package: &str) {
+        for entry in self.entries() {
+            let relations: Vec<_> = entry.relations().collect();
+            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+
+            if names.len() > 1 && names[0] == package {
+                panic!("Complex rule for {}, aborting", package);
+            }
+
+            if names.len() == 1 && names[0] == package {
+                // Package already exists, don't modify
+                return;
+            }
+        }
+
+        // Package not found, add it
+        let relation = Relation::simple(package);
+        self.push(Entry::from(relation));
+    }
+
+    /// Filter entries based on a predicate function.
+    ///
+    /// # Arguments
+    /// * `keep` - A function that returns true for entries to keep
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+    /// relations.filter_entries(|entry| {
+    ///     entry.relations().any(|r| r.name().starts_with("python"))
+    /// });
+    /// assert_eq!(relations.to_string(), "python3");
+    /// ```
+    pub fn filter_entries<F>(&mut self, keep: F)
+    where
+        F: Fn(&Entry) -> bool,
+    {
+        let indices_to_remove: Vec<_> = self
+            .entries()
+            .enumerate()
+            .filter_map(|(idx, entry)| if keep(&entry) { None } else { Some(idx) })
+            .collect();
+
+        // Remove in reverse order to maintain correct indices
+        for idx in indices_to_remove.into_iter().rev() {
+            self.remove_entry(idx);
+        }
+    }
 }
 
 impl From<Vec<Entry>> for Relations {
@@ -2548,5 +2774,103 @@ mod tests {
         let mut relation = Relation::simple("samba");
         relation.set_architectures(vec!["amd64", "i386"].into_iter());
         assert_eq!(relation.to_string(), "samba [amd64 i386]");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_add_new() {
+        let mut relations: Relations = "python3".parse().unwrap();
+        relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "python3, debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_update() {
+        let mut relations: Relations = "debhelper (>= 9)".parse().unwrap();
+        relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_no_change() {
+        let mut relations: Relations = "debhelper (>= 13)".parse().unwrap();
+        relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "debhelper (>= 13)");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_no_version() {
+        let mut relations: Relations = "debhelper".parse().unwrap();
+        relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_exact_version_add_new() {
+        let mut relations: Relations = "python3".parse().unwrap();
+        relations.ensure_exact_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "python3, debhelper (= 12)");
+    }
+
+    #[test]
+    fn test_ensure_exact_version_update() {
+        let mut relations: Relations = "debhelper (>= 9)".parse().unwrap();
+        relations.ensure_exact_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "debhelper (= 12)");
+    }
+
+    #[test]
+    fn test_ensure_exact_version_no_change() {
+        let mut relations: Relations = "debhelper (= 12)".parse().unwrap();
+        relations.ensure_exact_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "debhelper (= 12)");
+    }
+
+    #[test]
+    fn test_ensure_some_version_add_new() {
+        let mut relations: Relations = "python3".parse().unwrap();
+        relations.ensure_some_version("debhelper");
+        assert_eq!(relations.to_string(), "python3, debhelper");
+    }
+
+    #[test]
+    fn test_ensure_some_version_exists_with_version() {
+        let mut relations: Relations = "debhelper (>= 12)".parse().unwrap();
+        relations.ensure_some_version("debhelper");
+        assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_some_version_exists_no_version() {
+        let mut relations: Relations = "debhelper".parse().unwrap();
+        relations.ensure_some_version("debhelper");
+        assert_eq!(relations.to_string(), "debhelper");
+    }
+
+    #[test]
+    fn test_filter_entries_basic() {
+        let mut relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+        relations.filter_entries(|entry| entry.relations().any(|r| r.name().starts_with("python")));
+        assert_eq!(relations.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_filter_entries_keep_all() {
+        let mut relations: Relations = "python3, debhelper".parse().unwrap();
+        relations.filter_entries(|_| true);
+        assert_eq!(relations.to_string(), "python3, debhelper");
+    }
+
+    #[test]
+    fn test_filter_entries_remove_all() {
+        let mut relations: Relations = "python3, debhelper".parse().unwrap();
+        relations.filter_entries(|_| false);
+        assert_eq!(relations.to_string(), "");
+    }
+
+    #[test]
+    fn test_filter_entries_keep_middle() {
+        let mut relations: Relations = "aaa, bbb, ccc".parse().unwrap();
+        relations.filter_entries(|entry| entry.relations().any(|r| r.name() == "bbb"));
+        assert_eq!(relations.to_string(), "bbb");
     }
 }
