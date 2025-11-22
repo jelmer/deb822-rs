@@ -549,6 +549,117 @@ impl Default for Relations {
     }
 }
 
+/// Check if a package name should be treated as special for sorting purposes.
+///
+/// Special names include substitution variables (like `${misc:Depends}`)
+/// and template variables (like `@cdbs@`).
+fn is_special_package_name(name: &str) -> bool {
+    // Substitution variables like ${misc:Depends}
+    if name.starts_with("${") && name.ends_with('}') {
+        return true;
+    }
+    // Template variables like @cdbs@
+    if name.starts_with('@') && name.ends_with('@') {
+        return true;
+    }
+    false
+}
+
+/// Trait for defining sorting order of package relations.
+pub trait SortingOrder {
+    /// Compare two package names for sorting.
+    ///
+    /// Returns true if `name1` should come before `name2`.
+    fn lt(&self, name1: &str, name2: &str) -> bool;
+
+    /// Check if a package name should be ignored for sorting purposes.
+    fn ignore(&self, name: &str) -> bool;
+}
+
+/// Default sorting order (lexicographical with special items last).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DefaultSortingOrder;
+
+impl SortingOrder for DefaultSortingOrder {
+    fn lt(&self, name1: &str, name2: &str) -> bool {
+        let special1 = is_special_package_name(name1);
+        let special2 = is_special_package_name(name2);
+
+        // Special items always come last
+        if special1 && !special2 {
+            return false;
+        }
+        if !special1 && special2 {
+            return true;
+        }
+        if special1 && special2 {
+            // Both special - maintain original order
+            return false;
+        }
+
+        // Both are regular packages, use alphabetical order
+        name1 < name2
+    }
+
+    fn ignore(&self, name: &str) -> bool {
+        is_special_package_name(name)
+    }
+}
+
+/// Sorting order matching wrap-and-sort behavior.
+///
+/// This sorting order matches the behavior of the devscripts wrap-and-sort tool.
+/// It sorts packages into three groups:
+/// 1. Build-system packages (debhelper-compat, cdbs, etc.) - sorted first
+/// 2. Regular packages starting with [a-z0-9] - sorted in the middle
+/// 3. Substvars and other special packages - sorted last
+///
+/// Within each group, packages are sorted lexicographically.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WrapAndSortOrder;
+
+impl WrapAndSortOrder {
+    /// Build systems that should be sorted first, matching wrap-and-sort
+    const BUILD_SYSTEMS: &'static [&'static str] = &[
+        "cdbs",
+        "debhelper-compat",
+        "debhelper",
+        "debputy",
+        "dpkg-build-api",
+        "dpkg-dev",
+    ];
+
+    fn get_sort_key<'a>(&self, name: &'a str) -> (i32, &'a str) {
+        // Check if it's a build system (including dh-* packages)
+        if Self::BUILD_SYSTEMS.contains(&name) || name.starts_with("dh-") {
+            return (-1, name);
+        }
+
+        // Check if it starts with a regular character
+        if name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
+            return (0, name);
+        }
+
+        // Special packages (substvars, etc.) go last
+        (1, name)
+    }
+}
+
+impl SortingOrder for WrapAndSortOrder {
+    fn lt(&self, name1: &str, name2: &str) -> bool {
+        self.get_sort_key(name1) < self.get_sort_key(name2)
+    }
+
+    fn ignore(&self, _name: &str) -> bool {
+        // wrap-and-sort doesn't ignore any packages - it sorts everything
+        false
+    }
+}
+
 impl Relations {
     /// Create a new relations field
     pub fn new() -> Self {
@@ -897,6 +1008,271 @@ impl Relations {
         for idx in indices_to_remove.into_iter().rev() {
             self.remove_entry(idx);
         }
+    }
+
+    /// Check whether the relations are sorted according to a given sorting order.
+    ///
+    /// # Arguments
+    /// * `sorting_order` - The sorting order to check against
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::{Relations, WrapAndSortOrder};
+    ///
+    /// let relations: Relations = "debhelper, python3, rustc".parse().unwrap();
+    /// assert!(relations.is_sorted(&WrapAndSortOrder));
+    ///
+    /// let relations: Relations = "rustc, debhelper, python3".parse().unwrap();
+    /// assert!(!relations.is_sorted(&WrapAndSortOrder));
+    /// ```
+    pub fn is_sorted(&self, sorting_order: &impl SortingOrder) -> bool {
+        let mut last_name: Option<String> = None;
+        for entry in self.entries() {
+            // Skip empty entries
+            let mut relations = entry.relations();
+            let Some(relation) = relations.next() else {
+                continue;
+            };
+
+            let name = relation.name();
+
+            // Skip items that should be ignored
+            if sorting_order.ignore(&name) {
+                continue;
+            }
+
+            // Check if this breaks the sort order
+            if let Some(ref last) = last_name {
+                if sorting_order.lt(&name, last) {
+                    return false;
+                }
+            }
+
+            last_name = Some(name);
+        }
+        true
+    }
+
+    /// Find the position to insert an entry while maintaining sort order.
+    ///
+    /// This method detects the current sorting order and returns the appropriate
+    /// insertion position. If there are fewer than 2 entries, it defaults to
+    /// WrapAndSortOrder. If no sorting order is detected, it returns the end position.
+    ///
+    /// # Arguments
+    /// * `entry` - The entry to insert
+    ///
+    /// # Returns
+    /// The index where the entry should be inserted
+    fn find_insert_position(&self, entry: &Entry) -> usize {
+        // Get the package name from the first relation in the entry
+        let Some(relation) = entry.relations().next() else {
+            // Empty entry, just append at the end
+            return self.len();
+        };
+        let package_name = relation.name();
+
+        // Count non-empty entries
+        let count = self.entries().filter(|e| !e.is_empty()).count();
+
+        // If there are less than 2 items, default to WrapAndSortOrder
+        let sorting_order: Box<dyn SortingOrder> = if count < 2 {
+            Box::new(WrapAndSortOrder)
+        } else {
+            // Try to detect which sorting order is being used
+            // Try WrapAndSortOrder first, then DefaultSortingOrder
+            if self.is_sorted(&WrapAndSortOrder) {
+                Box::new(WrapAndSortOrder)
+            } else if self.is_sorted(&DefaultSortingOrder) {
+                Box::new(DefaultSortingOrder)
+            } else {
+                // No sorting order detected, just append at the end
+                return self.len();
+            }
+        };
+
+        // If adding a special item that should be ignored by this sort order, append at the end
+        if sorting_order.ignore(&package_name) {
+            return self.len();
+        }
+
+        // Insert in sorted order among regular items
+        let mut position = 0;
+        for (idx, existing_entry) in self.entries().enumerate() {
+            let mut existing_relations = existing_entry.relations();
+            let Some(existing_relation) = existing_relations.next() else {
+                // Empty entry, skip
+                position += 1;
+                continue;
+            };
+
+            let existing_name = existing_relation.name();
+
+            // Skip special items when finding insertion position
+            if sorting_order.ignore(&existing_name) {
+                position += 1;
+                continue;
+            }
+
+            // Compare with regular items only
+            if sorting_order.lt(&package_name, &existing_name) {
+                return idx;
+            }
+            position += 1;
+        }
+
+        position
+    }
+
+    /// Drop a dependency from the relations by package name.
+    ///
+    /// # Arguments
+    /// * `package` - The package name to remove
+    ///
+    /// # Returns
+    /// `true` if the package was found and removed, `false` otherwise
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+    /// assert!(relations.drop_dependency("debhelper"));
+    /// assert_eq!(relations.to_string(), "python3, rustc");
+    /// assert!(!relations.drop_dependency("nonexistent"));
+    /// ```
+    pub fn drop_dependency(&mut self, package: &str) -> bool {
+        let indices_to_remove: Vec<_> = self
+            .entries()
+            .enumerate()
+            .filter_map(|(idx, entry)| {
+                let relations: Vec<_> = entry.relations().collect();
+                let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+                if names == vec![package] {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let found = !indices_to_remove.is_empty();
+
+        // Remove in reverse order to maintain correct indices
+        for idx in indices_to_remove.into_iter().rev() {
+            self.remove_entry(idx);
+        }
+
+        found
+    }
+
+    /// Add a dependency at a specific position or auto-detect the position.
+    ///
+    /// If `position` is `None`, the position is automatically determined based
+    /// on the detected sorting order. If a sorting order is detected, the entry
+    /// is inserted in the appropriate position to maintain that order. Otherwise,
+    /// it is appended at the end.
+    ///
+    /// # Arguments
+    /// * `entry` - The entry to add
+    /// * `position` - Optional position to insert at
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::{Relations, Relation, Entry};
+    ///
+    /// let mut relations: Relations = "python3, rustc".parse().unwrap();
+    /// let entry = Entry::from(Relation::simple("debhelper"));
+    /// relations.add_dependency(entry, None);
+    /// // debhelper is inserted in sorted order (if order is detected)
+    /// ```
+    pub fn add_dependency(&mut self, entry: Entry, position: Option<usize>) {
+        let pos = position.unwrap_or_else(|| self.find_insert_position(&entry));
+        self.insert(pos, entry);
+    }
+
+    /// Get the entry containing a specific package.
+    ///
+    /// This returns the first entry that contains exactly one relation with the
+    /// specified package name (no alternatives).
+    ///
+    /// # Arguments
+    /// * `package` - The package name to search for
+    ///
+    /// # Returns
+    /// A tuple of (index, Entry) if found
+    ///
+    /// # Errors
+    /// Returns `Err` with a message if the package is found in a complex rule (with alternatives)
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let relations: Relations = "python3, debhelper (>= 12), rustc".parse().unwrap();
+    /// let (idx, entry) = relations.get_relation("debhelper").unwrap();
+    /// assert_eq!(idx, 1);
+    /// assert_eq!(entry.to_string(), "debhelper (>= 12)");
+    /// ```
+    pub fn get_relation(&self, package: &str) -> Result<(usize, Entry), String> {
+        for (idx, entry) in self.entries().enumerate() {
+            let relations: Vec<_> = entry.relations().collect();
+            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+
+            if names.len() > 1 && names.contains(&package.to_string()) {
+                return Err(format!("Complex rule for {}, aborting", package));
+            }
+
+            if names.len() == 1 && names[0] == package {
+                return Ok((idx, entry));
+            }
+        }
+        Err(format!("Package {} not found", package))
+    }
+
+    /// Iterate over all entries containing a specific package.
+    ///
+    /// # Arguments
+    /// * `package` - The package name to search for
+    ///
+    /// # Returns
+    /// An iterator over tuples of (index, Entry)
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let relations: Relations = "python3 | python3-minimal, python3-dev".parse().unwrap();
+    /// let entries: Vec<_> = relations.iter_relations_for("python3").collect();
+    /// assert_eq!(entries.len(), 1);
+    /// ```
+    pub fn iter_relations_for(&self, package: &str) -> impl Iterator<Item = (usize, Entry)> + '_ {
+        let package = package.to_string();
+        self.entries().enumerate().filter(move |(_, entry)| {
+            let names: Vec<_> = entry.relations().map(|r| r.name()).collect();
+            names.contains(&package)
+        })
+    }
+
+    /// Check whether a package exists in the relations.
+    ///
+    /// # Arguments
+    /// * `package` - The package name to search for
+    ///
+    /// # Returns
+    /// `true` if the package is found, `false` otherwise
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+    /// assert!(relations.has_relation("debhelper"));
+    /// assert!(!relations.has_relation("nonexistent"));
+    /// ```
+    pub fn has_relation(&self, package: &str) -> bool {
+        self.entries()
+            .any(|entry| entry.relations().any(|r| r.name() == package))
     }
 }
 
@@ -2872,5 +3248,242 @@ mod tests {
         let mut relations: Relations = "aaa, bbb, ccc".parse().unwrap();
         relations.filter_entries(|entry| entry.relations().any(|r| r.name() == "bbb"));
         assert_eq!(relations.to_string(), "bbb");
+    }
+
+    // Tests for new convenience methods
+
+    #[test]
+    fn test_is_sorted_wrap_and_sort_order() {
+        // Sorted according to WrapAndSortOrder
+        let relations: Relations = "debhelper, python3, rustc".parse().unwrap();
+        assert!(relations.is_sorted(&WrapAndSortOrder));
+
+        // Not sorted
+        let relations: Relations = "rustc, debhelper, python3".parse().unwrap();
+        assert!(!relations.is_sorted(&WrapAndSortOrder));
+
+        // Build systems first (sorted alphabetically within their group)
+        let (relations, _) =
+            Relations::parse_relaxed("cdbs, debhelper-compat, python3, ${misc:Depends}", true);
+        assert!(relations.is_sorted(&WrapAndSortOrder));
+    }
+
+    #[test]
+    fn test_is_sorted_default_order() {
+        // Sorted alphabetically
+        let relations: Relations = "aaa, bbb, ccc".parse().unwrap();
+        assert!(relations.is_sorted(&DefaultSortingOrder));
+
+        // Not sorted
+        let relations: Relations = "ccc, aaa, bbb".parse().unwrap();
+        assert!(!relations.is_sorted(&DefaultSortingOrder));
+
+        // Special items at end
+        let (relations, _) = Relations::parse_relaxed("aaa, bbb, ${misc:Depends}", true);
+        assert!(relations.is_sorted(&DefaultSortingOrder));
+    }
+
+    #[test]
+    fn test_is_sorted_with_substvars() {
+        // Substvars should be ignored by DefaultSortingOrder
+        let (relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}, rustc", true);
+        // This is considered sorted because ${misc:Depends} is ignored
+        assert!(relations.is_sorted(&DefaultSortingOrder));
+    }
+
+    #[test]
+    fn test_drop_dependency_exists() {
+        let mut relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+        assert!(relations.drop_dependency("debhelper"));
+        assert_eq!(relations.to_string(), "python3, rustc");
+    }
+
+    #[test]
+    fn test_drop_dependency_not_exists() {
+        let mut relations: Relations = "python3, rustc".parse().unwrap();
+        assert!(!relations.drop_dependency("nonexistent"));
+        assert_eq!(relations.to_string(), "python3, rustc");
+    }
+
+    #[test]
+    fn test_drop_dependency_only_item() {
+        let mut relations: Relations = "python3".parse().unwrap();
+        assert!(relations.drop_dependency("python3"));
+        assert_eq!(relations.to_string(), "");
+    }
+
+    #[test]
+    fn test_add_dependency_to_empty() {
+        let mut relations: Relations = "".parse().unwrap();
+        let entry = Entry::from(Relation::simple("python3"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_add_dependency_sorted_position() {
+        let mut relations: Relations = "debhelper, rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("python3"));
+        relations.add_dependency(entry, None);
+        // Should be inserted in sorted position
+        assert_eq!(relations.to_string(), "debhelper, python3, rustc");
+    }
+
+    #[test]
+    fn test_add_dependency_explicit_position() {
+        let mut relations: Relations = "python3, rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper"));
+        relations.add_dependency(entry, Some(0));
+        assert_eq!(relations.to_string(), "debhelper, python3, rustc");
+    }
+
+    #[test]
+    fn test_add_dependency_build_system_first() {
+        let mut relations: Relations = "python3, rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper-compat"));
+        relations.add_dependency(entry, None);
+        // debhelper-compat should be inserted first (build system)
+        assert_eq!(relations.to_string(), "debhelper-compat, python3, rustc");
+    }
+
+    #[test]
+    fn test_add_dependency_at_end() {
+        let mut relations: Relations = "debhelper, python3".parse().unwrap();
+        let entry = Entry::from(Relation::simple("zzz-package"));
+        relations.add_dependency(entry, None);
+        // Should be added at the end (alphabetically after python3)
+        assert_eq!(relations.to_string(), "debhelper, python3, zzz-package");
+    }
+
+    #[test]
+    fn test_get_relation_exists() {
+        let relations: Relations = "python3, debhelper (>= 12), rustc".parse().unwrap();
+        let result = relations.get_relation("debhelper");
+        assert!(result.is_ok());
+        let (idx, entry) = result.unwrap();
+        assert_eq!(idx, 1);
+        assert_eq!(entry.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_get_relation_not_exists() {
+        let relations: Relations = "python3, rustc".parse().unwrap();
+        let result = relations.get_relation("nonexistent");
+        assert_eq!(result, Err("Package nonexistent not found".to_string()));
+    }
+
+    #[test]
+    fn test_get_relation_complex_rule() {
+        let relations: Relations = "python3 | python3-minimal, rustc".parse().unwrap();
+        let result = relations.get_relation("python3");
+        assert_eq!(
+            result,
+            Err("Complex rule for python3, aborting".to_string())
+        );
+    }
+
+    #[test]
+    fn test_iter_relations_for_simple() {
+        let relations: Relations = "python3, debhelper, python3-dev".parse().unwrap();
+        let entries: Vec<_> = relations.iter_relations_for("python3").collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, 0);
+        assert_eq!(entries[0].1.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_iter_relations_for_alternatives() {
+        let relations: Relations = "python3 | python3-minimal, python3-dev".parse().unwrap();
+        let entries: Vec<_> = relations.iter_relations_for("python3").collect();
+        // Should find both the alternative entry and python3-dev is not included
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, 0);
+    }
+
+    #[test]
+    fn test_iter_relations_for_not_found() {
+        let relations: Relations = "python3, rustc".parse().unwrap();
+        let entries: Vec<_> = relations.iter_relations_for("debhelper").collect();
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_has_relation_exists() {
+        let relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+        assert!(relations.has_relation("debhelper"));
+        assert!(relations.has_relation("python3"));
+        assert!(relations.has_relation("rustc"));
+    }
+
+    #[test]
+    fn test_has_relation_not_exists() {
+        let relations: Relations = "python3, rustc".parse().unwrap();
+        assert!(!relations.has_relation("debhelper"));
+    }
+
+    #[test]
+    fn test_has_relation_in_alternative() {
+        let relations: Relations = "python3 | python3-minimal".parse().unwrap();
+        assert!(relations.has_relation("python3"));
+        assert!(relations.has_relation("python3-minimal"));
+    }
+
+    #[test]
+    fn test_sorting_order_wrap_and_sort_build_systems() {
+        let order = WrapAndSortOrder;
+        // Build systems should come before regular packages
+        assert!(order.lt("debhelper", "python3"));
+        assert!(order.lt("debhelper-compat", "rustc"));
+        assert!(order.lt("cdbs", "aaa"));
+        assert!(order.lt("dh-python", "python3"));
+    }
+
+    #[test]
+    fn test_sorting_order_wrap_and_sort_regular_packages() {
+        let order = WrapAndSortOrder;
+        // Regular packages sorted alphabetically
+        assert!(order.lt("aaa", "bbb"));
+        assert!(order.lt("python3", "rustc"));
+        assert!(!order.lt("rustc", "python3"));
+    }
+
+    #[test]
+    fn test_sorting_order_wrap_and_sort_substvars() {
+        let order = WrapAndSortOrder;
+        // Substvars should come after regular packages
+        assert!(order.lt("python3", "${misc:Depends}"));
+        assert!(!order.lt("${misc:Depends}", "python3"));
+        // But wrap-and-sort doesn't ignore them
+        assert!(!order.ignore("${misc:Depends}"));
+    }
+
+    #[test]
+    fn test_sorting_order_default_special_items() {
+        let order = DefaultSortingOrder;
+        // Special items should come after regular items
+        assert!(order.lt("python3", "${misc:Depends}"));
+        assert!(order.lt("aaa", "@cdbs@"));
+        // And should be ignored
+        assert!(order.ignore("${misc:Depends}"));
+        assert!(order.ignore("@cdbs@"));
+        assert!(!order.ignore("python3"));
+    }
+
+    #[test]
+    fn test_is_special_package_name() {
+        assert!(is_special_package_name("${misc:Depends}"));
+        assert!(is_special_package_name("${shlibs:Depends}"));
+        assert!(is_special_package_name("@cdbs@"));
+        assert!(!is_special_package_name("python3"));
+        assert!(!is_special_package_name("debhelper"));
+    }
+
+    #[test]
+    fn test_add_dependency_with_explicit_position() {
+        // Test that add_dependency works with explicit position
+        let mut relations: Relations = "python3,  rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper"));
+        relations.add_dependency(entry, Some(1));
+        assert_eq!(relations.to_string(), "python3,  debhelper, rustc");
     }
 }
