@@ -700,35 +700,229 @@ impl Relations {
         entry
     }
 
+    /// Helper to collect all consecutive WHITESPACE/NEWLINE tokens starting from a node
+    fn collect_whitespace(start: Option<NodeOrToken<SyntaxNode, SyntaxToken>>) -> String {
+        let mut pattern = String::new();
+        let mut current = start;
+        while let Some(token) = current {
+            if matches!(token.kind(), WHITESPACE | NEWLINE) {
+                if let NodeOrToken::Token(t) = &token {
+                    pattern.push_str(t.text());
+                }
+                current = token.next_sibling_or_token();
+            } else {
+                break;
+            }
+        }
+        pattern
+    }
+
+    /// Helper to convert a NodeOrToken to its green equivalent
+    fn to_green(node: &NodeOrToken<SyntaxNode, SyntaxToken>) -> NodeOrToken<GreenNode, GreenToken> {
+        match node {
+            NodeOrToken::Node(n) => NodeOrToken::Node(n.green().into()),
+            NodeOrToken::Token(t) => NodeOrToken::Token(t.green().to_owned()),
+        }
+    }
+
+    /// Helper to check if a token is whitespace
+    fn is_whitespace_token(token: &GreenToken) -> bool {
+        token.kind() == rowan::SyntaxKind(WHITESPACE as u16)
+            || token.kind() == rowan::SyntaxKind(NEWLINE as u16)
+    }
+
+    /// Helper to strip trailing whitespace tokens from a list of green children
+    fn strip_trailing_ws_from_children(
+        mut children: Vec<NodeOrToken<GreenNode, GreenToken>>,
+    ) -> Vec<NodeOrToken<GreenNode, GreenToken>> {
+        while let Some(last) = children.last() {
+            if let NodeOrToken::Token(t) = last {
+                if Self::is_whitespace_token(t) {
+                    children.pop();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        children
+    }
+
+    /// Helper to strip trailing whitespace from a RELATION node's children
+    fn strip_relation_trailing_ws(relation: &SyntaxNode) -> GreenNode {
+        let children: Vec<_> = relation
+            .children_with_tokens()
+            .map(|c| Self::to_green(&c))
+            .collect();
+        let stripped = Self::strip_trailing_ws_from_children(children);
+        GreenNode::new(relation.kind().into(), stripped)
+    }
+
+    /// Helper to build nodes for insertion with odd syntax
+    fn build_odd_syntax_nodes(
+        before_ws: &str,
+        after_ws: &str,
+    ) -> Vec<NodeOrToken<GreenNode, GreenToken>> {
+        [
+            (!before_ws.is_empty())
+                .then(|| NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), before_ws))),
+            Some(NodeOrToken::Token(GreenToken::new(COMMA.into(), ","))),
+            (!after_ws.is_empty())
+                .then(|| NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), after_ws))),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    /// Detect if relations use odd syntax (whitespace before comma) and return whitespace parts
+    fn detect_odd_syntax(&self) -> Option<(String, String)> {
+        for entry_node in self.entries() {
+            let mut node = entry_node.0.next_sibling_or_token()?;
+
+            // Skip whitespace tokens and collect their text
+            let mut before = String::new();
+            while matches!(node.kind(), WHITESPACE | NEWLINE) {
+                if let NodeOrToken::Token(t) = &node {
+                    before.push_str(t.text());
+                }
+                node = node.next_sibling_or_token()?;
+            }
+
+            // Check if we found a comma after whitespace
+            if node.kind() == COMMA && !before.is_empty() {
+                let after = Self::collect_whitespace(node.next_sibling_or_token());
+                return Some((before, after));
+            }
+        }
+        None
+    }
+
+    /// Detect the most common whitespace pattern after commas in the relations.
+    ///
+    /// This matches debmutate's behavior of analyzing existing whitespace
+    /// patterns to preserve formatting when adding entries.
+    ///
+    /// # Arguments
+    /// * `default` - The default whitespace pattern to use if no pattern is detected
+    fn detect_whitespace_pattern(&self, default: &str) -> String {
+        use std::collections::HashMap;
+
+        let entries: Vec<_> = self.entries().collect();
+        let num_entries = entries.len();
+
+        if num_entries == 0 {
+            return String::from(""); // Empty list - first entry gets no prefix
+        }
+
+        if num_entries == 1 {
+            // Single entry - check if there's a pattern after it
+            if let Some(node) = entries[0].0.next_sibling_or_token() {
+                if node.kind() == COMMA {
+                    let pattern = Self::collect_whitespace(node.next_sibling_or_token());
+                    if !pattern.is_empty() {
+                        return pattern;
+                    }
+                }
+            }
+            return default.to_string(); // Use default for single entry with no pattern
+        }
+
+        // Count whitespace patterns after commas (excluding the last entry)
+        let mut whitespace_counts: HashMap<String, usize> = HashMap::new();
+
+        for (i, entry) in entries.iter().enumerate() {
+            if i == num_entries - 1 {
+                break; // Skip the last entry
+            }
+
+            // Look for comma and whitespace after this entry
+            if let Some(mut node) = entry.0.next_sibling_or_token() {
+                // Skip any whitespace/newlines before the comma (odd syntax)
+                while matches!(node.kind(), WHITESPACE | NEWLINE) {
+                    if let Some(next) = node.next_sibling_or_token() {
+                        node = next;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Found comma, collect all whitespace/newlines after it
+                if node.kind() == COMMA {
+                    let pattern = Self::collect_whitespace(node.next_sibling_or_token());
+                    if !pattern.is_empty() {
+                        *whitespace_counts.entry(pattern).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        // If there's exactly one pattern, use it
+        if whitespace_counts.len() == 1 {
+            if let Some((ws, _)) = whitespace_counts.iter().next() {
+                return ws.clone();
+            }
+        }
+
+        // Multiple patterns - use the most common
+        if let Some((ws, _)) = whitespace_counts.iter().max_by_key(|(_, count)| *count) {
+            return ws.clone();
+        }
+
+        // Use the provided default
+        default.to_string()
+    }
+
     /// Insert a new entry at the given index
-    pub fn insert(&mut self, idx: usize, entry: Entry) {
+    ///
+    /// # Arguments
+    /// * `idx` - The index to insert at
+    /// * `entry` - The entry to insert
+    /// * `default_sep` - Optional default separator to use if no pattern is detected (defaults to " ")
+    pub fn insert_with_separator(&mut self, idx: usize, entry: Entry, default_sep: Option<&str>) {
         let is_empty = !self.0.children_with_tokens().any(|n| n.kind() == COMMA);
+        let whitespace = self.detect_whitespace_pattern(default_sep.unwrap_or(" "));
+
+        // Strip trailing whitespace first
+        self.strip_trailing_whitespace();
+
+        // Detect odd syntax (whitespace before comma)
+        let odd_syntax = self.detect_odd_syntax();
+
         let (position, new_children) = if let Some(current_entry) = self.entries().nth(idx) {
-            let to_insert: Vec<NodeOrToken<GreenNode, GreenToken>> = if idx == 0 && is_empty {
+            let to_insert = if idx == 0 && is_empty {
                 vec![entry.0.green().into()]
+            } else if let Some((before_ws, after_ws)) = &odd_syntax {
+                let mut nodes = vec![entry.0.green().into()];
+                nodes.extend(Self::build_odd_syntax_nodes(before_ws, after_ws));
+                nodes
             } else {
                 vec![
                     entry.0.green().into(),
                     NodeOrToken::Token(GreenToken::new(COMMA.into(), ",")),
-                    NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), " ")),
+                    NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), whitespace.as_str())),
                 ]
             };
 
             (current_entry.0.index(), to_insert)
         } else {
             let child_count = self.0.children_with_tokens().count();
-            (
-                child_count,
-                if idx == 0 {
-                    vec![entry.0.green().into()]
-                } else {
-                    vec![
-                        NodeOrToken::Token(GreenToken::new(COMMA.into(), ",")),
-                        NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), " ")),
-                        entry.0.green().into(),
-                    ]
-                },
-            )
+            let to_insert = if idx == 0 {
+                vec![entry.0.green().into()]
+            } else if let Some((before_ws, after_ws)) = &odd_syntax {
+                let mut nodes = Self::build_odd_syntax_nodes(before_ws, after_ws);
+                nodes.push(entry.0.green().into());
+                nodes
+            } else {
+                vec![
+                    NodeOrToken::Token(GreenToken::new(COMMA.into(), ",")),
+                    NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), whitespace.as_str())),
+                    entry.0.green().into(),
+                ]
+            };
+
+            (child_count, to_insert)
         };
         // We can safely replace the root here since Relations is a root node
         self.0 = SyntaxNode::new_root_mut(
@@ -737,6 +931,63 @@ impl Relations {
                     .green()
                     .splice_children(position..position, new_children),
             ),
+        );
+    }
+
+    /// Insert a new entry at the given index with default separator
+    pub fn insert(&mut self, idx: usize, entry: Entry) {
+        self.insert_with_separator(idx, entry, None);
+    }
+
+    /// Helper to recursively strip trailing whitespace from an ENTRY node
+    fn strip_entry_trailing_ws(entry: &SyntaxNode) -> GreenNode {
+        let mut children: Vec<_> = entry
+            .children_with_tokens()
+            .map(|c| Self::to_green(&c))
+            .collect();
+
+        // Strip trailing whitespace from the last RELATION if present
+        if let Some(NodeOrToken::Node(last)) = children.last() {
+            if last.kind() == rowan::SyntaxKind(RELATION as u16) {
+                // Replace last child with stripped version
+                let relation_node = entry.children().last().unwrap();
+                children.pop();
+                children.push(NodeOrToken::Node(
+                    Self::strip_relation_trailing_ws(&relation_node).into(),
+                ));
+            }
+        }
+
+        // Strip trailing whitespace tokens at entry level
+        let stripped = Self::strip_trailing_ws_from_children(children);
+        GreenNode::new(ENTRY.into(), stripped)
+    }
+
+    fn strip_trailing_whitespace(&mut self) {
+        let mut children: Vec<_> = self
+            .0
+            .children_with_tokens()
+            .map(|c| Self::to_green(&c))
+            .collect();
+
+        // Strip trailing whitespace from the last ENTRY if present
+        if let Some(NodeOrToken::Node(last)) = children.last() {
+            if last.kind() == rowan::SyntaxKind(ENTRY as u16) {
+                let last_entry = self.0.children().last().unwrap();
+                children.pop();
+                children.push(NodeOrToken::Node(
+                    Self::strip_entry_trailing_ws(&last_entry).into(),
+                ));
+            }
+        }
+
+        // Strip trailing whitespace tokens at root level
+        let stripped = Self::strip_trailing_ws_from_children(children);
+
+        let nc = self.0.children_with_tokens().count();
+        self.0 = SyntaxNode::new_root_mut(
+            self.0
+                .replace_with(self.0.green().splice_children(0..nc, stripped)),
         );
     }
 
@@ -2698,6 +2949,23 @@ mod tests {
     }
 
     #[test]
+    fn test_insert_with_custom_separator() {
+        let mut rels: Relations = "python3".parse().unwrap();
+        let entry = Entry::from(vec![Relation::simple("debhelper")]);
+        rels.insert_with_separator(1, entry, Some("\n "));
+        assert_eq!(rels.to_string(), "python3,\n debhelper");
+    }
+
+    #[test]
+    fn test_insert_with_wrap_and_sort_separator() {
+        let mut rels: Relations = "python3".parse().unwrap();
+        let entry = Entry::from(vec![Relation::simple("rustc")]);
+        // Simulate wrap-and-sort -a style with field name "Depends: " (9 chars)
+        rels.insert_with_separator(1, entry, Some("\n         "));
+        assert_eq!(rels.to_string(), "python3,\n         rustc");
+    }
+
+    #[test]
     fn test_push_from_empty() {
         let mut rels: Relations = "".parse().unwrap();
         let entry = Entry::from(vec![Relation::simple("python3-dulwich")]);
@@ -3480,10 +3748,120 @@ mod tests {
 
     #[test]
     fn test_add_dependency_with_explicit_position() {
-        // Test that add_dependency works with explicit position
+        // Test that add_dependency works with explicit position and preserves whitespace
         let mut relations: Relations = "python3,  rustc".parse().unwrap();
         let entry = Entry::from(Relation::simple("debhelper"));
         relations.add_dependency(entry, Some(1));
-        assert_eq!(relations.to_string(), "python3,  debhelper, rustc");
+        // Should preserve the 2-space pattern from the original
+        assert_eq!(relations.to_string(), "python3,  debhelper,  rustc");
+    }
+
+    #[test]
+    fn test_whitespace_detection_single_space() {
+        let mut relations: Relations = "python3, rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper"));
+        relations.add_dependency(entry, Some(1));
+        assert_eq!(relations.to_string(), "python3, debhelper, rustc");
+    }
+
+    #[test]
+    fn test_whitespace_detection_multiple_spaces() {
+        let mut relations: Relations = "python3,  rustc,  gcc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper"));
+        relations.add_dependency(entry, Some(1));
+        // Should detect and use the 2-space pattern
+        assert_eq!(relations.to_string(), "python3,  debhelper,  rustc,  gcc");
+    }
+
+    #[test]
+    fn test_whitespace_detection_mixed_patterns() {
+        // When patterns differ, use the most common one
+        let mut relations: Relations = "a, b, c,  d, e".parse().unwrap();
+        let entry = Entry::from(Relation::simple("x"));
+        relations.push(entry);
+        // Three single-space (after a, b, d), one double-space (after c)
+        // Should use single space as it's most common
+        assert_eq!(relations.to_string(), "a, b, c,  d, e, x");
+    }
+
+    #[test]
+    fn test_whitespace_detection_newlines() {
+        let mut relations: Relations = "python3,\n rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper"));
+        relations.add_dependency(entry, Some(1));
+        // Detects full pattern including newline
+        assert_eq!(relations.to_string(), "python3,\n debhelper,\n rustc");
+    }
+
+    #[test]
+    fn test_append_with_newline_no_trailing() {
+        let mut relations: Relations = "foo,\n bar".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,\n bar,\n blah");
+    }
+
+    #[test]
+    fn test_append_with_trailing_newline() {
+        let mut relations: Relations = "foo,\n bar\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,\n bar,\n blah");
+    }
+
+    #[test]
+    fn test_append_with_4_space_indent() {
+        let mut relations: Relations = "foo,\n    bar".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,\n    bar,\n    blah");
+    }
+
+    #[test]
+    fn test_append_with_4_space_and_trailing_newline() {
+        let mut relations: Relations = "foo,\n    bar\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,\n    bar,\n    blah");
+    }
+
+    #[test]
+    fn test_odd_syntax_append_no_trailing() {
+        let mut relations: Relations = "\n foo\n , bar".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "\n foo\n , bar\n , blah");
+    }
+
+    #[test]
+    fn test_odd_syntax_append_with_trailing() {
+        let mut relations: Relations = "\n foo\n , bar\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "\n foo\n , bar\n , blah");
+    }
+
+    #[test]
+    fn test_insert_at_1_no_trailing() {
+        let mut relations: Relations = "foo,\n bar".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, Some(1));
+        assert_eq!(relations.to_string(), "foo,\n blah,\n bar");
+    }
+
+    #[test]
+    fn test_insert_at_1_with_trailing() {
+        let mut relations: Relations = "foo,\n bar\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, Some(1));
+        assert_eq!(relations.to_string(), "foo,\n blah,\n bar");
+    }
+
+    #[test]
+    fn test_odd_syntax_insert_at_1() {
+        let mut relations: Relations = "\n foo\n , bar\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, Some(1));
+        assert_eq!(relations.to_string(), "\n foo\n , blah\n , bar");
     }
 }
