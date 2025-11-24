@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "deb822-fast"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "deb822-derive",
 ]
