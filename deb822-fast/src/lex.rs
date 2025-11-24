@@ -48,7 +48,7 @@ pub(crate) fn lex(mut input: &str) -> impl Iterator<Item = (SyntaxKind, &str)> {
     std::iter::from_fn(move || {
         if let Some(c) = input.chars().next() {
             match c {
-                ':' if colon_count == 0 => {
+                ':' if colon_count == 0 && indent == 0 => {
                     colon_count += 1;
                     let char_len = c.len_utf8();
                     input = &input[char_len..];
@@ -367,6 +367,60 @@ Section: vcs
                 (COLON, ":"),
                 (WHITESPACE, " "),
                 (VALUE, "value: with: colons"),
+                (NEWLINE, "\n")
+            ]
+        );
+    }
+
+    #[test]
+    fn test_lex_continuation_with_colon() {
+        // Test that continuation lines with colons are properly lexed
+        let text = "Package: test\nDescription: short\n line: with colon\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+
+        assert_eq!(
+            tokens,
+            vec![
+                (KEY, "Package"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "test"),
+                (NEWLINE, "\n"),
+                (KEY, "Description"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "short"),
+                (NEWLINE, "\n"),
+                (INDENT, " "),
+                (VALUE, "line: with colon"),
+                (NEWLINE, "\n")
+            ]
+        );
+    }
+
+    #[test]
+    fn test_lex_continuation_starting_with_colon() {
+        // Test continuation line that STARTS with a colon (the actual bug!)
+        let text = "Package: test\nDescription: short\n :value\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+
+        println!("Tokens: {:?}", tokens);
+
+        assert_eq!(
+            tokens,
+            vec![
+                (KEY, "Package"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "test"),
+                (NEWLINE, "\n"),
+                (KEY, "Description"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "short"),
+                (NEWLINE, "\n"),
+                (INDENT, " "),
+                (VALUE, ":value"),
                 (NEWLINE, "\n")
             ]
         );

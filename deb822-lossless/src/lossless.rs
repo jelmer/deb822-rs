@@ -2868,4 +2868,33 @@ Architecture: all
 "#
         );
     }
+
+    #[test]
+    fn test_parse_continuation_with_colon() {
+        // Test that continuation lines with colons are properly parsed
+        let input = "Package: test\nDescription: short\n line: with colon\n";
+        let result = input.parse::<Deb822>();
+        assert!(result.is_ok());
+
+        let deb822 = result.unwrap();
+        let para = deb822.paragraphs().next().unwrap();
+        assert_eq!(para.get("Package").as_deref(), Some("test"));
+        assert_eq!(
+            para.get("Description").as_deref(),
+            Some("short\nline: with colon")
+        );
+    }
+
+    #[test]
+    fn test_parse_continuation_starting_with_colon() {
+        // Test continuation line STARTING with a colon (issue #315)
+        let input = "Package: test\nDescription: short\n :value\n";
+        let result = input.parse::<Deb822>();
+        assert!(result.is_ok());
+
+        let deb822 = result.unwrap();
+        let para = deb822.paragraphs().next().unwrap();
+        assert_eq!(para.get("Package").as_deref(), Some("test"));
+        assert_eq!(para.get("Description").as_deref(), Some("short\n:value"));
+    }
 }

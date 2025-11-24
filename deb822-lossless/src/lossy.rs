@@ -549,4 +549,36 @@ Version: 2.10
             "Description: A program that says hello\n Some more text\n"
         );
     }
+
+    #[test]
+    fn test_parse_continuation_with_colon() {
+        // Test that continuation lines with colons are properly parsed
+        let input = "Package: test\nDescription: short\n line: with colon\n";
+        let result = input.parse::<Deb822>();
+        assert!(result.is_ok());
+
+        let deb822 = result.unwrap();
+        assert_eq!(deb822.0.len(), 1);
+        assert_eq!(deb822.0[0].fields.len(), 2);
+        assert_eq!(deb822.0[0].fields[0].name, "Package");
+        assert_eq!(deb822.0[0].fields[0].value, "test");
+        assert_eq!(deb822.0[0].fields[1].name, "Description");
+        assert_eq!(deb822.0[0].fields[1].value, "short\nline: with colon");
+    }
+
+    #[test]
+    fn test_parse_continuation_starting_with_colon() {
+        // Test continuation line STARTING with a colon (issue #315)
+        let input = "Package: test\nDescription: short\n :value\n";
+        let result = input.parse::<Deb822>();
+        assert!(result.is_ok());
+
+        let deb822 = result.unwrap();
+        assert_eq!(deb822.0.len(), 1);
+        assert_eq!(deb822.0[0].fields.len(), 2);
+        assert_eq!(deb822.0[0].fields[0].name, "Package");
+        assert_eq!(deb822.0[0].fields[0].value, "test");
+        assert_eq!(deb822.0[0].fields[1].name, "Description");
+        assert_eq!(deb822.0[0].fields[1].value, "short\n:value");
+    }
 }
