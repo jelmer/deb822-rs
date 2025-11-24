@@ -780,6 +780,46 @@ impl Deb822 {
         Self(SyntaxNode::new_root_mut(builder.finish()))
     }
 
+    /// Normalize the spacing around field separators (colons) for all entries in all paragraphs in place.
+    ///
+    /// This ensures that there is exactly one space after the colon and before the value
+    /// for each field in every paragraph. This is a lossless operation that preserves the
+    /// field names, values, and comments, but normalizes the whitespace formatting.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// use std::str::FromStr;
+    ///
+    /// let input = "Field1:    value1\nField2:value2\n\nField3:  value3\n";
+    /// let mut deb822 = Deb822::from_str(input).unwrap();
+    ///
+    /// deb822.normalize_field_spacing();
+    /// assert_eq!(deb822.to_string(), "Field1: value1\nField2: value2\n\nField3: value3\n");
+    /// ```
+    pub fn normalize_field_spacing(&mut self) {
+        // Collect paragraph indices and iterate through them
+        let para_indices: Vec<_> = self
+            .0
+            .children()
+            .filter_map(|c| {
+                if c.kind() == PARAGRAPH {
+                    Some(c.index())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for para_index in para_indices {
+            if let Some(para_node) = self.0.children().nth(para_index) {
+                let mut para = Paragraph::cast(para_node).unwrap();
+                para.normalize_field_spacing();
+            }
+        }
+    }
+
     /// Returns an iterator over all paragraphs in the file.
     pub fn paragraphs(&self) -> impl Iterator<Item = Paragraph> {
         self.0.children().filter_map(Paragraph::cast)
@@ -1102,6 +1142,88 @@ impl Paragraph {
 
         builder.finish_node();
         Self(SyntaxNode::new_root_mut(builder.finish()))
+    }
+
+    /// Normalize the spacing around field separators (colons) for all entries in place.
+    ///
+    /// This ensures that there is exactly one space after the colon and before the value
+    /// for each field in the paragraph. This is a lossless operation that preserves the
+    /// field names, values, and comments, but normalizes the whitespace formatting.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// use std::str::FromStr;
+    ///
+    /// let input = "Field1:    value1\nField2:value2\n";
+    /// let mut deb822 = Deb822::from_str(input).unwrap();
+    /// let mut para = deb822.paragraphs().next().unwrap();
+    ///
+    /// para.normalize_field_spacing();
+    /// assert_eq!(para.to_string(), "Field1: value1\nField2: value2\n");
+    /// ```
+    pub fn normalize_field_spacing(&mut self) {
+        use rowan::GreenNodeBuilder;
+
+        // Collect entry information first to avoid borrowing issues
+        let entries_to_normalize: Vec<_> = self
+            .entries()
+            .map(|entry| {
+                let index = entry.0.index();
+
+                // Build normalized entry inline
+                let mut builder = GreenNodeBuilder::new();
+                builder.start_node(ENTRY.into());
+
+                let mut seen_colon = false;
+                let mut skip_whitespace = false;
+
+                for child in entry.0.children_with_tokens() {
+                    match child.kind() {
+                        KEY => {
+                            builder.token(KEY.into(), child.as_token().unwrap().text());
+                        }
+                        COLON => {
+                            builder.token(COLON.into(), ":");
+                            seen_colon = true;
+                            skip_whitespace = true;
+                        }
+                        WHITESPACE if skip_whitespace => {
+                            // Skip existing whitespace after colon
+                            continue;
+                        }
+                        VALUE if skip_whitespace => {
+                            // Add exactly one space before the first value token
+                            builder.token(WHITESPACE.into(), " ");
+                            builder.token(VALUE.into(), child.as_token().unwrap().text());
+                            skip_whitespace = false;
+                        }
+                        NEWLINE if skip_whitespace && seen_colon => {
+                            // Empty value case (e.g., "Field:\n")
+                            builder.token(WHITESPACE.into(), " ");
+                            builder.token(NEWLINE.into(), "\n");
+                            skip_whitespace = false;
+                        }
+                        _ => {
+                            // Copy all other tokens as-is
+                            if let Some(token) = child.as_token() {
+                                builder.token(token.kind().into(), token.text());
+                            }
+                        }
+                    }
+                }
+
+                builder.finish_node();
+                (index, SyntaxNode::new_root_mut(builder.finish()))
+            })
+            .collect();
+
+        // Now replace each entry with its normalized version
+        for (index, normalized_entry) in entries_to_normalize {
+            self.0
+                .splice_children(index..index + 1, vec![normalized_entry.into()]);
+        }
     }
 
     /// Returns the value of the given key in the paragraph.
@@ -1623,6 +1745,81 @@ impl Entry {
                 }
                 result
             }
+        }
+    }
+
+    /// Normalize the spacing around the field separator (colon) in place.
+    ///
+    /// This ensures that there is exactly one space after the colon and before the value.
+    /// This is a lossless operation that preserves the field name and value content,
+    /// but normalizes the whitespace formatting.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// use std::str::FromStr;
+    ///
+    /// // Parse an entry with extra spacing after the colon
+    /// let input = "Field:    value\n";
+    /// let mut deb822 = Deb822::from_str(input).unwrap();
+    /// let mut para = deb822.paragraphs().next().unwrap();
+    ///
+    /// para.normalize_field_spacing();
+    /// assert_eq!(para.get("Field").as_deref(), Some("value"));
+    /// ```
+    pub fn normalize_field_spacing(&mut self) {
+        use rowan::GreenNodeBuilder;
+
+        // Build normalized entry
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(ENTRY.into());
+
+        let mut seen_colon = false;
+        let mut skip_whitespace = false;
+
+        for child in self.0.children_with_tokens() {
+            match child.kind() {
+                KEY => {
+                    builder.token(KEY.into(), child.as_token().unwrap().text());
+                }
+                COLON => {
+                    builder.token(COLON.into(), ":");
+                    seen_colon = true;
+                    skip_whitespace = true;
+                }
+                WHITESPACE if skip_whitespace => {
+                    // Skip existing whitespace after colon
+                    continue;
+                }
+                VALUE if skip_whitespace => {
+                    // Add exactly one space before the first value token
+                    builder.token(WHITESPACE.into(), " ");
+                    builder.token(VALUE.into(), child.as_token().unwrap().text());
+                    skip_whitespace = false;
+                }
+                NEWLINE if skip_whitespace && seen_colon => {
+                    // Empty value case (e.g., "Field:\n")
+                    builder.token(WHITESPACE.into(), " ");
+                    builder.token(NEWLINE.into(), "\n");
+                    skip_whitespace = false;
+                }
+                _ => {
+                    // Copy all other tokens as-is
+                    if let Some(token) = child.as_token() {
+                        builder.token(token.kind().into(), token.text());
+                    }
+                }
+            }
+        }
+
+        builder.finish_node();
+        let normalized = SyntaxNode::new_root_mut(builder.finish());
+
+        // Replace this entry in place
+        if let Some(parent) = self.0.parent() {
+            let index = self.0.index();
+            parent.splice_children(index..index + 1, vec![normalized.into()]);
         }
     }
 
@@ -2896,5 +3093,124 @@ Architecture: all
         let para = deb822.paragraphs().next().unwrap();
         assert_eq!(para.get("Package").as_deref(), Some("test"));
         assert_eq!(para.get("Description").as_deref(), Some("short\n:value"));
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_single_space() {
+        // Field already has correct spacing
+        let input = "Field: value\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(para.to_string(), "Field: value\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_extra_spaces() {
+        // Field has extra spaces after colon
+        let input = "Field:    value\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(para.to_string(), "Field: value\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_no_space() {
+        // Field has no space after colon
+        let input = "Field:value\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(para.to_string(), "Field: value\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_multiple_fields() {
+        // Multiple fields with various spacing
+        let input = "Field1:    value1\nField2:value2\nField3:  value3\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(
+            para.to_string(),
+            "Field1: value1\nField2: value2\nField3: value3\n"
+        );
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_multiline_value() {
+        // Field with multiline value
+        let input = "Description:    short\n continuation line\n .  \n final line\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(
+            para.to_string(),
+            "Description: short\n continuation line\n .  \n final line\n"
+        );
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_empty_value() {
+        // Field with empty value
+        let input = "Field:  \n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(para.to_string(), "Field: \n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_multiple_paragraphs() {
+        // Multiple paragraphs
+        let input = "Field1:    value1\n\nField2:  value2\n";
+        let mut deb822 = input.parse::<Deb822>().unwrap();
+
+        deb822.normalize_field_spacing();
+        assert_eq!(deb822.to_string(), "Field1: value1\n\nField2: value2\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_preserves_comments() {
+        // Normalize spacing while preserving comments (comments are at document level)
+        let input = "# Comment\nField:    value\n";
+        let mut deb822 = input.parse::<Deb822>().unwrap();
+
+        deb822.normalize_field_spacing();
+        assert_eq!(deb822.to_string(), "# Comment\nField: value\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_preserves_values() {
+        // Ensure values are preserved exactly
+        let input = "Source:   foo-bar\nMaintainer:Foo Bar <test@example.com>\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+
+        assert_eq!(para.get("Source").as_deref(), Some("foo-bar"));
+        assert_eq!(
+            para.get("Maintainer").as_deref(),
+            Some("Foo Bar <test@example.com>")
+        );
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_tab_after_colon() {
+        // Field with tab after colon (should be normalized to single space)
+        let input = "Field:\tvalue\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(para.to_string(), "Field: value\n");
     }
 }
