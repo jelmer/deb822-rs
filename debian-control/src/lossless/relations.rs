@@ -3979,4 +3979,53 @@ mod tests {
         relations.add_dependency(entry, Some(1));
         assert_eq!(relations.to_string(), "\n foo\n , blah\n , bar");
     }
+
+    #[test]
+    fn test_relations_preserves_exact_whitespace() {
+        // Test that Relations preserves exact whitespace from input
+        let input =
+            "debhelper (>= 10), quilt (>= 0.40),\n    libsystemd-dev [linux-any], pkg-config";
+
+        let relations: Relations = input.parse().unwrap();
+
+        // The whitespace should be preserved in the syntax tree
+        assert_eq!(
+            relations.to_string(),
+            input,
+            "Relations should preserve exact whitespace from input"
+        );
+    }
+
+    #[test]
+    fn test_remove_entry_preserves_indentation() {
+        // Test that removing an entry preserves the indentation pattern
+        let input = "debhelper (>= 10), quilt (>= 0.40),\n    libsystemd-dev [linux-any], dh-systemd (>= 1.5), pkg-config";
+
+        let mut relations: Relations = input.parse().unwrap();
+
+        // Find and remove dh-systemd entry (index 2)
+        let mut to_remove = Vec::new();
+        for (idx, entry) in relations.entries().enumerate() {
+            for relation in entry.relations() {
+                if relation.name() == "dh-systemd" {
+                    to_remove.push(idx);
+                    break;
+                }
+            }
+        }
+
+        for idx in to_remove.into_iter().rev() {
+            relations.remove_entry(idx);
+        }
+
+        let output = relations.to_string();
+        println!("After removal: '{}'", output);
+
+        // The 4-space indentation should be preserved
+        assert!(
+            output.contains("\n    libsystemd-dev"),
+            "Expected 4-space indentation to be preserved, but got:\n'{}'",
+            output
+        );
+    }
 }
