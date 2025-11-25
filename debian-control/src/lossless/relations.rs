@@ -2525,7 +2525,7 @@ pub struct RelationBuilder {
     name: String,
     version_constraint: Option<(VersionConstraint, Version)>,
     archqual: Option<String>,
-    architectures: Vec<String>,
+    architectures: Option<Vec<String>>,
     profiles: Vec<Vec<BuildProfile>>,
 }
 
@@ -2536,7 +2536,7 @@ impl RelationBuilder {
             name: name.to_string(),
             version_constraint: None,
             archqual: None,
-            architectures: vec![],
+            architectures: None,
             profiles: vec![],
         }
     }
@@ -2555,7 +2555,7 @@ impl RelationBuilder {
 
     /// Set the architectures for this relation
     pub fn architectures(mut self, architectures: Vec<String>) -> Self {
-        self.architectures = architectures;
+        self.architectures = Some(architectures);
         self
     }
 
@@ -2577,7 +2577,9 @@ impl RelationBuilder {
         if let Some(archqual) = &self.archqual {
             relation.set_archqual(archqual);
         }
-        relation.set_architectures(self.architectures.iter().map(|s| s.as_str()));
+        if let Some(architectures) = &self.architectures {
+            relation.set_architectures(architectures.iter().map(|s| s.as_str()));
+        }
         for profile in &self.profiles {
             relation.add_profile(profile);
         }
@@ -3417,6 +3419,22 @@ mod tests {
     fn test_set_architectures() {
         let mut relation = Relation::simple("samba");
         relation.set_architectures(vec!["amd64", "i386"].into_iter());
+        assert_eq!(relation.to_string(), "samba [amd64 i386]");
+    }
+
+    #[test]
+    fn test_relation_builder_no_architectures() {
+        // Test that building a relation without architectures doesn't add empty brackets
+        let relation = Relation::build("debhelper").build();
+        assert_eq!(relation.to_string(), "debhelper");
+    }
+
+    #[test]
+    fn test_relation_builder_with_architectures() {
+        // Test that building a relation with architectures works correctly
+        let relation = Relation::build("samba")
+            .architectures(vec!["amd64".to_string(), "i386".to_string()])
+            .build();
         assert_eq!(relation.to_string(), "samba [amd64 i386]");
     }
 
