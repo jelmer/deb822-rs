@@ -2052,4 +2052,93 @@ Description: Test library
         assert!(output.contains("test-lib"));
         assert!(output.contains("Source: test"));
     }
+
+    #[test]
+    fn test_build_depends_preserves_indentation_after_removal() {
+        let input = r#"Source: acpi-support
+Section: admin
+Priority: optional
+Maintainer: Debian Acpi Team <pkg-acpi-devel@lists.alioth.debian.org>
+Build-Depends: debhelper (>= 10), quilt (>= 0.40),
+    libsystemd-dev [linux-any], dh-systemd (>= 1.5), pkg-config
+"#;
+        let control: Control = input.parse().unwrap();
+        let mut source = control.source().unwrap();
+
+        // Get the Build-Depends
+        let mut build_depends = source.build_depends().unwrap();
+
+        // Find and remove dh-systemd entry
+        let mut to_remove = Vec::new();
+        for (idx, entry) in build_depends.entries().enumerate() {
+            for relation in entry.relations() {
+                if relation.name() == "dh-systemd" {
+                    to_remove.push(idx);
+                    break;
+                }
+            }
+        }
+
+        for idx in to_remove.into_iter().rev() {
+            build_depends.remove_entry(idx);
+        }
+
+        // Set it back
+        source.set_build_depends(&build_depends);
+
+        let output = source.to_string();
+
+        // The indentation should be preserved (4 spaces on the continuation line)
+        assert!(
+            output.contains("Build-Depends: debhelper (>= 10), quilt (>= 0.40),\n    libsystemd-dev [linux-any], pkg-config"),
+            "Expected 4-space indentation to be preserved, but got:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_build_depends_direct_string_set_loses_indentation() {
+        let input = r#"Source: acpi-support
+Section: admin
+Priority: optional
+Maintainer: Debian Acpi Team <pkg-acpi-devel@lists.alioth.debian.org>
+Build-Depends: debhelper (>= 10), quilt (>= 0.40),
+    libsystemd-dev [linux-any], dh-systemd (>= 1.5), pkg-config
+"#;
+        let control: Control = input.parse().unwrap();
+        let mut source = control.source().unwrap();
+
+        // Get the Build-Depends as Relations
+        let mut build_depends = source.build_depends().unwrap();
+
+        // Find and remove dh-systemd entry
+        let mut to_remove = Vec::new();
+        for (idx, entry) in build_depends.entries().enumerate() {
+            for relation in entry.relations() {
+                if relation.name() == "dh-systemd" {
+                    to_remove.push(idx);
+                    break;
+                }
+            }
+        }
+
+        for idx in to_remove.into_iter().rev() {
+            build_depends.remove_entry(idx);
+        }
+
+        // Set it back using the string representation - this is what might cause the bug
+        source.set("Build-Depends", &build_depends.to_string());
+
+        let output = source.to_string();
+        println!("Output with string set:");
+        println!("{}", output);
+
+        // Check if indentation is preserved
+        // This test documents the current behavior - it may fail if indentation is lost
+        assert!(
+            output.contains("Build-Depends: debhelper (>= 10), quilt (>= 0.40),\n    libsystemd-dev [linux-any], pkg-config"),
+            "Expected 4-space indentation to be preserved, but got:\n{}",
+            output
+        );
+    }
 }
