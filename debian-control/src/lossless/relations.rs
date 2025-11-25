@@ -1230,6 +1230,73 @@ impl Relations {
         self.push(Entry::from(relation));
     }
 
+    /// Ensure that a substitution variable is present in the relations.
+    ///
+    /// If the substvar already exists, it is left unchanged. Otherwise, it is added
+    /// at the end of the relations list.
+    ///
+    /// # Arguments
+    /// * `substvar` - The substitution variable (e.g., "${misc:Depends}")
+    ///
+    /// # Returns
+    /// `Ok(())` on success, or `Err` with an error message if parsing fails
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "python3".parse().unwrap();
+    /// relations.ensure_substvar("${misc:Depends}").unwrap();
+    /// assert_eq!(relations.to_string(), "python3, ${misc:Depends}");
+    /// ```
+    pub fn ensure_substvar(&mut self, substvar: &str) -> Result<(), String> {
+        // Check if the substvar already exists
+        for existing in self.substvars() {
+            if existing.trim() == substvar.trim() {
+                return Ok(());
+            }
+        }
+
+        // Parse the substvar
+        let (parsed, errors) = Relations::parse_relaxed(substvar, true);
+        if !errors.is_empty() {
+            return Err(errors.join("\n"));
+        }
+
+        // Detect whitespace pattern to preserve formatting
+        let whitespace = self.detect_whitespace_pattern(" ");
+
+        // Find the substvar node and inject it
+        for substvar_node in parsed.0.children().filter(|n| n.kind() == SUBSTVAR) {
+            let has_content = self.entries().next().is_some() || self.substvars().next().is_some();
+
+            let mut builder = GreenNodeBuilder::new();
+            builder.start_node(ROOT.into());
+
+            // Copy existing content
+            for child in self.0.children_with_tokens() {
+                match child {
+                    NodeOrToken::Node(n) => inject(&mut builder, n),
+                    NodeOrToken::Token(t) => builder.token(t.kind().into(), t.text()),
+                }
+            }
+
+            // Add separator if needed, using detected whitespace pattern
+            if has_content {
+                builder.token(COMMA.into(), ",");
+                builder.token(WHITESPACE.into(), whitespace.as_str());
+            }
+
+            // Inject the substvar node
+            inject(&mut builder, substvar_node);
+
+            builder.finish_node();
+            self.0 = SyntaxNode::new_root_mut(builder.finish());
+        }
+
+        Ok(())
+    }
+
     /// Filter entries based on a predicate function.
     ///
     /// # Arguments
@@ -3488,6 +3555,36 @@ mod tests {
         let mut relations: Relations = "debhelper".parse().unwrap();
         relations.ensure_some_version("debhelper");
         assert_eq!(relations.to_string(), "debhelper");
+    }
+
+    #[test]
+    fn test_ensure_substvar() {
+        let mut relations: Relations = "python3".parse().unwrap();
+        relations.ensure_substvar("${misc:Depends}").unwrap();
+        assert_eq!(relations.to_string(), "python3, ${misc:Depends}");
+    }
+
+    #[test]
+    fn test_ensure_substvar_already_exists() {
+        let (mut relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}", true);
+        relations.ensure_substvar("${misc:Depends}").unwrap();
+        assert_eq!(relations.to_string(), "python3, ${misc:Depends}");
+    }
+
+    #[test]
+    fn test_ensure_substvar_empty_relations() {
+        let mut relations: Relations = Relations::new();
+        relations.ensure_substvar("${misc:Depends}").unwrap();
+        assert_eq!(relations.to_string(), "${misc:Depends}");
+    }
+
+    #[test]
+    fn test_ensure_substvar_preserves_whitespace() {
+        // Test with non-standard whitespace (multiple spaces)
+        let (mut relations, _) = Relations::parse_relaxed("python3,  rustc", false);
+        relations.ensure_substvar("${misc:Depends}").unwrap();
+        // Should preserve the double-space pattern
+        assert_eq!(relations.to_string(), "python3,  rustc,  ${misc:Depends}");
     }
 
     #[test]
