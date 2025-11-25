@@ -152,6 +152,37 @@ impl Control {
         Binary(p)
     }
 
+    /// Remove a binary package paragraph by name
+    ///
+    /// # Arguments
+    /// * `name` - The name of the binary package to remove
+    ///
+    /// # Returns
+    /// `true` if a binary paragraph with the given name was found and removed, `false` otherwise
+    ///
+    /// # Example
+    /// ```rust
+    /// use debian_control::lossless::control::Control;
+    /// let mut control = Control::new();
+    /// control.add_binary("foo");
+    /// assert_eq!(control.binaries().count(), 1);
+    /// assert!(control.remove_binary("foo"));
+    /// assert_eq!(control.binaries().count(), 0);
+    /// ```
+    pub fn remove_binary(&mut self, name: &str) -> bool {
+        let index = self
+            .0
+            .paragraphs()
+            .position(|p| p.get("Package").as_deref() == Some(name));
+
+        if let Some(index) = index {
+            self.0.remove_paragraph(index);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Read a control file from a file
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, deb822_lossless::Error> {
         Ok(Control(Deb822::from_file(path)?))
@@ -1933,5 +1964,92 @@ Description: AAA package
         assert_eq!(binaries[1].name(), Some("zzz".to_string()));
         assert_eq!(binaries[1].architecture(), Some("any".to_string()));
         assert_eq!(binaries[1].description(), Some("ZZZ package".to_string()));
+    }
+
+    #[test]
+    fn test_remove_binary_basic() {
+        let mut control = Control::new();
+        control.add_binary("foo");
+        assert_eq!(control.binaries().count(), 1);
+        assert!(control.remove_binary("foo"));
+        assert_eq!(control.binaries().count(), 0);
+    }
+
+    #[test]
+    fn test_remove_binary_nonexistent() {
+        let mut control = Control::new();
+        control.add_binary("foo");
+        assert!(!control.remove_binary("bar"));
+        assert_eq!(control.binaries().count(), 1);
+    }
+
+    #[test]
+    fn test_remove_binary_multiple() {
+        let mut control = Control::new();
+        control.add_binary("foo");
+        control.add_binary("bar");
+        control.add_binary("baz");
+        assert_eq!(control.binaries().count(), 3);
+
+        assert!(control.remove_binary("bar"));
+        assert_eq!(control.binaries().count(), 2);
+
+        let names: Vec<_> = control.binaries().map(|b| b.name().unwrap()).collect();
+        assert_eq!(names, vec!["foo", "baz"]);
+    }
+
+    #[test]
+    fn test_remove_binary_preserves_source() {
+        let input = r#"Source: mypackage
+
+Package: foo
+Architecture: all
+
+Package: bar
+Architecture: all
+"#;
+        let mut control: Control = input.parse().unwrap();
+        assert!(control.source().is_some());
+        assert_eq!(control.binaries().count(), 2);
+
+        assert!(control.remove_binary("foo"));
+
+        // Source should still be present
+        assert!(control.source().is_some());
+        assert_eq!(
+            control.source().unwrap().name(),
+            Some("mypackage".to_string())
+        );
+
+        // Only bar should remain
+        assert_eq!(control.binaries().count(), 1);
+        assert_eq!(
+            control.binaries().next().unwrap().name(),
+            Some("bar".to_string())
+        );
+    }
+
+    #[test]
+    fn test_remove_binary_from_parsed() {
+        let input = r#"Source: test
+
+Package: test-bin
+Architecture: any
+Depends: libc6
+Description: Test binary
+
+Package: test-lib
+Architecture: all
+Description: Test library
+"#;
+        let mut control: Control = input.parse().unwrap();
+        assert_eq!(control.binaries().count(), 2);
+
+        assert!(control.remove_binary("test-bin"));
+
+        let output = control.to_string();
+        assert!(!output.contains("test-bin"));
+        assert!(output.contains("test-lib"));
+        assert!(output.contains("Source: test"));
     }
 }
