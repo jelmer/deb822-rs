@@ -1061,6 +1061,25 @@ impl<'a> FromIterator<(&'a str, &'a str)> for Paragraph {
     }
 }
 
+/// Detected indentation pattern for multi-line field values
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum IndentPattern {
+    /// All fields use a fixed number of spaces for indentation
+    Fixed(usize),
+    /// Each field's indentation matches its field name length + 2 (for ": ")
+    FieldNameLength,
+}
+
+impl IndentPattern {
+    /// Convert the pattern to a concrete indentation string for a given field name
+    fn to_string(&self, field_name: &str) -> String {
+        match self {
+            IndentPattern::Fixed(spaces) => " ".repeat(*spaces),
+            IndentPattern::FieldNameLength => " ".repeat(field_name.len() + 2),
+        }
+    }
+}
+
 impl Paragraph {
     /// Create a new empty paragraph.
     pub fn new() -> Paragraph {
@@ -1314,9 +1333,63 @@ impl Paragraph {
         parent.splice_children(index..index, vec![comment_node.into()]);
     }
 
+    /// Detect the indentation pattern used in this paragraph.
+    ///
+    /// This method analyzes existing multi-line fields to determine if they use:
+    /// 1. A fixed indentation (all fields use the same number of spaces)
+    /// 2. Field-name-length-based indentation (indent matches field name + ": ")
+    ///
+    /// If no pattern can be detected, defaults to field name length + 2.
+    fn detect_indent_pattern(&self) -> IndentPattern {
+        // Collect indentation data from existing multi-line fields
+        let indent_data: Vec<(String, usize)> = self
+            .entries()
+            .filter_map(|entry| {
+                let field_key = entry.key()?;
+                let indent = entry.get_indent()?;
+                Some((field_key, indent.len()))
+            })
+            .collect();
+
+        if indent_data.is_empty() {
+            // No existing multi-line fields, default to field name length
+            return IndentPattern::FieldNameLength;
+        }
+
+        // Check if all fields use the same fixed indentation
+        let first_indent_len = indent_data[0].1;
+        let all_same = indent_data.iter().all(|(_, len)| *len == first_indent_len);
+
+        if all_same {
+            // All fields use the same indentation - use that
+            return IndentPattern::Fixed(first_indent_len);
+        }
+
+        // Check if fields use field-name-length-based indentation
+        let all_match_field_length = indent_data
+            .iter()
+            .all(|(field_key, indent_len)| *indent_len == field_key.len() + 2);
+
+        if all_match_field_length {
+            // Fields use field-name-length-based indentation
+            return IndentPattern::FieldNameLength;
+        }
+
+        // Can't detect a clear pattern, default to field name length + 2
+        IndentPattern::FieldNameLength
+    }
+
     /// Set a field in the paragraph, inserting at the appropriate location if new
     pub fn set(&mut self, key: &str, value: &str) {
-        let new_entry = Entry::new(key, value);
+        // Check if the field already exists and extract its indentation
+        // Otherwise, detect the indentation pattern from existing fields
+        let indent = self
+            .entries()
+            .find(|entry| entry.key().as_deref() == Some(key))
+            .and_then(|entry| entry.get_indent())
+            .unwrap_or_else(|| self.detect_indent_pattern().to_string(key));
+
+        let new_entry = Entry::with_indentation(key, value, &indent);
 
         // Check if the field already exists and replace it
         for entry in self.entries() {
@@ -1362,7 +1435,15 @@ impl Paragraph {
 
     /// Set a field using a specific field ordering
     pub fn set_with_field_order(&mut self, key: &str, value: &str, field_order: &[&str]) {
-        let new_entry = Entry::new(key, value);
+        // Check if the field already exists and extract its indentation
+        // Otherwise, detect the indentation pattern from existing fields
+        let indent = self
+            .entries()
+            .find(|entry| entry.key().as_deref() == Some(key))
+            .and_then(|entry| entry.get_indent())
+            .unwrap_or_else(|| self.detect_indent_pattern().to_string(key));
+
+        let new_entry = Entry::with_indentation(key, value, &indent);
 
         // Check if the field already exists and replace it
         for entry in self.entries() {
@@ -1594,6 +1675,16 @@ impl Entry {
 
     /// Create a new entry with the given key and value.
     pub fn new(key: &str, value: &str) -> Entry {
+        Self::with_indentation(key, value, " ")
+    }
+
+    /// Create a new entry with the given key, value, and custom indentation for continuation lines.
+    ///
+    /// # Arguments
+    /// * `key` - The field name
+    /// * `value` - The field value (may contain '\n' for multi-line values)
+    /// * `indent` - The indentation string to use for continuation lines
+    pub fn with_indentation(key: &str, value: &str, indent: &str) -> Entry {
         let mut builder = GreenNodeBuilder::new();
 
         builder.start_node(ENTRY.into());
@@ -1602,7 +1693,7 @@ impl Entry {
         builder.token(WHITESPACE.into(), " ");
         for (i, line) in value.split('\n').enumerate() {
             if i > 0 {
-                builder.token(INDENT.into(), " ");
+                builder.token(INDENT.into(), indent);
             }
             builder.token(VALUE.into(), line);
             builder.token(NEWLINE.into(), "\n");
@@ -1746,6 +1837,16 @@ impl Entry {
                 result
             }
         }
+    }
+
+    /// Returns the indentation string used for continuation lines in this entry.
+    /// Returns None if the entry has no continuation lines.
+    fn get_indent(&self) -> Option<String> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|it| it.kind() == INDENT)
+            .map(|it| it.text().to_string())
     }
 
     /// Normalize the spacing around the field separator (colon) in place.
@@ -3212,5 +3313,150 @@ Architecture: all
 
         para.normalize_field_spacing();
         assert_eq!(para.to_string(), "Field: value\n");
+    }
+
+    #[test]
+    fn test_set_preserves_indentation() {
+        // Test that Paragraph.set() preserves the original indentation
+        let original = r#"Source: example
+Build-Depends: foo,
+               bar,
+               baz
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Modify the Build-Depends field
+        para.set("Build-Depends", "foo,\nbar,\nbaz");
+
+        // The indentation should be preserved (15 spaces for "Build-Depends: ")
+        let expected = r#"Source: example
+Build-Depends: foo,
+               bar,
+               baz
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_set_new_field_detects_field_name_length_indent() {
+        // Test that new fields detect field-name-length-based indentation
+        let original = r#"Source: example
+Build-Depends: foo,
+               bar,
+               baz
+Depends: lib1,
+         lib2
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a new multi-line field - should detect that indentation is field-name-length + 2
+        para.set("Recommends", "pkg1,\npkg2,\npkg3");
+
+        // "Recommends: " is 12 characters, so indentation should be 12 spaces
+        assert!(para
+            .to_string()
+            .contains("Recommends: pkg1,\n            pkg2,"));
+    }
+
+    #[test]
+    fn test_set_new_field_detects_fixed_indent() {
+        // Test that new fields detect fixed indentation pattern
+        let original = r#"Source: example
+Build-Depends: foo,
+     bar,
+     baz
+Depends: lib1,
+     lib2
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a new multi-line field - should detect fixed 5-space indentation
+        para.set("Recommends", "pkg1,\npkg2,\npkg3");
+
+        // Should use the same 5-space indentation
+        assert!(para
+            .to_string()
+            .contains("Recommends: pkg1,\n     pkg2,\n     pkg3\n"));
+    }
+
+    #[test]
+    fn test_set_new_field_no_multiline_fields() {
+        // Test that new fields use field-name-length when no existing multi-line fields
+        let original = r#"Source: example
+Maintainer: Test <test@example.com>
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a new multi-line field - should default to field name length + 2
+        para.set("Depends", "foo,\nbar,\nbaz");
+
+        // "Depends: " is 9 characters, so indentation should be 9 spaces
+        let expected = r#"Source: example
+Maintainer: Test <test@example.com>
+Depends: foo,
+         bar,
+         baz
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_set_new_field_mixed_indentation() {
+        // Test that new fields fall back to field-name-length when pattern is inconsistent
+        let original = r#"Source: example
+Build-Depends: foo,
+               bar
+Depends: lib1,
+     lib2
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a new multi-line field - mixed pattern, should fall back to field name length + 2
+        para.set("Recommends", "pkg1,\npkg2");
+
+        // "Recommends: " is 12 characters
+        assert!(para
+            .to_string()
+            .contains("Recommends: pkg1,\n            pkg2\n"));
+    }
+
+    #[test]
+    fn test_entry_with_indentation() {
+        // Test Entry::with_indentation directly
+        let entry = super::Entry::with_indentation("Test-Field", "value1\nvalue2\nvalue3", "    ");
+
+        assert_eq!(
+            entry.to_string(),
+            "Test-Field: value1\n    value2\n    value3\n"
+        );
+    }
+
+    #[test]
+    fn test_entry_get_indent() {
+        // Test that we can extract indentation from an entry
+        let original = r#"Build-Depends: foo,
+               bar,
+               baz
+"#;
+        let para: super::Paragraph = original.parse().unwrap();
+        let entry = para.entries().next().unwrap();
+
+        assert_eq!(entry.get_indent(), Some("               ".to_string()));
+    }
+
+    #[test]
+    fn test_entry_get_indent_single_line() {
+        // Single-line entries should return None for indentation
+        let original = r#"Source: example
+"#;
+        let para: super::Paragraph = original.parse().unwrap();
+        let entry = para.entries().next().unwrap();
+
+        assert_eq!(entry.get_indent(), None);
     }
 }
