@@ -1435,15 +1435,23 @@ impl Paragraph {
 
     /// Set a field using a specific field ordering
     pub fn set_with_field_order(&mut self, key: &str, value: &str, field_order: &[&str]) {
-        // Check if the field already exists and extract its indentation
+        // Check if the field already exists and extract its formatting
         // Otherwise, detect the indentation pattern from existing fields
-        let indent = self
+        let existing_entry = self
             .entries()
-            .find(|entry| entry.key().as_deref() == Some(key))
+            .find(|entry| entry.key().as_deref() == Some(key));
+
+        let indent = existing_entry
+            .as_ref()
             .and_then(|entry| entry.get_indent())
             .unwrap_or_else(|| self.detect_indent_pattern().to_string(key));
 
-        let new_entry = Entry::with_indentation(key, value, &indent);
+        let post_colon_ws = existing_entry
+            .as_ref()
+            .and_then(|entry| entry.get_post_colon_whitespace())
+            .unwrap_or_else(|| " ".to_string());
+
+        let new_entry = Entry::with_formatting(key, value, &post_colon_ws, &indent);
 
         // Check if the field already exists and replace it
         for entry in self.entries() {
@@ -1685,14 +1693,41 @@ impl Entry {
     /// * `value` - The field value (may contain '\n' for multi-line values)
     /// * `indent` - The indentation string to use for continuation lines
     pub fn with_indentation(key: &str, value: &str, indent: &str) -> Entry {
+        Entry::with_formatting(key, value, " ", indent)
+    }
+
+    /// Create a new entry with specific formatting for post-colon whitespace and indentation.
+    ///
+    /// # Arguments
+    /// * `key` - The field name
+    /// * `value` - The field value (may contain '\n' for multi-line values)
+    /// * `post_colon_ws` - The whitespace after the colon (e.g., " " or "\n ")
+    /// * `indent` - The indentation string to use for continuation lines
+    pub fn with_formatting(key: &str, value: &str, post_colon_ws: &str, indent: &str) -> Entry {
         let mut builder = GreenNodeBuilder::new();
 
         builder.start_node(ENTRY.into());
         builder.token(KEY.into(), key);
         builder.token(COLON.into(), ":");
-        builder.token(WHITESPACE.into(), " ");
-        for (i, line) in value.split('\n').enumerate() {
-            if i > 0 {
+
+        // Add the post-colon whitespace token by token
+        let mut i = 0;
+        while i < post_colon_ws.len() {
+            if post_colon_ws[i..].starts_with('\n') {
+                builder.token(NEWLINE.into(), "\n");
+                i += 1;
+            } else {
+                // Collect consecutive non-newline chars as WHITESPACE
+                let start = i;
+                while i < post_colon_ws.len() && !post_colon_ws[i..].starts_with('\n') {
+                    i += post_colon_ws[i..].chars().next().unwrap().len_utf8();
+                }
+                builder.token(WHITESPACE.into(), &post_colon_ws[start..i]);
+            }
+        }
+
+        for (line_idx, line) in value.split('\n').enumerate() {
+            if line_idx > 0 {
                 builder.token(INDENT.into(), indent);
             }
             builder.token(VALUE.into(), line);
@@ -1847,6 +1882,40 @@ impl Entry {
             .filter_map(|it| it.into_token())
             .find(|it| it.kind() == INDENT)
             .map(|it| it.text().to_string())
+    }
+
+    /// Returns the whitespace immediately after the colon in this entry.
+    /// This includes WHITESPACE, NEWLINE, and INDENT tokens up to the first VALUE token.
+    /// Returns None if there is no whitespace (which would be malformed).
+    fn get_post_colon_whitespace(&self) -> Option<String> {
+        let mut found_colon = false;
+        let mut whitespace = String::new();
+
+        for token in self
+            .0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+        {
+            if token.kind() == COLON {
+                found_colon = true;
+                continue;
+            }
+
+            if found_colon {
+                if token.kind() == WHITESPACE || token.kind() == NEWLINE || token.kind() == INDENT {
+                    whitespace.push_str(token.text());
+                } else {
+                    // We've reached a non-whitespace token, stop collecting
+                    break;
+                }
+            }
+        }
+
+        if whitespace.is_empty() {
+            None
+        } else {
+            Some(whitespace)
+        }
     }
 
     /// Normalize the spacing around the field separator (colon) in place.
