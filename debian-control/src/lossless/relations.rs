@@ -1117,7 +1117,10 @@ impl Relations {
                 package,
                 Some((VersionConstraint::GreaterThanEqual, minimum_version.clone())),
             );
-            self.replace(idx, Entry::from(relation));
+            // Get the existing entry and replace its relation to preserve formatting
+            let mut entry = self.get_entry(idx).unwrap();
+            entry.replace(0, relation);
+            self.replace(idx, entry);
         }
 
         // Remove obsolete entries
@@ -1183,7 +1186,10 @@ impl Relations {
         if let Some(idx) = update_idx {
             let relation =
                 Relation::new(package, Some((VersionConstraint::Equal, version.clone())));
-            self.replace(idx, Entry::from(relation));
+            // Get the existing entry and replace its relation to preserve formatting
+            let mut entry = self.get_entry(idx).unwrap();
+            entry.replace(0, relation);
+            self.replace(idx, entry);
         }
 
         if !found {
@@ -3531,6 +3537,65 @@ mod tests {
         let mut relations: Relations = "debhelper".parse().unwrap();
         relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
         assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_preserves_newline() {
+        // Test that newline after the field name is preserved
+        // This is the format often used in Debian control files:
+        // Build-Depends:
+        //  debhelper (>= 9),
+        //  pkg-config
+        let input = "\n debhelper (>= 9),\n pkg-config,\n uuid-dev";
+        let mut relations: Relations = input.parse().unwrap();
+        relations.ensure_minimum_version("debhelper", &"12~".parse().unwrap());
+        let result = relations.to_string();
+
+        // The newline before the first entry should be preserved
+        assert!(
+            result.starts_with('\n'),
+            "Expected result to start with newline, got: {:?}",
+            result
+        );
+        assert_eq!(result, "\n debhelper (>= 12~),\n pkg-config,\n uuid-dev");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_preserves_newline_in_control() {
+        // Test the full scenario from the bug report
+        use crate::lossless::Control;
+        use std::str::FromStr;
+
+        let input = r#"Source: f2fs-tools
+Section: admin
+Priority: optional
+Maintainer: Test <test@example.com>
+Build-Depends:
+ debhelper (>= 9),
+ pkg-config,
+ uuid-dev
+
+Package: f2fs-tools
+Description: test
+"#;
+
+        let control = Control::from_str(input).unwrap();
+        let mut source = control.source().unwrap();
+        let mut build_depends = source.build_depends().unwrap();
+
+        let version = Version::from_str("12~").unwrap();
+        build_depends.ensure_minimum_version("debhelper", &version);
+
+        source.set_build_depends(&build_depends);
+
+        let output = control.to_string();
+
+        // Check that the formatting is preserved - the newline after "Build-Depends:" should still be there
+        assert!(
+            output.contains("Build-Depends:\n debhelper (>= 12~)"),
+            "Expected 'Build-Depends:\\n debhelper (>= 12~)' but got:\n{}",
+            output
+        );
     }
 
     #[test]
