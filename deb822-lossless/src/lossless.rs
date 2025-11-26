@@ -1219,8 +1219,8 @@ impl Paragraph {
                             skip_whitespace = false;
                         }
                         NEWLINE if skip_whitespace && seen_colon => {
-                            // Empty value case (e.g., "Field:\n")
-                            builder.token(WHITESPACE.into(), " ");
+                            // Empty value case (e.g., "Field:\n" or "Field:  \n")
+                            // Normalize to no trailing space - just output newline
                             builder.token(NEWLINE.into(), "\n");
                             skip_whitespace = false;
                         }
@@ -1969,8 +1969,8 @@ impl Entry {
                     skip_whitespace = false;
                 }
                 NEWLINE if skip_whitespace && seen_colon => {
-                    // Empty value case (e.g., "Field:\n")
-                    builder.token(WHITESPACE.into(), " ");
+                    // Empty value case (e.g., "Field:\n" or "Field:  \n")
+                    // Normalize to no trailing space - just output newline
                     builder.token(NEWLINE.into(), "\n");
                     skip_whitespace = false;
                 }
@@ -3327,14 +3327,27 @@ Architecture: all
     }
 
     #[test]
-    fn test_normalize_field_spacing_empty_value() {
-        // Field with empty value
+    fn test_normalize_field_spacing_empty_value_with_whitespace() {
+        // Field with empty value (only whitespace) should normalize to no space
         let input = "Field:  \n";
         let deb822 = input.parse::<Deb822>().unwrap();
         let mut para = deb822.paragraphs().next().unwrap();
 
         para.normalize_field_spacing();
-        assert_eq!(para.to_string(), "Field: \n");
+        // When value is empty/whitespace-only, normalize to no space
+        assert_eq!(para.to_string(), "Field:\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_no_value() {
+        // Field with no value (just newline) should stay unchanged
+        let input = "Depends:\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        // Should remain with no space
+        assert_eq!(para.to_string(), "Depends:\n");
     }
 
     #[test]
