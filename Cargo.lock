@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "debian-control"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "chrono",
  "deb822-fast",
