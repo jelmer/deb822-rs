@@ -881,7 +881,7 @@ impl Relations {
     /// * `entry` - The entry to insert
     /// * `default_sep` - Optional default separator to use if no pattern is detected (defaults to " ")
     pub fn insert_with_separator(&mut self, idx: usize, entry: Entry, default_sep: Option<&str>) {
-        let is_empty = !self.0.children_with_tokens().any(|n| n.kind() == COMMA);
+        let is_empty = self.entries().next().is_none();
         let whitespace = self.detect_whitespace_pattern(default_sep.unwrap_or(" "));
 
         // Strip trailing whitespace first
@@ -3736,6 +3736,19 @@ mod tests {
         relations.add_dependency(entry, None);
         // Should be added at the end (alphabetically after python3)
         assert_eq!(relations.to_string(), "debhelper, python3, zzz-package");
+    }
+
+    #[test]
+    fn test_add_dependency_to_single_entry() {
+        // Regression test: ensure comma is added when inserting into single-entry Relations
+        let mut relations: Relations = "python3-dulwich".parse().unwrap();
+        let entry: Entry = "debhelper-compat (= 12)".parse().unwrap();
+        relations.add_dependency(entry, None);
+        // Should insert with comma separator
+        assert_eq!(
+            relations.to_string(),
+            "debhelper-compat (= 12), python3-dulwich"
+        );
     }
 
     #[test]
