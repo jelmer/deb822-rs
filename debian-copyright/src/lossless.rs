@@ -388,6 +388,11 @@ impl LicenseParagraph {
         self.0.get("Comment")
     }
 
+    /// Set the comment associated with the license
+    pub fn set_comment(&mut self, comment: &str) {
+        self.0.set("Comment", comment);
+    }
+
     /// Name of the license
     pub fn name(&self) -> Option<String> {
         self.0
@@ -400,6 +405,16 @@ impl LicenseParagraph {
         self.0
             .get("License")
             .and_then(|x| x.split_once('\n').map(|(_, text)| text.to_string()))
+    }
+
+    /// Set the license
+    pub fn set_license(&mut self, license: &License) {
+        let text = match license {
+            License::Name(name) => name.to_string(),
+            License::Named(name, text) => format!("{}\n{}", name, text),
+            License::Text(text) => text.to_string(),
+        };
+        self.0.set("License", &text);
     }
 }
 
@@ -557,5 +572,38 @@ License: GPL-3+
         let mut header = copyright.header().unwrap();
         header.set_source("https://example.com/source");
         assert_eq!(header.source().unwrap(), "https://example.com/source");
+    }
+
+    #[test]
+    fn test_license_paragraph_set_comment() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ This is the license text.
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let mut license = copyright.iter_licenses().next().unwrap();
+        license.set_comment("This is a test comment");
+        assert_eq!(license.comment().unwrap(), "This is a test comment");
+    }
+
+    #[test]
+    fn test_license_paragraph_set_license() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ Old license text.
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let mut license = copyright.iter_licenses().next().unwrap();
+
+        let new_license = crate::License::Named(
+            "MIT".to_string(),
+            "Permission is hereby granted...".to_string(),
+        );
+        license.set_license(&new_license);
+
+        assert_eq!(license.name().unwrap(), "MIT");
+        assert_eq!(license.text().unwrap(), "Permission is hereby granted...");
     }
 }
