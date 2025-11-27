@@ -931,6 +931,131 @@ impl Deb822 {
         }
     }
 
+    /// Move a paragraph from one index to another.
+    ///
+    /// This moves the paragraph at `from_index` to `to_index`, shifting other paragraphs as needed.
+    /// If `from_index` equals `to_index`, no operation is performed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// let mut d: Deb822 = vec![
+    ///     vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
+    ///     vec![("A", "B"), ("C", "D")].into_iter().collect(),
+    ///     vec![("X", "Y"), ("Z", "W")].into_iter().collect(),
+    /// ]
+    /// .into_iter()
+    /// .collect();
+    /// d.move_paragraph(0, 2);
+    /// assert_eq!(d.to_string(), "A: B\nC: D\n\nX: Y\nZ: W\n\nFoo: Bar\nBaz: Qux\n");
+    /// ```
+    pub fn move_paragraph(&mut self, from_index: usize, to_index: usize) {
+        if from_index == to_index {
+            return;
+        }
+
+        // Get the paragraph count to validate indices
+        let paragraph_count = self.paragraphs().count();
+        if from_index >= paragraph_count || to_index >= paragraph_count {
+            return;
+        }
+
+        // Clone the paragraph node we want to move
+        let paragraph_to_move = self.paragraphs().nth(from_index).unwrap().0.clone();
+
+        // Remove the paragraph from its original position
+        let from_physical = self.convert_index(from_index).unwrap();
+
+        // Determine the range to remove (paragraph and possibly preceding EMPTY_LINE)
+        let mut start_idx = from_physical;
+        if from_physical > 0 {
+            if let Some(prev_node) = self.0.children_with_tokens().nth(from_physical - 1) {
+                if prev_node.kind() == EMPTY_LINE {
+                    start_idx = from_physical - 1;
+                }
+            }
+        }
+
+        // Remove the paragraph and any preceding EMPTY_LINE
+        self.0.splice_children(start_idx..from_physical + 1, []);
+        self.delete_trailing_space(start_idx);
+
+        // Calculate the physical insertion point
+        // After removal, we need to determine where to insert
+        // The semantics are: the moved paragraph ends up at logical index to_index in the final result
+        let insert_at = if to_index > from_index {
+            // Moving forward: after removal, to_index-1 paragraphs should be before the moved one
+            // So we insert after paragraph at index (to_index - 1)
+            let target_idx = to_index - 1;
+            if let Some(target_physical) = self.convert_index(target_idx) {
+                target_physical + 1
+            } else {
+                // If convert_index returns None, insert at the end
+                self.0.children().count()
+            }
+        } else {
+            // Moving backward: after removal, to_index paragraphs should be before the moved one
+            // So we insert at paragraph index to_index
+            if let Some(target_physical) = self.convert_index(to_index) {
+                target_physical
+            } else {
+                self.0.children().count()
+            }
+        };
+
+        // Build the nodes to insert
+        let mut to_insert = vec![];
+
+        // Determine if we need to add an EMPTY_LINE before the paragraph
+        let needs_empty_line_before = if insert_at == 0 {
+            // At the beginning - no empty line before
+            false
+        } else if insert_at > 0 {
+            // Check if there's already an EMPTY_LINE at the insertion point
+            if let Some(node_at_insert) = self.0.children_with_tokens().nth(insert_at - 1) {
+                node_at_insert.kind() != EMPTY_LINE
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if needs_empty_line_before {
+            let mut builder = GreenNodeBuilder::new();
+            builder.start_node(EMPTY_LINE.into());
+            builder.token(NEWLINE.into(), "\n");
+            builder.finish_node();
+            to_insert.push(SyntaxNode::new_root_mut(builder.finish()).into());
+        }
+
+        to_insert.push(paragraph_to_move.into());
+
+        // Determine if we need to add an EMPTY_LINE after the paragraph
+        let needs_empty_line_after = if insert_at < self.0.children().count() {
+            // There are nodes after - check if next node is EMPTY_LINE
+            if let Some(node_after) = self.0.children_with_tokens().nth(insert_at) {
+                node_after.kind() != EMPTY_LINE
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if needs_empty_line_after {
+            let mut builder = GreenNodeBuilder::new();
+            builder.start_node(EMPTY_LINE.into());
+            builder.token(NEWLINE.into(), "\n");
+            builder.finish_node();
+            to_insert.push(SyntaxNode::new_root_mut(builder.finish()).into());
+        }
+
+        // Insert at the new position
+        self.0.splice_children(insert_at..insert_at, to_insert);
+    }
+
     /// Add a new empty paragraph to the end of the file.
     pub fn add_paragraph(&mut self) -> Paragraph {
         self.insert_empty_paragraph(None)
@@ -3672,4 +3797,106 @@ Depends: lib1,
 
         assert_eq!(entry.get_indent(), None);
     }
+}
+
+#[test]
+fn test_move_paragraph_forward() {
+    let mut d: Deb822 = vec![
+        vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
+        vec![("A", "B"), ("C", "D")].into_iter().collect(),
+        vec![("X", "Y"), ("Z", "W")].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect();
+    d.move_paragraph(0, 2);
+    assert_eq!(
+        d.to_string(),
+        "A: B\nC: D\n\nX: Y\nZ: W\n\nFoo: Bar\nBaz: Qux\n"
+    );
+}
+
+#[test]
+fn test_move_paragraph_backward() {
+    let mut d: Deb822 = vec![
+        vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
+        vec![("A", "B"), ("C", "D")].into_iter().collect(),
+        vec![("X", "Y"), ("Z", "W")].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect();
+    d.move_paragraph(2, 0);
+    assert_eq!(
+        d.to_string(),
+        "X: Y\nZ: W\n\nFoo: Bar\nBaz: Qux\n\nA: B\nC: D\n"
+    );
+}
+
+#[test]
+fn test_move_paragraph_middle() {
+    let mut d: Deb822 = vec![
+        vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
+        vec![("A", "B"), ("C", "D")].into_iter().collect(),
+        vec![("X", "Y"), ("Z", "W")].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect();
+    d.move_paragraph(2, 1);
+    assert_eq!(
+        d.to_string(),
+        "Foo: Bar\nBaz: Qux\n\nX: Y\nZ: W\n\nA: B\nC: D\n"
+    );
+}
+
+#[test]
+fn test_move_paragraph_same_index() {
+    let mut d: Deb822 = vec![
+        vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
+        vec![("A", "B"), ("C", "D")].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect();
+    let original = d.to_string();
+    d.move_paragraph(1, 1);
+    assert_eq!(d.to_string(), original);
+}
+
+#[test]
+fn test_move_paragraph_single() {
+    let mut d: Deb822 = vec![vec![("Foo", "Bar")].into_iter().collect()]
+        .into_iter()
+        .collect();
+    let original = d.to_string();
+    d.move_paragraph(0, 0);
+    assert_eq!(d.to_string(), original);
+}
+
+#[test]
+fn test_move_paragraph_invalid_index() {
+    let mut d: Deb822 = vec![
+        vec![("Foo", "Bar")].into_iter().collect(),
+        vec![("A", "B")].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect();
+    let original = d.to_string();
+    d.move_paragraph(0, 5);
+    assert_eq!(d.to_string(), original);
+}
+
+#[test]
+fn test_move_paragraph_with_comments() {
+    let text = r#"Foo: Bar
+
+# This is a comment
+
+A: B
+
+X: Y
+"#;
+    let mut d: Deb822 = text.parse().unwrap();
+    d.move_paragraph(0, 2);
+    assert_eq!(
+        d.to_string(),
+        "# This is a comment\n\nA: B\n\nX: Y\n\nFoo: Bar\n"
+    );
 }
