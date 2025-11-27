@@ -2,14 +2,12 @@
 //!
 //! This parser is lossy in the sense that it will discard whitespace and comments
 //! in the input.
-use crate::lex::SyntaxKind;
 
 #[cfg(feature = "derive")]
 pub use deb822_derive::{FromDeb822, ToDeb822};
 
 pub mod convert;
 pub use convert::{FromDeb822Paragraph, ToDeb822Paragraph};
-mod lex;
 
 /// Canonical field order for source paragraphs in debian/control files
 pub const SOURCE_FIELD_ORDER: &[&str] = &[
@@ -66,7 +64,7 @@ pub const BINARY_FIELD_ORDER: &[&str] = &[
 #[derive(Debug)]
 pub enum Error {
     /// An unexpected token was encountered.
-    UnexpectedToken(SyntaxKind, String),
+    UnexpectedToken(String),
 
     /// Unexpected end-of-file.
     UnexpectedEof,
@@ -87,7 +85,7 @@ impl From<std::io::Error> for Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
-            Self::UnexpectedToken(_k, t) => write!(f, "Unexpected token: {}", t),
+            Self::UnexpectedToken(t) => write!(f, "Unexpected token: {}", t),
             Self::UnexpectedEof => f.write_str("Unexpected end-of-file"),
             Self::Io(e) => write!(f, "IO error: {}", e),
             Self::ExpectedEof => f.write_str("Expected end-of-file"),
@@ -281,7 +279,7 @@ impl Paragraph {
         if new_field_position.is_some() && insertion_index == self.fields.len() {
             // Look for the position after the last known field that comes before our field
             for (i, field) in self.fields.iter().enumerate().rev() {
-                if field_order.iter().position(|&f| f == field.name).is_some() {
+                if field_order.iter().any(|&f| f == field.name) {
                     // Found a known field, insert after it
                     insertion_index = i + 1;
                     break;
@@ -338,7 +336,7 @@ impl std::str::FromStr for Paragraph {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let doc: Deb822 = s.parse().map_err(|_| Error::ExpectedEof)?;
+        let doc: Deb822 = s.parse()?;
         if doc.is_empty() {
             Err(Error::UnexpectedEof)
         } else if doc.len() > 1 {
@@ -512,117 +510,166 @@ impl std::str::FromStr for Deb822 {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut tokens = crate::lex::lex(s).peekable();
-
+        // Optimized zero-copy byte-level parser
+        let bytes = s.as_bytes();
         let mut paragraphs = Vec::new();
-        let mut current_paragraph = Vec::new();
+        let mut pos = 0;
+        let len = bytes.len();
 
-        while let Some((k, t)) = tokens.next() {
-            match k {
-                SyntaxKind::INDENT | SyntaxKind::COLON | SyntaxKind::ERROR => {
-                    return Err(Error::UnexpectedToken(k, t.to_string()));
-                }
-                SyntaxKind::WHITESPACE => {
-                    // ignore whitespace
-                }
-                SyntaxKind::KEY => {
-                    current_paragraph.push(Field {
-                        name: t.to_string(),
-                        value: String::new(),
-                    });
-
-                    match tokens.next() {
-                        Some((SyntaxKind::COLON, _)) => {}
-                        Some((k, t)) => {
-                            return Err(Error::UnexpectedToken(k, t.to_string()));
-                        }
-                        None => {
-                            return Err(Error::UnexpectedEof);
-                        }
+        while pos < len {
+            // Skip leading newlines and comments between paragraphs
+            while pos < len {
+                let b = bytes[pos];
+                if b == b'#' {
+                    while pos < len && bytes[pos] != b'\n' {
+                        pos += 1;
                     }
-
-                    while tokens.peek().map(|(k, _)| k) == Some(&SyntaxKind::WHITESPACE) {
-                        tokens.next();
+                    if pos < len {
+                        pos += 1;
                     }
-
-                    for (k, t) in tokens.by_ref() {
-                        match k {
-                            SyntaxKind::VALUE => {
-                                current_paragraph.last_mut().unwrap().value = t.to_string();
-                            }
-                            SyntaxKind::NEWLINE => {
-                                break;
-                            }
-                            _ => return Err(Error::UnexpectedToken(k, t.to_string())),
-                        }
-                    }
-
-                    current_paragraph.last_mut().unwrap().value.push('\n');
-
-                    // while the next line starts with INDENT, it's a continuation of the value
-                    while tokens.peek().map(|(k, _)| k) == Some(&SyntaxKind::INDENT) {
-                        tokens.next();
-                        loop {
-                            match tokens.peek() {
-                                Some((SyntaxKind::VALUE, t)) => {
-                                    current_paragraph.last_mut().unwrap().value.push_str(t);
-                                    tokens.next();
-                                }
-                                Some((SyntaxKind::COMMENT, _)) => {
-                                    // ignore comments
-                                    tokens.next();
-                                }
-                                Some((SyntaxKind::NEWLINE, n)) => {
-                                    current_paragraph.last_mut().unwrap().value.push_str(n);
-                                    tokens.next();
-                                    break;
-                                }
-                                Some((SyntaxKind::KEY, _)) => {
-                                    break;
-                                }
-                                Some((k, _)) => {
-                                    return Err(Error::UnexpectedToken(*k, t.to_string()));
-                                }
-                                None => {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    // Trim the trailing newline
-                    {
-                        let par = current_paragraph.last_mut().unwrap();
-                        if par.value.ends_with('\n') {
-                            par.value.pop();
-                        }
-                    }
-                }
-                SyntaxKind::VALUE => {
-                    return Err(Error::UnexpectedToken(k, t.to_string()));
-                }
-                SyntaxKind::COMMENT => {
-                    for (k, _) in tokens.by_ref() {
-                        if k == SyntaxKind::NEWLINE {
-                            break;
-                        }
-                    }
-                }
-                SyntaxKind::NEWLINE => {
-                    if !current_paragraph.is_empty() {
-                        paragraphs.push(Paragraph {
-                            fields: current_paragraph,
-                        });
-                        current_paragraph = Vec::new();
-                    }
+                } else if b == b'\n' || b == b'\r' {
+                    pos += 1;
+                } else {
+                    break;
                 }
             }
+
+            if pos >= len {
+                break;
+            }
+
+            // Check for unexpected leading space/tab before paragraph
+            if bytes[pos] == b' ' || bytes[pos] == b'\t' {
+                let line_start = pos;
+                while pos < len && bytes[pos] != b'\n' {
+                    pos += 1;
+                }
+                let token = unsafe { std::str::from_utf8_unchecked(&bytes[line_start..pos]) };
+                return Err(Error::UnexpectedToken(token.to_string()));
+            }
+
+            // Parse paragraph
+            let mut fields: Vec<Field> = Vec::new();
+
+            loop {
+                if pos >= len {
+                    break;
+                }
+
+                // Check for blank line (end of paragraph)
+                if bytes[pos] == b'\n' {
+                    pos += 1;
+                    break;
+                }
+
+                // Skip comment lines
+                if bytes[pos] == b'#' {
+                    while pos < len && bytes[pos] != b'\n' {
+                        pos += 1;
+                    }
+                    if pos < len {
+                        pos += 1;
+                    }
+                    continue;
+                }
+
+                // Check for continuation line (starts with space/tab)
+                if bytes[pos] == b' ' || bytes[pos] == b'\t' {
+                    if fields.is_empty() {
+                        // Indented line before any field - this is an error
+                        let line_start = pos;
+                        while pos < len && bytes[pos] != b'\n' {
+                            pos += 1;
+                        }
+                        let token =
+                            unsafe { std::str::from_utf8_unchecked(&bytes[line_start..pos]) };
+                        return Err(Error::UnexpectedToken(token.to_string()));
+                    }
+
+                    // Skip all leading whitespace (deb822 format strips leading spaces)
+                    while pos < len && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+                        pos += 1;
+                    }
+
+                    // Read the rest of the continuation line
+                    let line_start = pos;
+                    while pos < len && bytes[pos] != b'\n' {
+                        pos += 1;
+                    }
+
+                    // Add to previous field value
+                    if let Some(last_field) = fields.last_mut() {
+                        last_field.value.push('\n');
+                        last_field.value.push_str(unsafe {
+                            std::str::from_utf8_unchecked(&bytes[line_start..pos])
+                        });
+                    }
+
+                    if pos < len {
+                        pos += 1; // Skip newline
+                    }
+                    continue;
+                }
+
+                // Parse field name
+                let name_start = pos;
+                while pos < len && bytes[pos] != b':' && bytes[pos] != b'\n' {
+                    pos += 1;
+                }
+
+                if pos >= len || bytes[pos] != b':' {
+                    // Invalid line - missing colon or value without key
+                    let line_start = name_start;
+                    while pos < len && bytes[pos] != b'\n' {
+                        pos += 1;
+                    }
+                    let token = unsafe { std::str::from_utf8_unchecked(&bytes[line_start..pos]) };
+                    return Err(Error::UnexpectedToken(token.to_string()));
+                }
+
+                let name = unsafe { std::str::from_utf8_unchecked(&bytes[name_start..pos]) };
+
+                // Check for empty field name (e.g., line starting with ':')
+                if name.is_empty() {
+                    let line_start = name_start;
+                    let mut end = pos;
+                    while end < len && bytes[end] != b'\n' {
+                        end += 1;
+                    }
+                    let token = unsafe { std::str::from_utf8_unchecked(&bytes[line_start..end]) };
+                    return Err(Error::UnexpectedToken(token.to_string()));
+                }
+
+                pos += 1; // Skip colon
+
+                // Skip whitespace after colon
+                while pos < len && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+                    pos += 1;
+                }
+
+                // Read field value (rest of line)
+                let value_start = pos;
+                while pos < len && bytes[pos] != b'\n' {
+                    pos += 1;
+                }
+
+                let value = unsafe { std::str::from_utf8_unchecked(&bytes[value_start..pos]) };
+
+                fields.push(Field {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                });
+
+                if pos < len {
+                    pos += 1; // Skip newline
+                }
+            }
+
+            if !fields.is_empty() {
+                paragraphs.push(Paragraph { fields });
+            }
         }
-        if !current_paragraph.is_empty() {
-            paragraphs.push(Paragraph {
-                fields: current_paragraph,
-            });
-        }
+
         Ok(Deb822(paragraphs))
     }
 }
@@ -630,11 +677,10 @@ impl std::str::FromStr for Deb822 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lex::lex;
 
     #[test]
     fn test_error_display() {
-        let err = Error::UnexpectedToken(SyntaxKind::ERROR, "invalid".to_string());
+        let err = Error::UnexpectedToken("invalid".to_string());
         assert_eq!(err.to_string(), "Unexpected token: invalid");
 
         let err = Error::UnexpectedEof;
@@ -739,55 +785,6 @@ Another-Field: value
     }
 
     #[test]
-    fn test_lex() {
-        let input = r#"Package: hello
-Version: 2.10
-
-Package: world
-# Comment
-Version: 1.0
-Description: A program that says world
- And some more text
-"#;
-        assert_eq!(
-            lex(input).collect::<Vec<_>>(),
-            vec![
-                (SyntaxKind::KEY, "Package"),
-                (SyntaxKind::COLON, ":"),
-                (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::VALUE, "hello"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::KEY, "Version"),
-                (SyntaxKind::COLON, ":"),
-                (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::VALUE, "2.10"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::KEY, "Package"),
-                (SyntaxKind::COLON, ":"),
-                (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::VALUE, "world"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::COMMENT, "# Comment"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::KEY, "Version"),
-                (SyntaxKind::COLON, ":"),
-                (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::VALUE, "1.0"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::KEY, "Description"),
-                (SyntaxKind::COLON, ":"),
-                (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::VALUE, "A program that says world"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::INDENT, " "),
-                (SyntaxKind::VALUE, "And some more text"),
-                (SyntaxKind::NEWLINE, "\n"),
-            ]
-        );
-    }
-
-    #[test]
     fn test_paragraph_iter() {
         let input = r#"Package: hello
 Version: 2.10
@@ -848,27 +845,27 @@ Version: 2.10
         // Test parsing with unexpected tokens
         let input = "Value before key\nPackage: hello\n";
         let result = input.parse::<Deb822>();
-        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+        assert!(matches!(result, Err(Error::UnexpectedToken(_))));
 
         // Test parsing with missing colon after key
         let input = "Package hello\n";
         let result = input.parse::<Deb822>();
-        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+        assert!(matches!(result, Err(Error::UnexpectedToken(_))));
 
         // Test parsing with unexpected indent
         let input = " Indented: value\n";
         let result = input.parse::<Deb822>();
-        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+        assert!(matches!(result, Err(Error::UnexpectedToken(_))));
 
         // Test parsing with unexpected value
         let input = "Key: value\nvalue without key\n";
         let result = input.parse::<Deb822>();
-        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+        assert!(matches!(result, Err(Error::UnexpectedToken(_))));
 
         // Test parsing with unexpected colon
         let input = "Key: value\n:\n";
         let result = input.parse::<Deb822>();
-        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+        assert!(matches!(result, Err(Error::UnexpectedToken(_))));
     }
 
     #[test]
