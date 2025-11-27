@@ -1303,6 +1303,82 @@ impl Relations {
         Ok(())
     }
 
+    /// Remove a substitution variable from the relations.
+    ///
+    /// If the substvar exists, it is removed along with its surrounding separators.
+    /// If the substvar does not exist, this is a no-op.
+    ///
+    /// # Arguments
+    /// * `substvar` - The substitution variable to remove (e.g., "${misc:Depends}")
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let (mut relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}", true);
+    /// relations.drop_substvar("${misc:Depends}");
+    /// assert_eq!(relations.to_string(), "python3");
+    /// ```
+    pub fn drop_substvar(&mut self, substvar: &str) {
+        // Find all substvar nodes that match the given string
+        let substvars_to_remove: Vec<_> = self
+            .0
+            .children()
+            .filter_map(Substvar::cast)
+            .filter(|s| s.to_string().trim() == substvar.trim())
+            .collect();
+
+        for substvar_node in substvars_to_remove {
+            // Determine if this is the first substvar (no previous ENTRY or SUBSTVAR siblings)
+            let is_first = !substvar_node
+                .0
+                .siblings(Direction::Prev)
+                .skip(1)
+                .any(|n| n.kind() == ENTRY || n.kind() == SUBSTVAR);
+
+            let mut removed_comma = false;
+
+            // Remove whitespace and comma after the substvar
+            while let Some(n) = substvar_node.0.next_sibling_or_token() {
+                if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                    n.detach();
+                } else if n.kind() == COMMA {
+                    n.detach();
+                    removed_comma = true;
+                    break;
+                } else {
+                    break;
+                }
+            }
+
+            // If not first, remove preceding whitespace and comma
+            if !is_first {
+                while let Some(n) = substvar_node.0.prev_sibling_or_token() {
+                    if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                        n.detach();
+                    } else if !removed_comma && n.kind() == COMMA {
+                        n.detach();
+                        break;
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                // If first and we didn't remove a comma after, clean up any leading whitespace
+                while let Some(n) = substvar_node.0.next_sibling_or_token() {
+                    if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                        n.detach();
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            // Finally, detach the substvar node itself
+            substvar_node.0.detach();
+        }
+    }
+
     /// Filter entries based on a predicate function.
     ///
     /// # Arguments
@@ -3668,6 +3744,56 @@ Description: test
         relations.ensure_substvar("${misc:Depends}").unwrap();
         // Should preserve the double-space pattern
         assert_eq!(relations.to_string(), "python3,  rustc,  ${misc:Depends}");
+    }
+
+    #[test]
+    fn test_drop_substvar_basic() {
+        let (mut relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_drop_substvar_first_position() {
+        let (mut relations, _) = Relations::parse_relaxed("${misc:Depends}, python3", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_drop_substvar_middle_position() {
+        let (mut relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}, rustc", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3, rustc");
+    }
+
+    #[test]
+    fn test_drop_substvar_only_substvar() {
+        let (mut relations, _) = Relations::parse_relaxed("${misc:Depends}", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "");
+    }
+
+    #[test]
+    fn test_drop_substvar_not_exists() {
+        let (mut relations, _) = Relations::parse_relaxed("python3, rustc", false);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3, rustc");
+    }
+
+    #[test]
+    fn test_drop_substvar_multiple_substvars() {
+        let (mut relations, _) =
+            Relations::parse_relaxed("python3, ${misc:Depends}, ${shlibs:Depends}", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3, ${shlibs:Depends}");
+    }
+
+    #[test]
+    fn test_drop_substvar_preserves_whitespace() {
+        let (mut relations, _) = Relations::parse_relaxed("python3,  ${misc:Depends}", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3");
     }
 
     #[test]
