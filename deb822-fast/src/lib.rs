@@ -95,6 +95,15 @@ impl std::fmt::Display for Error {
     }
 }
 
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 /// A field in a deb822 paragraph.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Field {
