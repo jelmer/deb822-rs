@@ -413,6 +413,90 @@ impl Deb822 {
         r.read_to_string(&mut buf)?;
         buf.parse()
     }
+
+    /// Stream paragraphs from a reader.
+    ///
+    /// This returns an iterator that reads and parses paragraphs one at a time,
+    /// which is more memory-efficient for large files.
+    pub fn iter_paragraphs_from_reader<R: std::io::BufRead>(reader: R) -> ParagraphReader<R> {
+        ParagraphReader::new(reader)
+    }
+}
+
+/// Reader that streams paragraphs from a buffered reader.
+pub struct ParagraphReader<R: std::io::BufRead> {
+    reader: R,
+    buffer: String,
+    finished: bool,
+}
+
+impl<R: std::io::BufRead> ParagraphReader<R> {
+    /// Create a new paragraph reader from a buffered reader.
+    pub fn new(reader: R) -> Self {
+        Self {
+            reader,
+            buffer: String::new(),
+            finished: false,
+        }
+    }
+}
+
+impl<R: std::io::BufRead> Iterator for ParagraphReader<R> {
+    type Item = Result<Paragraph, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
+        self.buffer.clear();
+        let mut found_content = false;
+
+        loop {
+            let mut line = String::new();
+            match self.reader.read_line(&mut line) {
+                Ok(0) => {
+                    // End of file
+                    self.finished = true;
+                    if found_content {
+                        // Parse the buffered paragraph
+                        return Some(self.buffer.parse());
+                    }
+                    return None;
+                }
+                Ok(_) => {
+                    // Check if this is a blank line (paragraph separator)
+                    if line.trim().is_empty() && found_content {
+                        // End of current paragraph
+                        return Some(self.buffer.parse());
+                    }
+
+                    // Skip leading blank lines and comments before first field
+                    if !found_content
+                        && (line.trim().is_empty() || line.trim_start().starts_with('#'))
+                    {
+                        continue;
+                    }
+
+                    // Check if this starts a new field (not indented)
+                    if !line.starts_with(|c: char| c.is_whitespace()) && line.contains(':') {
+                        found_content = true;
+                    } else if found_content {
+                        // Continuation line or comment within paragraph
+                    } else if !line.trim_start().starts_with('#') {
+                        // Non-blank, non-comment line before any field - this is content
+                        found_content = true;
+                    }
+
+                    self.buffer.push_str(&line);
+                }
+                Err(e) => {
+                    self.finished = true;
+                    return Some(Err(Error::Io(e)));
+                }
+            }
+        }
+    }
 }
 
 impl std::str::FromStr for Deb822 {
@@ -1069,5 +1153,77 @@ Version: 2.10
             deb822.iter().next().unwrap().get("Key"),
             Some("value\nline1\nline2")
         );
+    }
+
+    #[test]
+    fn test_iter_paragraphs_from_reader() {
+        use std::io::BufReader;
+
+        let input = r#"Package: hello
+Version: 2.10
+Description: A program that says hello
+ Some more text
+
+Package: world
+Version: 1.0
+Description: A program that says world
+ And some more text
+Another-Field: value
+
+# A comment
+
+"#;
+
+        let reader = BufReader::new(input.as_bytes());
+        let paragraphs: Result<Vec<_>, _> = Deb822::iter_paragraphs_from_reader(reader).collect();
+        let paragraphs = paragraphs.unwrap();
+
+        assert_eq!(paragraphs.len(), 2);
+
+        assert_eq!(paragraphs[0].get("Package"), Some("hello"));
+        assert_eq!(paragraphs[0].get("Version"), Some("2.10"));
+        assert_eq!(
+            paragraphs[0].get("Description"),
+            Some("A program that says hello\nSome more text")
+        );
+
+        assert_eq!(paragraphs[1].get("Package"), Some("world"));
+        assert_eq!(paragraphs[1].get("Version"), Some("1.0"));
+        assert_eq!(
+            paragraphs[1].get("Description"),
+            Some("A program that says world\nAnd some more text")
+        );
+        assert_eq!(paragraphs[1].get("Another-Field"), Some("value"));
+    }
+
+    #[test]
+    fn test_iter_paragraphs_from_reader_empty() {
+        use std::io::BufReader;
+
+        let input = "";
+        let reader = BufReader::new(input.as_bytes());
+        let paragraphs: Result<Vec<_>, _> = Deb822::iter_paragraphs_from_reader(reader).collect();
+        let paragraphs = paragraphs.unwrap();
+
+        assert_eq!(paragraphs.len(), 0);
+    }
+
+    #[test]
+    fn test_iter_paragraphs_from_reader_with_leading_comments() {
+        use std::io::BufReader;
+
+        let input = r#"# Leading comment
+# Another comment
+
+Package: test
+Version: 1.0
+"#;
+
+        let reader = BufReader::new(input.as_bytes());
+        let paragraphs: Result<Vec<_>, _> = Deb822::iter_paragraphs_from_reader(reader).collect();
+        let paragraphs = paragraphs.unwrap();
+
+        assert_eq!(paragraphs.len(), 1);
+        assert_eq!(paragraphs[0].get("Package"), Some("test"));
     }
 }
