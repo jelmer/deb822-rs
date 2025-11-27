@@ -1,13 +1,97 @@
-//! Lossy parser for deb822 format.
+//! Fast parser for deb822 format.
 //!
 //! This parser is lossy in the sense that it will discard whitespace and comments
 //! in the input.
+//!
+//! ## API Variants
+//!
+//! This crate provides two parsing APIs:
+//!
+//! ### Owned API (default)
+//! The main API using [`Deb822`], [`Paragraph`], and [`Field`] types that own their data.
+//! - Easy to use - no lifetime management required
+//! - Can be stored, moved, and outlive the source string
+//! - Good performance with moderate allocations
+//!
+//! ### Borrowed API (zero-copy)
+//! The [`borrowed`] module provides a zero-allocation API using borrowed string slices.
+//! - Maximum performance - no string allocations
+//! - Requires lifetime management
+//! - Data cannot outlive the source string
+//! - Best for parsing large files where you process data immediately
+//!
+//! ```rust
+//! use deb822_fast::{Deb822, borrowed::BorrowedParser};
+//!
+//! let input = "Package: hello\nVersion: 1.0\n";
+//!
+//! // Owned API - easy to use
+//! let doc: Deb822 = input.parse().unwrap();
+//! let package = doc.iter().next().unwrap().get("Package");
+//!
+//! // Borrowed API - maximum performance
+//! let paragraphs = BorrowedParser::new(input).parse_all().unwrap();
+//! let package = paragraphs[0].get("Package");
+//! ```
 
 #[cfg(feature = "derive")]
 pub use deb822_derive::{FromDeb822, ToDeb822};
 
 pub mod convert;
 pub use convert::{FromDeb822Paragraph, ToDeb822Paragraph};
+
+pub mod borrowed;
+
+/// Canonical field order for source paragraphs in debian/control files
+pub const SOURCE_FIELD_ORDER: &[&str] = &[
+    "Source",
+    "Section",
+    "Priority",
+    "Maintainer",
+    "Uploaders",
+    "Build-Depends",
+    "Build-Depends-Indep",
+    "Build-Depends-Arch",
+    "Build-Conflicts",
+    "Build-Conflicts-Indep",
+    "Build-Conflicts-Arch",
+    "Standards-Version",
+    "Vcs-Browser",
+    "Vcs-Git",
+    "Vcs-Svn",
+    "Vcs-Bzr",
+    "Vcs-Hg",
+    "Vcs-Darcs",
+    "Vcs-Cvs",
+    "Vcs-Arch",
+    "Vcs-Mtn",
+    "Homepage",
+    "Rules-Requires-Root",
+    "Testsuite",
+    "Testsuite-Triggers",
+];
+
+/// Canonical field order for binary packages in debian/control files
+pub const BINARY_FIELD_ORDER: &[&str] = &[
+    "Package",
+    "Architecture",
+    "Section",
+    "Priority",
+    "Multi-Arch",
+    "Essential",
+    "Build-Profiles",
+    "Built-Using",
+    "Pre-Depends",
+    "Depends",
+    "Recommends",
+    "Suggests",
+    "Enhances",
+    "Conflicts",
+    "Breaks",
+    "Replaces",
+    "Provides",
+    "Description",
+];
 
 /// Error type for the parser.
 #[derive(Debug)]
