@@ -936,6 +936,70 @@ impl Deb822 {
         self.insert_empty_paragraph(None)
     }
 
+    /// Swap two paragraphs by their indices.
+    ///
+    /// This method swaps the positions of two paragraphs while preserving their
+    /// content, formatting, whitespace, and comments. The paragraphs at positions
+    /// `index1` and `index2` will exchange places.
+    ///
+    /// # Arguments
+    ///
+    /// * `index1` - The index of the first paragraph to swap
+    /// * `index2` - The index of the second paragraph to swap
+    ///
+    /// # Panics
+    ///
+    /// Panics if either `index1` or `index2` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// let mut d: Deb822 = vec![
+    ///     vec![("Foo", "Bar")].into_iter().collect(),
+    ///     vec![("A", "B")].into_iter().collect(),
+    ///     vec![("X", "Y")].into_iter().collect(),
+    /// ]
+    /// .into_iter()
+    /// .collect();
+    /// d.swap_paragraphs(0, 2);
+    /// assert_eq!(d.to_string(), "X: Y\n\nA: B\n\nFoo: Bar\n");
+    /// ```
+    pub fn swap_paragraphs(&mut self, index1: usize, index2: usize) {
+        if index1 == index2 {
+            return;
+        }
+
+        // Collect all children
+        let mut children: Vec<_> = self.0.children().map(|n| n.clone().into()).collect();
+
+        // Find the child indices for paragraphs
+        let mut para_child_indices = vec![];
+        for (child_idx, child) in self.0.children().enumerate() {
+            if child.kind() == PARAGRAPH {
+                para_child_indices.push(child_idx);
+            }
+        }
+
+        // Validate paragraph indices
+        if index1 >= para_child_indices.len() {
+            panic!("index1 {} out of bounds", index1);
+        }
+        if index2 >= para_child_indices.len() {
+            panic!("index2 {} out of bounds", index2);
+        }
+
+        let child_idx1 = para_child_indices[index1];
+        let child_idx2 = para_child_indices[index2];
+
+        // Swap the children in the vector
+        children.swap(child_idx1, child_idx2);
+
+        // Replace all children
+        let num_children = children.len();
+        self.0.splice_children(0..num_children, children);
+    }
+
     /// Read a deb822 file from the given path.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, Error> {
         let text = std::fs::read_to_string(path)?;
@@ -2475,6 +2539,73 @@ Foo: Bar
         // test delete again
         d.remove_paragraph(0);
         assert_eq!(d.to_string(), "");
+    }
+
+    #[test]
+    fn test_swap_paragraphs() {
+        // Test basic swap
+        let mut d: super::Deb822 = vec![
+            vec![("Foo", "Bar")].into_iter().collect(),
+            vec![("A", "B")].into_iter().collect(),
+            vec![("X", "Y")].into_iter().collect(),
+        ]
+        .into_iter()
+        .collect();
+
+        d.swap_paragraphs(0, 2);
+        assert_eq!(d.to_string(), "X: Y\n\nA: B\n\nFoo: Bar\n");
+
+        // Swap back
+        d.swap_paragraphs(0, 2);
+        assert_eq!(d.to_string(), "Foo: Bar\n\nA: B\n\nX: Y\n");
+
+        // Swap adjacent paragraphs
+        d.swap_paragraphs(0, 1);
+        assert_eq!(d.to_string(), "A: B\n\nFoo: Bar\n\nX: Y\n");
+
+        // Swap with same index should be no-op
+        let before = d.to_string();
+        d.swap_paragraphs(1, 1);
+        assert_eq!(d.to_string(), before);
+    }
+
+    #[test]
+    fn test_swap_paragraphs_preserves_content() {
+        // Test that field content is preserved
+        let mut d: super::Deb822 = vec![
+            vec![("Field1", "Value1"), ("Field2", "Value2")]
+                .into_iter()
+                .collect(),
+            vec![("FieldA", "ValueA"), ("FieldB", "ValueB")]
+                .into_iter()
+                .collect(),
+        ]
+        .into_iter()
+        .collect();
+
+        d.swap_paragraphs(0, 1);
+
+        let mut paras = d.paragraphs();
+        let p1 = paras.next().unwrap();
+        assert_eq!(p1.get("FieldA").as_deref(), Some("ValueA"));
+        assert_eq!(p1.get("FieldB").as_deref(), Some("ValueB"));
+
+        let p2 = paras.next().unwrap();
+        assert_eq!(p2.get("Field1").as_deref(), Some("Value1"));
+        assert_eq!(p2.get("Field2").as_deref(), Some("Value2"));
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn test_swap_paragraphs_out_of_bounds() {
+        let mut d: super::Deb822 = vec![
+            vec![("Foo", "Bar")].into_iter().collect(),
+            vec![("A", "B")].into_iter().collect(),
+        ]
+        .into_iter()
+        .collect();
+
+        d.swap_paragraphs(0, 5);
     }
 
     #[test]
