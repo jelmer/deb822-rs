@@ -39,6 +39,24 @@ use crate::{License, CURRENT_FORMAT, KNOWN_FORMATS};
 use deb822_lossless::{Deb822, Paragraph};
 use std::path::Path;
 
+/// Field order for header paragraphs according to DEP-5 specification
+const HEADER_FIELD_ORDER: &[&str] = &[
+    "Format",
+    "Upstream-Name",
+    "Upstream-Contact",
+    "Source",
+    "Disclaimer",
+    "Comment",
+    "License",
+    "Copyright",
+];
+
+/// Field order for Files paragraphs according to DEP-5 specification
+const FILES_FIELD_ORDER: &[&str] = &["Files", "Copyright", "License", "Comment"];
+
+/// Field order for standalone License paragraphs according to DEP-5 specification
+const LICENSE_FIELD_ORDER: &[&str] = &["License", "Comment"];
+
 /// A copyright file
 #[derive(Debug)]
 pub struct Copyright(Deb822);
@@ -142,14 +160,14 @@ impl Copyright {
         license: &License,
     ) -> FilesParagraph {
         let mut para = self.0.add_paragraph();
-        para.set("Files", &files.join(" "));
-        para.set("Copyright", &copyright.join("\n"));
+        para.set_with_field_order("Files", &files.join(" "), FILES_FIELD_ORDER);
+        para.set_with_field_order("Copyright", &copyright.join("\n"), FILES_FIELD_ORDER);
         let license_text = match license {
             License::Name(name) => name.to_string(),
             License::Named(name, text) => format!("{}\n{}", name, text),
             License::Text(text) => text.to_string(),
         };
-        para.set("License", &license_text);
+        para.set_with_field_order("License", &license_text, FILES_FIELD_ORDER);
         FilesParagraph(para)
     }
 
@@ -163,7 +181,7 @@ impl Copyright {
             License::Named(name, text) => format!("{}\n{}", name, text),
             License::Text(text) => text.to_string(),
         };
-        para.set("License", &license_text);
+        para.set_with_field_order("License", &license_text, LICENSE_FIELD_ORDER);
         LicenseParagraph(para)
     }
 
@@ -318,7 +336,8 @@ impl Header {
 
     /// Set the upstream name
     pub fn set_upstream_name(&mut self, name: &str) {
-        self.0.set("Upstream-Name", name);
+        self.0
+            .set_with_field_order("Upstream-Name", name, HEADER_FIELD_ORDER);
     }
 
     /// Upstream contact
@@ -328,7 +347,8 @@ impl Header {
 
     /// Set the upstream contact
     pub fn set_upstream_contact(&mut self, contact: &str) {
-        self.0.set("Upstream-Contact", contact);
+        self.0
+            .set_with_field_order("Upstream-Contact", contact, HEADER_FIELD_ORDER);
     }
 
     /// Source
@@ -338,7 +358,8 @@ impl Header {
 
     /// Set the source
     pub fn set_source(&mut self, source: &str) {
-        self.0.set("Source", source);
+        self.0
+            .set_with_field_order("Source", source, HEADER_FIELD_ORDER);
     }
 
     /// List of files excluded from the copyright information, as well as the source package
@@ -350,7 +371,8 @@ impl Header {
 
     /// Set excluded files
     pub fn set_files_excluded(&mut self, files: &[&str]) {
-        self.0.set("Files-Excluded", &files.join("\n"));
+        self.0
+            .set_with_field_order("Files-Excluded", &files.join("\n"), HEADER_FIELD_ORDER);
     }
 
     /// Fix the the header paragraph
@@ -413,7 +435,8 @@ impl FilesParagraph {
 
     /// Set the copyright
     pub fn set_copyright(&mut self, authors: &[&str]) {
-        self.0.set("Copyright", &authors.join("\n"));
+        self.0
+            .set_with_field_order("Copyright", &authors.join("\n"), FILES_FIELD_ORDER);
     }
 
     /// Comment associated with the files paragraph
@@ -423,7 +446,8 @@ impl FilesParagraph {
 
     /// Set the comment associated with the files paragraph
     pub fn set_comment(&mut self, comment: &str) {
-        self.0.set("Comment", comment);
+        self.0
+            .set_with_field_order("Comment", comment, FILES_FIELD_ORDER);
     }
 
     /// License in the paragraph
@@ -449,7 +473,8 @@ impl FilesParagraph {
             License::Named(name, text) => format!("{}\n{}", name, text),
             License::Text(text) => text.to_string(),
         };
-        self.0.set("License", &text);
+        self.0
+            .set_with_field_order("License", &text, FILES_FIELD_ORDER);
     }
 }
 
@@ -480,7 +505,8 @@ impl LicenseParagraph {
 
     /// Set the comment associated with the license
     pub fn set_comment(&mut self, comment: &str) {
-        self.0.set("Comment", comment);
+        self.0
+            .set_with_field_order("Comment", comment, LICENSE_FIELD_ORDER);
     }
 
     /// Name of the license
@@ -504,7 +530,8 @@ impl LicenseParagraph {
             License::Named(name, text) => format!("{}\n{}", name, text),
             License::Text(text) => text.to_string(),
         };
-        self.0.set("License", &text);
+        self.0
+            .set_with_field_order("License", &text, LICENSE_FIELD_ORDER);
     }
 }
 
@@ -743,8 +770,8 @@ License: GPL-3+
         assert_eq!(
             copyright.to_string(),
             "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
-             Copyright: 2024 John Doe\n           2024 Jane Doe\n\
              Files: src/* *.rs\n\
+             Copyright: 2024 John Doe\n           2024 Jane Doe\n\
              License: GPL-3+\n"
         );
     }
@@ -770,8 +797,8 @@ License: GPL-3+
         assert_eq!(
             copyright.to_string(),
             "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
-             Copyright: 2024 Test Author\n\
              Files: *\n\
+             Copyright: 2024 Test Author\n\
              License: MIT\n         Permission is hereby granted...\n"
         );
     }
@@ -834,11 +861,11 @@ License: GPL-3+
         assert_eq!(
             copyright.to_string(),
             "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
-             Copyright: 2024 Author One\n\
              Files: src/*\n\
+             Copyright: 2024 Author One\n\
              License: MIT\n\n\
-             Copyright: 2024 Author Two\n\
              Files: debian/*\n\
+             Copyright: 2024 Author Two\n\
              License: GPL-3+\n\n\
              License: GPL-3+\n         Full GPL-3+ text here.\n"
         );
