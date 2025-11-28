@@ -961,4 +961,33 @@ License: GPL-3+
         // Verify the paragraph was removed
         assert_eq!(0, copyright.iter_files().count());
     }
+
+    #[test]
+    fn test_field_order_with_comment() {
+        // Test that fields follow DEP-5 order: Files, Copyright, License, Comment
+        let mut copyright = super::Copyright::new();
+
+        let files = vec!["*"];
+        let copyrights = vec!["Unknown"];
+        let license = crate::License::Name("GPL-2+".to_string());
+
+        let mut para = copyright.add_files(&files, &copyrights, &license);
+        para.set_comment("Test comment");
+
+        let output = copyright.to_string();
+
+        // Expected order: Format, blank line, Files, Copyright, License, Comment
+        let expected =
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
+                        Files: *\n\
+                        Copyright: Unknown\n\
+                        License: GPL-2+\n\
+                        Comment: Test comment\n";
+
+        assert_eq!(
+            output, expected,
+            "Fields should be in DEP-5 order (Files, Copyright, License, Comment), but got:\n{}",
+            output
+        );
+    }
 }
