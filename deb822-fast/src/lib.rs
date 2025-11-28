@@ -13,9 +13,10 @@
 //! - Can be stored, moved, and outlive the source string
 //! - Good performance with moderate allocations
 //!
-//! ### Borrowed API (zero-copy)
-//! The [`borrowed`] module provides a zero-allocation API using borrowed string slices.
-//! - Maximum performance - no string allocations
+//! ### Borrowed API (low-allocation)
+//! The [`borrowed`] module provides a low-allocation API using borrowed string slices.
+//! - Maximum performance - avoids allocating owned Strings for field data
+//! - Still allocates Vec structures for paragraphs and fields
 //! - Requires lifetime management
 //! - Data cannot outlive the source string
 //! - Best for parsing large files where you process data immediately
