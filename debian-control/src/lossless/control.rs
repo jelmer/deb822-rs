@@ -1134,7 +1134,12 @@ impl Binary {
     /// Set the binary package description
     pub fn set_description(&mut self, description: Option<&str>) {
         if let Some(description) = description {
-            self.set("Description", description);
+            self.0.set_with_indent_pattern(
+                "Description",
+                description,
+                Some(&deb822_lossless::IndentPattern::Fixed(1)),
+                Some(BINARY_FIELD_ORDER),
+            );
         } else {
             self.0.remove("Description");
         }
