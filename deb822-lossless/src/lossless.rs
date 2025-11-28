@@ -42,6 +42,11 @@ use rowan::ast::AstNode;
 use std::path::Path;
 use std::str::FromStr;
 
+// TODO: SOURCE_FIELD_ORDER and BINARY_FIELD_ORDER are Debian-specific and should
+// really be defined in the debian-control crate instead of here in the generic
+// deb822-lossless parser. They are currently here for historical reasons and to
+// avoid breaking existing code, but should be moved in a future breaking release.
+
 /// Canonical field order for source paragraphs in debian/control files
 pub const SOURCE_FIELD_ORDER: &[&str] = &[
     "Source",
