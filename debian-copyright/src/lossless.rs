@@ -76,7 +76,9 @@ impl Copyright {
     pub fn iter_licenses(&self) -> impl Iterator<Item = LicenseParagraph> {
         self.0
             .paragraphs()
-            .filter(|x| !x.contains_key("Files") && x.contains_key("License"))
+            .filter(|x| {
+                !x.contains_key("Files") && !x.contains_key("Format") && x.contains_key("License")
+            })
             .map(LicenseParagraph)
     }
 
@@ -128,6 +130,41 @@ impl Copyright {
         let text = std::fs::read_to_string(path)?;
         use std::str::FromStr;
         Self::from_str(&text)
+    }
+
+    /// Add a new files paragraph
+    ///
+    /// Returns a mutable reference to the newly created FilesParagraph
+    pub fn add_files(
+        &mut self,
+        files: &[&str],
+        copyright: &[&str],
+        license: &License,
+    ) -> FilesParagraph {
+        let mut para = self.0.add_paragraph();
+        para.set("Files", &files.join(" "));
+        para.set("Copyright", &copyright.join("\n"));
+        let license_text = match license {
+            License::Name(name) => name.to_string(),
+            License::Named(name, text) => format!("{}\n{}", name, text),
+            License::Text(text) => text.to_string(),
+        };
+        para.set("License", &license_text);
+        FilesParagraph(para)
+    }
+
+    /// Add a new license paragraph
+    ///
+    /// Returns a mutable reference to the newly created LicenseParagraph
+    pub fn add_license(&mut self, license: &License) -> LicenseParagraph {
+        let mut para = self.0.add_paragraph();
+        let license_text = match license {
+            License::Name(name) => name.to_string(),
+            License::Named(name, text) => format!("{}\n{}", name, text),
+            License::Text(text) => text.to_string(),
+        };
+        para.set("License", &license_text);
+        LicenseParagraph(para)
     }
 }
 
@@ -605,5 +642,152 @@ License: GPL-3+
 
         assert_eq!(license.name().unwrap(), "MIT");
         assert_eq!(license.text().unwrap(), "Permission is hereby granted...");
+    }
+
+    #[test]
+    fn test_iter_licenses_excludes_header() {
+        // Test that iter_licenses does not include the header paragraph even if it has a License field
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: foo
+License: GPL-3+
+
+Files: *
+Copyright: 2020 Joe Bloggs
+License: MIT
+
+License: GPL-3+
+ This is the GPL-3+ license text.
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let licenses: Vec<_> = copyright.iter_licenses().collect();
+
+        // Should only have the standalone License paragraph, not the header
+        assert_eq!(1, licenses.len());
+        assert_eq!("GPL-3+", licenses[0].name().unwrap());
+        assert_eq!(
+            "This is the GPL-3+ license text.",
+            licenses[0].text().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_add_files() {
+        let mut copyright = super::Copyright::new();
+        let license = crate::License::Name("GPL-3+".to_string());
+        copyright.add_files(
+            &["src/*", "*.rs"],
+            &["2024 John Doe", "2024 Jane Doe"],
+            &license,
+        );
+
+        let files: Vec<_> = copyright.iter_files().collect();
+        assert_eq!(1, files.len());
+        assert_eq!(vec!["src/*", "*.rs"], files[0].files());
+        assert_eq!(vec!["2024 John Doe", "2024 Jane Doe"], files[0].copyright());
+        assert_eq!("GPL-3+", files[0].license().unwrap().name().unwrap());
+
+        // Verify the generated format
+        assert_eq!(
+            copyright.to_string(),
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
+             Copyright: 2024 John Doe\n           2024 Jane Doe\n\
+             Files: src/* *.rs\n\
+             License: GPL-3+\n"
+        );
+    }
+
+    #[test]
+    fn test_add_files_with_license_text() {
+        let mut copyright = super::Copyright::new();
+        let license = crate::License::Named(
+            "MIT".to_string(),
+            "Permission is hereby granted...".to_string(),
+        );
+        copyright.add_files(&["*"], &["2024 Test Author"], &license);
+
+        let files: Vec<_> = copyright.iter_files().collect();
+        assert_eq!(1, files.len());
+        assert_eq!("MIT", files[0].license().unwrap().name().unwrap());
+        assert_eq!(
+            "Permission is hereby granted...",
+            files[0].license().unwrap().text().unwrap()
+        );
+
+        // Verify the generated format
+        assert_eq!(
+            copyright.to_string(),
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
+             Copyright: 2024 Test Author\n\
+             Files: *\n\
+             License: MIT\n         Permission is hereby granted...\n"
+        );
+    }
+
+    #[test]
+    fn test_add_license() {
+        let mut copyright = super::Copyright::new();
+        let license = crate::License::Named(
+            "GPL-3+".to_string(),
+            "This is the GPL-3+ license text.".to_string(),
+        );
+        copyright.add_license(&license);
+
+        let licenses: Vec<_> = copyright.iter_licenses().collect();
+        assert_eq!(1, licenses.len());
+        assert_eq!("GPL-3+", licenses[0].name().unwrap());
+        assert_eq!(
+            "This is the GPL-3+ license text.",
+            licenses[0].text().unwrap()
+        );
+
+        // Verify the generated format
+        assert_eq!(
+            copyright.to_string(),
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
+             License: GPL-3+\n         This is the GPL-3+ license text.\n"
+        );
+    }
+
+    #[test]
+    fn test_add_multiple_paragraphs() {
+        let mut copyright = super::Copyright::new();
+
+        // Add a files paragraph
+        let license1 = crate::License::Name("MIT".to_string());
+        copyright.add_files(&["src/*"], &["2024 Author One"], &license1);
+
+        // Add another files paragraph
+        let license2 = crate::License::Name("GPL-3+".to_string());
+        copyright.add_files(&["debian/*"], &["2024 Author Two"], &license2);
+
+        // Add a license paragraph
+        let license3 =
+            crate::License::Named("GPL-3+".to_string(), "Full GPL-3+ text here.".to_string());
+        copyright.add_license(&license3);
+
+        // Verify all paragraphs were added
+        assert_eq!(2, copyright.iter_files().count());
+        assert_eq!(1, copyright.iter_licenses().count());
+
+        let files: Vec<_> = copyright.iter_files().collect();
+        assert_eq!(vec!["src/*"], files[0].files());
+        assert_eq!(vec!["debian/*"], files[1].files());
+
+        let licenses: Vec<_> = copyright.iter_licenses().collect();
+        assert_eq!("GPL-3+", licenses[0].name().unwrap());
+        assert_eq!("Full GPL-3+ text here.", licenses[0].text().unwrap());
+
+        // Verify the generated format
+        assert_eq!(
+            copyright.to_string(),
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
+             Copyright: 2024 Author One\n\
+             Files: src/*\n\
+             License: MIT\n\n\
+             Copyright: 2024 Author Two\n\
+             Files: debian/*\n\
+             License: GPL-3+\n\n\
+             License: GPL-3+\n         Full GPL-3+ text here.\n"
+        );
     }
 }
