@@ -42,6 +42,11 @@ use rowan::ast::AstNode;
 use std::path::Path;
 use std::str::FromStr;
 
+// TODO: SOURCE_FIELD_ORDER and BINARY_FIELD_ORDER are Debian-specific and should
+// really be defined in the debian-control crate instead of here in the generic
+// deb822-lossless parser. They are currently here for historical reasons and to
+// avoid breaking existing code, but should be moved in a future breaking release.
+
 /// Canonical field order for source paragraphs in debian/control files
 pub const SOURCE_FIELD_ORDER: &[&str] = &[
     "Source",
@@ -1252,7 +1257,7 @@ impl<'a> FromIterator<(&'a str, &'a str)> for Paragraph {
 
 /// Detected indentation pattern for multi-line field values
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum IndentPattern {
+pub enum IndentPattern {
     /// All fields use a fixed number of spaces for indentation
     Fixed(usize),
     /// Each field's indentation matches its field name length + 2 (for ": ")
@@ -1570,28 +1575,6 @@ impl Paragraph {
 
     /// Set a field in the paragraph, inserting at the appropriate location if new
     pub fn set(&mut self, key: &str, value: &str) {
-        // Check if the field already exists and extract its indentation
-        // Otherwise, detect the indentation pattern from existing fields
-        let indent = self
-            .entries()
-            .find(|entry| entry.key().as_deref() == Some(key))
-            .and_then(|entry| entry.get_indent())
-            .unwrap_or_else(|| self.detect_indent_pattern().to_string(key));
-
-        let new_entry = Entry::with_indentation(key, value, &indent);
-
-        // Check if the field already exists and replace it
-        for entry in self.entries() {
-            if entry.key().as_deref() == Some(key) {
-                self.0.splice_children(
-                    entry.0.index()..entry.0.index() + 1,
-                    vec![new_entry.0.into()],
-                );
-                return;
-            }
-        }
-
-        // Field doesn't exist, insert at appropriate location
         // Try to detect if this is a source or binary package paragraph
         let field_order = if self.contains_key("Source") {
             SOURCE_FIELD_ORDER
@@ -1617,23 +1600,51 @@ impl Paragraph {
             }
         };
 
-        let insertion_index = self.find_insertion_index(key, field_order);
-        self.0
-            .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
+        self.set_with_indent_pattern(key, value, None, Some(field_order));
     }
 
     /// Set a field using a specific field ordering
     pub fn set_with_field_order(&mut self, key: &str, value: &str, field_order: &[&str]) {
+        self.set_with_indent_pattern(key, value, None, Some(field_order));
+    }
+
+    /// Set a field with optional default indentation pattern and field ordering.
+    ///
+    /// This method allows setting a field while optionally specifying a default indentation pattern
+    /// to use when the field doesn't already have multi-line indentation to preserve.
+    /// If the field already exists and is multi-line, its existing indentation is preserved.
+    ///
+    /// # Arguments
+    /// * `key` - The field name
+    /// * `value` - The field value
+    /// * `default_indent_pattern` - Optional default indentation pattern to use for new fields or
+    ///   fields without existing multi-line indentation. If None, will preserve existing field's
+    ///   indentation or auto-detect from other fields
+    /// * `field_order` - Optional field ordering for positioning the field. If None, inserts at end
+    pub fn set_with_indent_pattern(
+        &mut self,
+        key: &str,
+        value: &str,
+        default_indent_pattern: Option<&IndentPattern>,
+        field_order: Option<&[&str]>,
+    ) {
         // Check if the field already exists and extract its formatting
-        // Otherwise, detect the indentation pattern from existing fields
         let existing_entry = self
             .entries()
             .find(|entry| entry.key().as_deref() == Some(key));
 
+        // Determine indentation to use
         let indent = existing_entry
             .as_ref()
             .and_then(|entry| entry.get_indent())
-            .unwrap_or_else(|| self.detect_indent_pattern().to_string(key));
+            .unwrap_or_else(|| {
+                // No existing indentation, use default pattern or auto-detect
+                if let Some(pattern) = default_indent_pattern {
+                    pattern.to_string(key)
+                } else {
+                    self.detect_indent_pattern().to_string(key)
+                }
+            });
 
         let post_colon_ws = existing_entry
             .as_ref()
@@ -1653,9 +1664,17 @@ impl Paragraph {
             }
         }
 
-        let insertion_index = self.find_insertion_index(key, field_order);
-        self.0
-            .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
+        // Insert new field
+        if let Some(order) = field_order {
+            let insertion_index = self.find_insertion_index(key, order);
+            self.0
+                .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
+        } else {
+            // Insert at the end if no field order specified
+            let insertion_index = self.0.children_with_tokens().count();
+            self.0
+                .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
+        }
     }
 
     /// Find the appropriate insertion index for a new field based on field ordering
@@ -3772,6 +3791,168 @@ Depends: lib1,
             entry.to_string(),
             "Test-Field: value1\n    value2\n    value3\n"
         );
+    }
+
+    #[test]
+    fn test_set_with_indent_pattern_fixed() {
+        // Test setting a field with explicit fixed indentation pattern
+        let original = r#"Source: example
+Maintainer: Test <test@example.com>
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a new multi-line field with fixed 4-space indentation
+        para.set_with_indent_pattern(
+            "Depends",
+            "foo,\nbar,\nbaz",
+            Some(&super::IndentPattern::Fixed(4)),
+            None,
+        );
+
+        // Should use the specified 4-space indentation
+        let expected = r#"Source: example
+Maintainer: Test <test@example.com>
+Depends: foo,
+    bar,
+    baz
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_set_with_indent_pattern_field_name_length() {
+        // Test setting a field with field-name-length indentation pattern
+        let original = r#"Source: example
+Maintainer: Test <test@example.com>
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a new multi-line field with field-name-length indentation
+        para.set_with_indent_pattern(
+            "Build-Depends",
+            "libfoo,\nlibbar,\nlibbaz",
+            Some(&super::IndentPattern::FieldNameLength),
+            None,
+        );
+
+        // "Build-Depends: " is 15 characters, so indentation should be 15 spaces
+        let expected = r#"Source: example
+Maintainer: Test <test@example.com>
+Build-Depends: libfoo,
+               libbar,
+               libbaz
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_set_with_indent_pattern_override_auto_detection() {
+        // Test that explicit default pattern overrides auto-detection for new fields
+        let original = r#"Source: example
+Build-Depends: foo,
+               bar,
+               baz
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a NEW field with fixed 2-space indentation, overriding the auto-detected pattern
+        para.set_with_indent_pattern(
+            "Depends",
+            "lib1,\nlib2,\nlib3",
+            Some(&super::IndentPattern::Fixed(2)),
+            None,
+        );
+
+        // Should use the specified 2-space indentation, not the auto-detected 15-space
+        let expected = r#"Source: example
+Build-Depends: foo,
+               bar,
+               baz
+Depends: lib1,
+  lib2,
+  lib3
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_set_with_indent_pattern_none_auto_detects() {
+        // Test that None pattern auto-detects from existing fields
+        let original = r#"Source: example
+Build-Depends: foo,
+     bar,
+     baz
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a field with None pattern - should auto-detect fixed 5-space
+        para.set_with_indent_pattern("Depends", "lib1,\nlib2", None, None);
+
+        // Should auto-detect and use the 5-space indentation
+        let expected = r#"Source: example
+Build-Depends: foo,
+     bar,
+     baz
+Depends: lib1,
+     lib2
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_set_with_indent_pattern_with_field_order() {
+        // Test setting a field with both indent pattern and field ordering
+        let original = r#"Source: example
+Maintainer: Test <test@example.com>
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a field with fixed indentation and specific field ordering
+        para.set_with_indent_pattern(
+            "Priority",
+            "optional",
+            Some(&super::IndentPattern::Fixed(4)),
+            Some(super::SOURCE_FIELD_ORDER),
+        );
+
+        // Priority should be inserted between Source and Maintainer
+        let expected = r#"Source: example
+Priority: optional
+Maintainer: Test <test@example.com>
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_set_with_indent_pattern_replace_existing() {
+        // Test that replacing an existing multi-line field preserves its indentation
+        let original = r#"Source: example
+Depends: foo,
+         bar
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Replace Depends - the default pattern is ignored, existing indentation is preserved
+        para.set_with_indent_pattern(
+            "Depends",
+            "lib1,\nlib2,\nlib3",
+            Some(&super::IndentPattern::Fixed(3)),
+            None,
+        );
+
+        // Should preserve the existing 9-space indentation, not use the default 3-space
+        let expected = r#"Source: example
+Depends: lib1,
+         lib2,
+         lib3
+"#;
+        assert_eq!(para.to_string(), expected);
     }
 
     #[test]
