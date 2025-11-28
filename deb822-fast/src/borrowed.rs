@@ -10,48 +10,61 @@
 
 use crate::Error;
 
+/// Field value representation that avoids allocation for single-line fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldValue<'a> {
+    /// Single-line field (no allocation)
+    Single(&'a str),
+    /// Multi-line field with continuation lines
+    Multi(Vec<&'a str>),
+}
+
 /// A borrowed field that references data in the source string.
 ///
-/// The name is always borrowed. The value is a vector of borrowed string slices,
-/// one per line. Single-line fields have a one-element vector. Multi-line fields
-/// have multiple elements (one for each continuation line).
+/// The name is always borrowed. The value is either a single line or multiple lines.
+/// Single-line fields (the common case) avoid Vec allocation entirely.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BorrowedField<'a> {
     /// The field name (borrowed from source)
     pub name: &'a str,
-    /// The field value as a vector of lines (zero-copy)
-    pub value: Vec<&'a str>,
+    /// The field value (single or multiple lines)
+    pub value: FieldValue<'a>,
 }
 
 impl<'a> BorrowedField<'a> {
     /// Get the value as a single line (for single-line fields).
     /// Returns None if the field has multiple lines.
     pub fn as_single_line(&self) -> Option<&'a str> {
-        if self.value.len() == 1 {
-            Some(self.value[0])
-        } else {
-            None
+        match &self.value {
+            FieldValue::Single(s) => Some(s),
+            FieldValue::Multi(_) => None,
         }
     }
 
     /// Get the value lines as a slice.
     pub fn lines(&self) -> &[&'a str] {
-        &self.value
+        match &self.value {
+            FieldValue::Single(s) => std::slice::from_ref(s),
+            FieldValue::Multi(v) => v.as_slice(),
+        }
     }
 
     /// Join the value lines into an owned String with newlines.
     pub fn join(&self) -> String {
-        self.value.join("\n")
+        match &self.value {
+            FieldValue::Single(s) => s.to_string(),
+            FieldValue::Multi(v) => v.join("\n"),
+        }
     }
 
     /// Check if this is a single-line field.
     pub fn is_single_line(&self) -> bool {
-        self.value.len() == 1
+        matches!(self.value, FieldValue::Single(_))
     }
 
     /// Check if this is a multi-line field.
     pub fn is_multi_line(&self) -> bool {
-        self.value.len() > 1
+        matches!(self.value, FieldValue::Multi(_))
     }
 }
 
@@ -122,7 +135,7 @@ impl<'a> BorrowedParser<'a> {
     /// Note: This still allocates the Vec and field lists, but the strings
     /// themselves are borrowed.
     pub fn parse_all(mut self) -> Result<Vec<BorrowedParagraph<'a>>, Error> {
-        let mut paragraphs = Vec::new();
+        let mut paragraphs = Vec::with_capacity(16);
 
         while let Some(para) = self.next_paragraph()? {
             paragraphs.push(para);
@@ -180,7 +193,7 @@ impl<'a> BorrowedParser<'a> {
             }
         }
 
-        let mut fields: Vec<BorrowedField<'a>> = Vec::new();
+        let mut fields: Vec<BorrowedField<'a>> = Vec::with_capacity(8);
 
         loop {
             if self.pos >= len {
@@ -231,8 +244,18 @@ impl<'a> BorrowedParser<'a> {
                 }
 
                 if let Some(last_field) = fields.last_mut() {
-                    // Add the continuation line as a new slice
-                    last_field.value.push(&self.input[line_start..self.pos]);
+                    // Add the continuation line - convert Single to Multi if needed
+                    match &mut last_field.value {
+                        FieldValue::Single(first) => {
+                            // Convert to Multi with two lines
+                            let first = *first;
+                            last_field.value =
+                                FieldValue::Multi(vec![first, &self.input[line_start..self.pos]]);
+                        }
+                        FieldValue::Multi(lines) => {
+                            lines.push(&self.input[line_start..self.pos]);
+                        }
+                    }
                 }
 
                 if self.pos < len {
@@ -284,7 +307,7 @@ impl<'a> BorrowedParser<'a> {
                 self.pos += 1;
             }
 
-            let value = vec![&self.input[value_start..self.pos]];
+            let value = FieldValue::Single(&self.input[value_start..self.pos]);
 
             fields.push(BorrowedField { name, value });
 
@@ -383,7 +406,7 @@ mod tests {
         let fields: Vec<_> = paragraphs[0].iter().collect();
         assert_eq!(fields.len(), 3);
         assert_eq!(fields[0].name, "A");
-        assert_eq!(fields[0].value, vec!["1"]);
+        assert_eq!(fields[0].value, FieldValue::Single("1"));
         assert_eq!(fields[0].as_single_line(), Some("1"));
     }
 
