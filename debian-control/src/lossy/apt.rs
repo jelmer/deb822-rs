@@ -2,6 +2,22 @@
 use crate::lossy::Relations;
 use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 
+fn deserialize_yesno(s: &str) -> Result<bool, String> {
+    match s {
+        "yes" => Ok(true),
+        "no" => Ok(false),
+        _ => Err(format!("invalid value for yesno: {}", s)),
+    }
+}
+
+fn serialize_yesno(b: &bool) -> String {
+    if *b {
+        "yes".to_string()
+    } else {
+        "no".to_string()
+    }
+}
+
 fn deserialize_components(value: &str) -> Result<Vec<String>, String> {
     Ok(value.split_whitespace().map(|s| s.to_string()).collect())
 }
@@ -61,15 +77,15 @@ pub struct Release {
     /// Date the release was published
     pub date: String,
 
-    #[deb822(field = "NotAutomatic")]
+    #[deb822(field = "NotAutomatic", deserialize_with = deserialize_yesno, serialize_with = serialize_yesno)]
     /// Whether the release is not automatic
     pub not_automatic: bool,
 
-    #[deb822(field = "ButAutomaticUpgrades")]
+    #[deb822(field = "ButAutomaticUpgrades", deserialize_with = deserialize_yesno, serialize_with = serialize_yesno)]
     /// Indicates if packages retrieved from this release should be automatically upgraded
     pub but_automatic_upgrades: bool,
 
-    #[deb822(field = "Acquire-By-Hash")]
+    #[deb822(field = "Acquire-By-Hash", deserialize_with = deserialize_yesno, serialize_with = serialize_yesno)]
     /// Whether packages files can be acquired by hash
     pub acquire_by_hash: bool,
 }
@@ -297,7 +313,7 @@ pub struct Package {
     pub section: Option<String>,
 
     /// Essential
-    #[deb822(field = "Essential")]
+    #[deb822(field = "Essential", deserialize_with = deserialize_yesno, serialize_with = serialize_yesno)]
     pub essential: Option<bool>,
 
     /// Tag
@@ -372,9 +388,9 @@ Label: Ubuntu
 Suite: focal
 Version: 20.04
 Date: Thu, 23 Apr 2020 17:19:19 UTC
-NotAutomatic: false
-ButAutomaticUpgrades: true
-Acquire-By-Hash: true
+NotAutomatic: no
+ButAutomaticUpgrades: yes
+Acquire-By-Hash: yes
 "#;
 
         let para = deb822.parse::<Paragraph>().unwrap();
@@ -402,5 +418,33 @@ Suggests: apt-doc, aptitude | synaptic | wajig
         assert_eq!(package.name, "apt");
         assert_eq!(package.version, "2.1.10".parse().unwrap());
         assert_eq!(package.architecture, "amd64");
+    }
+
+    #[test]
+    fn test_package_essential() {
+        let package = r#"Package: base-files
+Version: 11.1
+Architecture: amd64
+Essential: yes
+"#;
+
+        let package: Package = package.parse().unwrap();
+
+        assert_eq!(package.name, "base-files");
+        assert_eq!(package.essential, Some(true));
+    }
+
+    #[test]
+    fn test_package_essential_no() {
+        let package = r#"Package: apt
+Version: 2.1.10
+Architecture: amd64
+Essential: no
+"#;
+
+        let package: Package = package.parse().unwrap();
+
+        assert_eq!(package.name, "apt");
+        assert_eq!(package.essential, Some(false));
     }
 }
