@@ -1,6 +1,6 @@
 [package]
 name = "deb822-fast"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 repository.workspace = true
 homepage.workspace = true
