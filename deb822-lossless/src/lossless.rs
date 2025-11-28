@@ -42,62 +42,6 @@ use rowan::ast::AstNode;
 use std::path::Path;
 use std::str::FromStr;
 
-// TODO: SOURCE_FIELD_ORDER and BINARY_FIELD_ORDER are Debian-specific and should
-// really be defined in the debian-control crate instead of here in the generic
-// deb822-lossless parser. They are currently here for historical reasons and to
-// avoid breaking existing code, but should be moved in a future breaking release.
-
-/// Canonical field order for source paragraphs in debian/control files
-pub const SOURCE_FIELD_ORDER: &[&str] = &[
-    "Source",
-    "Section",
-    "Priority",
-    "Maintainer",
-    "Uploaders",
-    "Build-Depends",
-    "Build-Depends-Indep",
-    "Build-Depends-Arch",
-    "Build-Conflicts",
-    "Build-Conflicts-Indep",
-    "Build-Conflicts-Arch",
-    "Standards-Version",
-    "Vcs-Browser",
-    "Vcs-Git",
-    "Vcs-Svn",
-    "Vcs-Bzr",
-    "Vcs-Hg",
-    "Vcs-Darcs",
-    "Vcs-Cvs",
-    "Vcs-Arch",
-    "Vcs-Mtn",
-    "Homepage",
-    "Rules-Requires-Root",
-    "Testsuite",
-    "Testsuite-Triggers",
-];
-
-/// Canonical field order for binary packages in debian/control files
-pub const BINARY_FIELD_ORDER: &[&str] = &[
-    "Package",
-    "Architecture",
-    "Section",
-    "Priority",
-    "Multi-Arch",
-    "Essential",
-    "Build-Profiles",
-    "Built-Using",
-    "Pre-Depends",
-    "Depends",
-    "Recommends",
-    "Suggests",
-    "Enhances",
-    "Conflicts",
-    "Breaks",
-    "Replaces",
-    "Provides",
-    "Description",
-];
-
 /// A positioned parse error containing location information.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PositionedParseError {
@@ -1575,32 +1519,7 @@ impl Paragraph {
 
     /// Set a field in the paragraph, inserting at the appropriate location if new
     pub fn set(&mut self, key: &str, value: &str) {
-        // Try to detect if this is a source or binary package paragraph
-        let field_order = if self.contains_key("Source") {
-            SOURCE_FIELD_ORDER
-        } else if self.contains_key("Package") {
-            BINARY_FIELD_ORDER
-        } else {
-            // Default to trying both, preferring source if the new field is "Source"
-            if key == "Source" {
-                SOURCE_FIELD_ORDER
-            } else if key == "Package" {
-                BINARY_FIELD_ORDER
-            } else {
-                // Try to determine based on existing fields
-                let has_source_fields = self.keys().any(|k| {
-                    SOURCE_FIELD_ORDER.contains(&k.as_str())
-                        && !BINARY_FIELD_ORDER.contains(&k.as_str())
-                });
-                if has_source_fields {
-                    SOURCE_FIELD_ORDER
-                } else {
-                    BINARY_FIELD_ORDER
-                }
-            }
-        };
-
-        self.set_with_indent_pattern(key, value, None, Some(field_order));
+        self.set_with_indent_pattern(key, value, None, None);
     }
 
     /// Set a field using a specific field ordering
@@ -2975,66 +2894,6 @@ C: D
     }
 
     #[test]
-    fn test_set_field_ordering_source() {
-        let mut p = super::Paragraph::new();
-
-        // Add fields in random order
-        p.set("Homepage", "https://example.com");
-        p.set("Source", "mypackage");
-        p.set("Build-Depends", "debhelper");
-        p.set("Maintainer", "Test <test@example.com>");
-        p.set("Standards-Version", "4.5.0");
-
-        // Check that fields are in the expected order
-        let keys: Vec<_> = p.keys().collect();
-        assert_eq!(keys[0], "Source");
-        assert_eq!(keys[1], "Maintainer");
-        assert_eq!(keys[2], "Build-Depends");
-        assert_eq!(keys[3], "Standards-Version");
-        assert_eq!(keys[4], "Homepage");
-    }
-
-    #[test]
-    fn test_set_field_ordering_binary() {
-        let mut p = super::Paragraph::new();
-
-        // Add fields in random order
-        p.set("Description", "A test package");
-        p.set("Package", "mypackage");
-        p.set("Depends", "libc6");
-        p.set("Architecture", "amd64");
-        p.set("Section", "utils");
-
-        // Check that fields are in the expected order
-        let keys: Vec<_> = p.keys().collect();
-        assert_eq!(keys[0], "Package");
-        assert_eq!(keys[1], "Architecture");
-        assert_eq!(keys[2], "Section");
-        assert_eq!(keys[3], "Depends");
-        assert_eq!(keys[4], "Description");
-    }
-
-    #[test]
-    fn test_set_field_ordering_mixed() {
-        let mut p = super::Paragraph::new();
-
-        // Add some known fields and some unknown fields
-        p.set("Package", "mypackage");
-        p.set("X-Custom-Field", "custom");
-        p.set("Architecture", "all");
-        p.set("Another-Custom", "value");
-        p.set("Description", "Test");
-
-        // Check that known fields are ordered correctly and unknown fields are alphabetical
-        let keys: Vec<_> = p.keys().collect();
-        assert_eq!(keys[0], "Package");
-        assert_eq!(keys[1], "Architecture");
-        assert_eq!(keys[2], "Description");
-        assert_eq!(keys[3], "Another-Custom"); // Unknown fields alphabetically sorted
-        assert_eq!(keys[4], "X-Custom-Field");
-    }
-
-    #[test]
     fn test_set_with_field_order() {
         let mut p = super::Paragraph::new();
         let custom_order = &["Foo", "Bar", "Baz"];
@@ -3917,7 +3776,7 @@ Maintainer: Test <test@example.com>
             "Priority",
             "optional",
             Some(&super::IndentPattern::Fixed(4)),
-            Some(super::SOURCE_FIELD_ORDER),
+            Some(&["Source", "Priority", "Maintainer"]),
         );
 
         // Priority should be inserted between Source and Maintainer
