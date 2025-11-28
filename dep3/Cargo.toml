@@ -11,7 +11,7 @@ categories = ["parser-implementations"]
 
 [dependencies]
 chrono = ">=0.4, <0.5"
-deb822-lossless = { path = "../deb822-lossless", version = ">=0.2, <0.5", optional = true }
+deb822-lossless = { path = "../deb822-lossless", version = ">=0.2, <0.6", optional = true }
 deb822-fast = { path = "../deb822-fast", version = ">=0.1, <0.3", features = ["derive"] }
 url = ">=2, <3"
 

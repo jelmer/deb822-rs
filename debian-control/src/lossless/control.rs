@@ -34,8 +34,59 @@
 //! ```
 use crate::fields::{MultiArch, Priority};
 use crate::lossless::relations::Relations;
-use deb822_lossless::{Deb822, Paragraph, BINARY_FIELD_ORDER, SOURCE_FIELD_ORDER};
+use deb822_lossless::{Deb822, Paragraph};
 use rowan::ast::AstNode;
+
+/// Canonical field order for source paragraphs in debian/control files
+pub const SOURCE_FIELD_ORDER: &[&str] = &[
+    "Source",
+    "Section",
+    "Priority",
+    "Maintainer",
+    "Uploaders",
+    "Build-Depends",
+    "Build-Depends-Indep",
+    "Build-Depends-Arch",
+    "Build-Conflicts",
+    "Build-Conflicts-Indep",
+    "Build-Conflicts-Arch",
+    "Standards-Version",
+    "Vcs-Browser",
+    "Vcs-Git",
+    "Vcs-Svn",
+    "Vcs-Bzr",
+    "Vcs-Hg",
+    "Vcs-Darcs",
+    "Vcs-Cvs",
+    "Vcs-Arch",
+    "Vcs-Mtn",
+    "Homepage",
+    "Rules-Requires-Root",
+    "Testsuite",
+    "Testsuite-Triggers",
+];
+
+/// Canonical field order for binary packages in debian/control files
+pub const BINARY_FIELD_ORDER: &[&str] = &[
+    "Package",
+    "Architecture",
+    "Section",
+    "Priority",
+    "Multi-Arch",
+    "Essential",
+    "Build-Profiles",
+    "Built-Using",
+    "Pre-Depends",
+    "Depends",
+    "Recommends",
+    "Suggests",
+    "Enhances",
+    "Conflicts",
+    "Breaks",
+    "Replaces",
+    "Provides",
+    "Description",
+];
 
 fn format_field(name: &str, value: &str) -> String {
     match name {
@@ -645,6 +696,11 @@ impl Source {
         self.0.set_with_field_order(key, value, SOURCE_FIELD_ORDER);
     }
 
+    /// Retrieve a field
+    pub fn get(&self, key: &str) -> Option<String> {
+        self.0.get(key)
+    }
+
     /// Return the Vcs-Browser field
     pub fn vcs_browser(&self) -> Option<String> {
         self.0.get("Vcs-Browser")
@@ -1158,6 +1214,11 @@ impl Binary {
     /// Set a field in the binary paragraph, using canonical field ordering for binary packages
     pub fn set(&mut self, key: &str, value: &str) {
         self.0.set_with_field_order(key, value, BINARY_FIELD_ORDER);
+    }
+
+    /// Retrieve a field
+    pub fn get(&self, key: &str) -> Option<String> {
+        self.0.get(key)
     }
 
     /// Check if this binary paragraph's range overlaps with the given range
