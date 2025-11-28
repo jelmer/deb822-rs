@@ -2,6 +2,7 @@ use crate::{Repositories, Repository, RepositoryType};
 use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Default path for APT sources files
@@ -49,8 +50,8 @@ impl SourcesManager {
         let sanitized = name.replace(['/', ':', ' '], "-").to_lowercase();
 
         match format {
-            FileFormat::Deb822 => format!("{}.sources", sanitized),
-            FileFormat::Legacy => format!("{}.list", sanitized),
+            FileFormat::Deb822 => format!("{sanitized}.sources"),
+            FileFormat::Legacy => format!("{sanitized}.list"),
         }
     }
 
@@ -66,18 +67,18 @@ impl SourcesManager {
 
     /// Write repositories to a file
     pub fn write_repositories(&self, path: &Path, repositories: &Repositories) -> io::Result<()> {
-        let content = repositories.to_string();
-        fs::write(path, content)
+        let mut file = fs::File::create(path)?;
+        write!(file, "{repositories}")
     }
 
     /// Read repositories from a file
     pub fn read_repositories(&self, path: &Path) -> Result<Repositories, String> {
         let content = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read file {}: {}", path.display(), e))?;
+            .map_err(|e| format!("Failed to read file {}: {e}", path.display()))?;
 
         content
             .parse::<Repositories>()
-            .map_err(|e| format!("Failed to parse repositories: {}", e))
+            .map_err(|e| format!("Failed to parse repositories: {e}"))
     }
 
     /// List all repository files in the sources directory
@@ -168,7 +169,7 @@ impl SourcesManager {
 
         // Write back to file
         self.write_repositories(&path, &repositories)
-            .map_err(|e| format!("Failed to write repository: {}", e))
+            .map_err(|e| format!("Failed to write repository: {e}"))
     }
 
     /// Remove a repository from all files
@@ -185,11 +186,11 @@ impl SourcesManager {
                 if repos.is_empty() {
                     // Remove empty file
                     fs::remove_file(&path)
-                        .map_err(|e| format!("Failed to remove {}: {}", path.display(), e))?;
+                        .map_err(|e| format!("Failed to remove {}: {e}", path.display()))?;
                 } else {
                     // Write updated repositories
                     self.write_repositories(&path, &repos)
-                        .map_err(|e| format!("Failed to update {}: {}", path.display(), e))?;
+                        .map_err(|e| format!("Failed to update {}: {e}", path.display()))?;
                 }
             }
         }
@@ -329,7 +330,7 @@ impl SourcesManager {
     /// Generate a keyring filename for a repository
     pub fn generate_keyring_filename(&self, repository_name: &str) -> String {
         let sanitized = repository_name.replace(['/', ':', ' '], "-").to_lowercase();
-        format!("{}.gpg", sanitized)
+        format!("{sanitized}.gpg")
     }
 
     /// Save a GPG key to the keyring directory

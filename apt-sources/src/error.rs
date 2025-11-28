@@ -2,7 +2,7 @@
 //! It intends to address error handling in meaningful manner, less vague than just passing
 //! `String` as error.
 
-/// Errors for APT sources parsing and conversion to `Repository`
+/// Errors for APT sources parsing and conversion to/from [`super::Repository`] or [`super::legacy::LegacyRepository`]
 #[derive(Debug)]
 pub enum RepositoryError {
     /// Invalid repository format
@@ -15,10 +15,18 @@ pub enum RepositoryError {
     InvalidType,
     /// The `Signed-By` field is incorrect
     InvalidSignature,
+    /// The Yes/No/Force field has invalid/unexpected value
+    YesNoForceFieldInvalid,
+    /// The Yes/No field has invalid/unexpected value
+    YesNoFieldInvalid,
+    /// The field in the parsed data is not recognized (check `man sources.list`)
+    UnrecognizedFieldName(String),
     /// Errors in lossy serializer or deserializer
     Lossy(deb822_fast::Error),
     /// I/O Error
     Io(std::io::Error),
+    /// URL Error
+    Url(url::ParseError),
 }
 
 /// Errors that can occur when loading repositories from directories
@@ -45,6 +53,9 @@ pub enum LoadError {
         /// The underlying I/O error
         error: std::io::Error,
     },
+    #[cfg(not(feature = "legacy"))]
+    /// The support for `legacy` format hadn't been enabled at build time
+    UnsupportedLegacyFormat,
 }
 
 impl From<std::io::Error> for RepositoryError {
@@ -53,16 +64,31 @@ impl From<std::io::Error> for RepositoryError {
     }
 }
 
+impl From<url::ParseError> for RepositoryError {
+    fn from(e: url::ParseError) -> Self {
+        Self::Url(e)
+    }
+}
+
 impl std::fmt::Display for RepositoryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        // Spare longer messages to split lines by `rustfmt`
+        const YNFERRMSG: &str = "The field requiring only `Yes`/`No`/`Force` values is incorrect";
+        const YNERRMSG: &str = "The field requiring only `Yes`/`No` values is incorrect";
+        const UFNERRMSG: &str =
+            "The field in the parsed data is not recognized (check `man sources.list`)";
         match self {
             Self::InvalidFormat => write!(f, "Invalid repository format"),
             Self::InvalidUri => write!(f, "Invalid repository URI"),
             Self::MissingUri => write!(f, "Missing repository URI"),
             Self::InvalidType => write!(f, "Invalid repository type"),
             Self::InvalidSignature => write!(f, "The field `Signed-By` is incorrect"),
-            Self::Lossy(e) => write!(f, "Lossy parser error: {}", e),
-            Self::Io(e) => write!(f, "IO error: {}", e),
+            Self::YesNoForceFieldInvalid => f.write_str(YNFERRMSG),
+            Self::YesNoFieldInvalid => f.write_str(YNERRMSG),
+            Self::UnrecognizedFieldName(_) => f.write_str(UFNERRMSG), // TODO: dump the field name
+            Self::Lossy(e) => write!(f, "Lossy parser error: {e}"),
+            Self::Io(e) => write!(f, "IO error: {e}"),
+            Self::Url(e) => write!(f, "URL parse error: {e}"),
         }
     }
 }
@@ -76,6 +102,13 @@ impl std::fmt::Display for LoadError {
             }
             Self::DirectoryRead { path, error } => {
                 write!(f, "Failed to read directory {}: {}", path.display(), error)
+            }
+            #[cfg(not(feature = "legacy"))]
+            Self::UnsupportedLegacyFormat => {
+                write!(
+                    f,
+                    "The support for `legacy` format hadn't been enabled at build time"
+                )
             }
         }
     }

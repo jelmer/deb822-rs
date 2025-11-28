@@ -1,10 +1,10 @@
-//! A module implementing `Signature` type that holds info about variants of the signature key used by the repository
+//! A module implementing [`Signature`] type that holds info about variants of the signature key used by the repository
 
 use std::path::PathBuf;
 
 use crate::error::RepositoryError;
 
-/// A type to store
+/// A type to store variants of cryptographic public key to validate the [`super::Repository`].
 #[derive(Debug, PartialEq, Clone)]
 pub enum Signature {
     /// The PGP key is stored inside the `.sources` files
@@ -46,7 +46,7 @@ impl std::str::FromStr for Signature {
 impl std::fmt::Display for Signature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Signature::KeyBlock(text) => write!(f, "\n{}", text),
+            Signature::KeyBlock(text) => write!(f, "\n{text}"),
             Signature::KeyPath(path) => f.write_str(path.to_string_lossy().as_ref()),
         }
     }

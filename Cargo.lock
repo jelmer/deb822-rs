@@ -50,12 +50,15 @@ version = "0.1.1"
 dependencies = [
  "deb822-fast",
  "indoc",
+ "itertools 0.14.0",
+ "regex",
  "sequoia-net",
  "sequoia-openpgp",
  "tempfile",
  "tokio",
  "tracing",
  "url",
+ "url-macro",
 ]
 
 [[package]]
@@ -1144,6 +1147,15 @@ name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
 dependencies = [
  "either",
 ]
@@ -2495,6 +2507,15 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+]
+
+[[package]]
+name = "url-macro"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0f1c96f9093a012822c49bd933852d5dfb8bff6d1cce079d3ba4ac5cc59e3e7"
+dependencies = [
+ "url",
 ]
 
 [[package]]

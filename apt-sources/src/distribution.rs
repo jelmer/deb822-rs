@@ -100,7 +100,7 @@ pub fn get_system_info() -> Result<(String, String), String> {
     let lsb_release = Command::new("lsb_release")
         .args(["-c", "-s"])
         .output()
-        .map_err(|e| format!("Failed to run lsb_release: {}", e))?;
+        .map_err(|e| format!("Failed to run lsb_release: {e}"))?;
 
     if !lsb_release.status.success() {
         return Err("Failed to determine distribution codename".to_string());
@@ -114,7 +114,7 @@ pub fn get_system_info() -> Result<(String, String), String> {
     let dpkg_arch = Command::new("dpkg")
         .arg("--print-architecture")
         .output()
-        .map_err(|e| format!("Failed to run dpkg: {}", e))?;
+        .map_err(|e| format!("Failed to run dpkg: {e}"))?;
 
     if !dpkg_arch.status.success() {
         return Err("Failed to determine system architecture".to_string());
