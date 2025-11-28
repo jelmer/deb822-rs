@@ -602,8 +602,7 @@ mod tests {
         );
         let ret = s.parse::<Repositories>();
         assert!(ret.is_err());
-        //assert_eq!(ret.unwrap_err(), "Not machine readable".to_string());
-        assert_eq!(ret.unwrap_err(), "Unexpected token:  ".to_string());
+        assert_eq!(ret.unwrap_err(), "missing field: Types".to_string());
     }
 
     #[test]

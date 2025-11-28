@@ -34,7 +34,7 @@
 //! ```
 use crate::fields::{MultiArch, Priority};
 use crate::lossless::relations::Relations;
-use deb822_lossless::{Deb822, Paragraph};
+use deb822_lossless::{Deb822, Paragraph, BINARY_FIELD_ORDER, SOURCE_FIELD_ORDER};
 use rowan::ast::AstNode;
 
 fn format_field(name: &str, value: &str) -> String {
@@ -152,6 +152,37 @@ impl Control {
         Binary(p)
     }
 
+    /// Remove a binary package paragraph by name
+    ///
+    /// # Arguments
+    /// * `name` - The name of the binary package to remove
+    ///
+    /// # Returns
+    /// `true` if a binary paragraph with the given name was found and removed, `false` otherwise
+    ///
+    /// # Example
+    /// ```rust
+    /// use debian_control::lossless::control::Control;
+    /// let mut control = Control::new();
+    /// control.add_binary("foo");
+    /// assert_eq!(control.binaries().count(), 1);
+    /// assert!(control.remove_binary("foo"));
+    /// assert_eq!(control.binaries().count(), 0);
+    /// ```
+    pub fn remove_binary(&mut self, name: &str) -> bool {
+        let index = self
+            .0
+            .paragraphs()
+            .position(|p| p.get("Package").as_deref() == Some(name));
+
+        if let Some(index) = index {
+            self.0.remove_paragraph(index);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Read a control file from a file
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, deb822_lossless::Error> {
         Ok(Control(Deb822::from_file(path)?))
@@ -221,6 +252,75 @@ impl Control {
         self.0 = self
             .0
             .wrap_and_sort(Some(&sort_paragraphs), Some(&wrap_paragraph));
+    }
+
+    /// Sort binary package paragraphs alphabetically by package name.
+    ///
+    /// This method reorders the binary package paragraphs in alphabetical order
+    /// based on their Package field value. The source paragraph always remains first.
+    ///
+    /// # Arguments
+    /// * `keep_first` - If true, keeps the first binary package in place and only
+    ///   sorts the remaining binary packages. If false, sorts all binary packages.
+    ///
+    /// # Example
+    /// ```rust
+    /// use debian_control::lossless::Control;
+    ///
+    /// let input = r#"Source: foo
+    ///
+    /// Package: libfoo
+    /// Architecture: all
+    ///
+    /// Package: libbar
+    /// Architecture: all
+    /// "#;
+    ///
+    /// let mut control: Control = input.parse().unwrap();
+    /// control.sort_binaries(false);
+    ///
+    /// // Binary packages are now sorted: libbar comes before libfoo
+    /// let binaries: Vec<_> = control.binaries().collect();
+    /// assert_eq!(binaries[0].name(), Some("libbar".to_string()));
+    /// assert_eq!(binaries[1].name(), Some("libfoo".to_string()));
+    /// ```
+    pub fn sort_binaries(&mut self, keep_first: bool) {
+        let mut paragraphs: Vec<_> = self.0.paragraphs().collect();
+
+        if paragraphs.len() <= 1 {
+            return; // Only source paragraph, nothing to sort
+        }
+
+        // Find the index where binary packages start (after source)
+        let source_idx = paragraphs.iter().position(|p| p.get("Source").is_some());
+        let binary_start = source_idx.map(|i| i + 1).unwrap_or(0);
+
+        // Determine where to start sorting
+        let sort_start = if keep_first && paragraphs.len() > binary_start + 1 {
+            binary_start + 1
+        } else {
+            binary_start
+        };
+
+        if sort_start >= paragraphs.len() {
+            return; // Nothing to sort
+        }
+
+        // Sort binary packages by package name
+        paragraphs[sort_start..].sort_by(|a, b| {
+            let a_name = a.get("Package");
+            let b_name = b.get("Package");
+            a_name.cmp(&b_name)
+        });
+
+        // Rebuild the Deb822 with sorted paragraphs
+        let sort_paragraphs = |a: &Paragraph, b: &Paragraph| -> std::cmp::Ordering {
+            let a_pos = paragraphs.iter().position(|p| p == a);
+            let b_pos = paragraphs.iter().position(|p| p == b);
+            a_pos.cmp(&b_pos)
+        };
+
+        self.0 = self.0.wrap_and_sort(Some(&sort_paragraphs), None);
     }
 
     /// Iterate over fields that overlap with the given range
@@ -348,7 +448,7 @@ impl Source {
 
     /// Set the name of the source package.
     pub fn set_name(&mut self, name: &str) {
-        self.0.set("Source", name);
+        self.set("Source", name);
     }
 
     /// The default section of the packages built from this source package.
@@ -359,7 +459,7 @@ impl Source {
     /// Set the section of the source package
     pub fn set_section(&mut self, section: Option<&str>) {
         if let Some(section) = section {
-            self.0.set("Section", section);
+            self.set("Section", section);
         } else {
             self.0.remove("Section");
         }
@@ -373,7 +473,7 @@ impl Source {
     /// Set the priority of the source package
     pub fn set_priority(&mut self, priority: Option<Priority>) {
         if let Some(priority) = priority {
-            self.0.set("Priority", priority.to_string().as_str());
+            self.set("Priority", priority.to_string().as_str());
         } else {
             self.0.remove("Priority");
         }
@@ -386,7 +486,7 @@ impl Source {
 
     /// Set the maintainer of the package
     pub fn set_maintainer(&mut self, maintainer: &str) {
-        self.0.set("Maintainer", maintainer);
+        self.set("Maintainer", maintainer);
     }
 
     /// The build dependencies of the package.
@@ -396,7 +496,7 @@ impl Source {
 
     /// Set the Build-Depends field
     pub fn set_build_depends(&mut self, relations: &Relations) {
-        self.0.set("Build-Depends", relations.to_string().as_str());
+        self.set("Build-Depends", relations.to_string().as_str());
     }
 
     /// Return the Build-Depends-Indep field
@@ -437,7 +537,7 @@ impl Source {
 
     /// Set the Standards-Version field
     pub fn set_standards_version(&mut self, version: &str) {
-        self.0.set("Standards-Version", version);
+        self.set("Standards-Version", version);
     }
 
     /// Return the upstrea mHomepage
@@ -447,7 +547,7 @@ impl Source {
 
     /// Set the Homepage field
     pub fn set_homepage(&mut self, homepage: &url::Url) {
-        self.0.set("Homepage", homepage.to_string().as_str());
+        self.set("Homepage", homepage.to_string().as_str());
     }
 
     /// Return the Vcs-Git field
@@ -457,7 +557,7 @@ impl Source {
 
     /// Set the Vcs-Git field
     pub fn set_vcs_git(&mut self, url: &str) {
-        self.0.set("Vcs-Git", url);
+        self.set("Vcs-Git", url);
     }
 
     /// Return the Vcs-Browser field
@@ -467,7 +567,7 @@ impl Source {
 
     /// Set the Vcs-Svn field
     pub fn set_vcs_svn(&mut self, url: &str) {
-        self.0.set("Vcs-Svn", url);
+        self.set("Vcs-Svn", url);
     }
 
     /// Return the Vcs-Bzr field
@@ -477,7 +577,7 @@ impl Source {
 
     /// Set the Vcs-Bzr field
     pub fn set_vcs_bzr(&mut self, url: &str) {
-        self.0.set("Vcs-Bzr", url);
+        self.set("Vcs-Bzr", url);
     }
 
     /// Return the Vcs-Arch field
@@ -487,7 +587,7 @@ impl Source {
 
     /// Set the Vcs-Arch field
     pub fn set_vcs_arch(&mut self, url: &str) {
-        self.0.set("Vcs-Arch", url);
+        self.set("Vcs-Arch", url);
     }
 
     /// Return the Vcs-Svk field
@@ -497,7 +597,7 @@ impl Source {
 
     /// Set the Vcs-Svk field
     pub fn set_vcs_svk(&mut self, url: &str) {
-        self.0.set("Vcs-Svk", url);
+        self.set("Vcs-Svk", url);
     }
 
     /// Return the Vcs-Darcs field
@@ -507,7 +607,7 @@ impl Source {
 
     /// Set the Vcs-Darcs field
     pub fn set_vcs_darcs(&mut self, url: &str) {
-        self.0.set("Vcs-Darcs", url);
+        self.set("Vcs-Darcs", url);
     }
 
     /// Return the Vcs-Mtn field
@@ -517,7 +617,7 @@ impl Source {
 
     /// Set the Vcs-Mtn field
     pub fn set_vcs_mtn(&mut self, url: &str) {
-        self.0.set("Vcs-Mtn", url);
+        self.set("Vcs-Mtn", url);
     }
 
     /// Return the Vcs-Cvs field
@@ -527,7 +627,7 @@ impl Source {
 
     /// Set the Vcs-Cvs field
     pub fn set_vcs_cvs(&mut self, url: &str) {
-        self.0.set("Vcs-Cvs", url);
+        self.set("Vcs-Cvs", url);
     }
 
     /// Return the Vcs-Hg field
@@ -537,7 +637,12 @@ impl Source {
 
     /// Set the Vcs-Hg field
     pub fn set_vcs_hg(&mut self, url: &str) {
-        self.0.set("Vcs-Hg", url);
+        self.set("Vcs-Hg", url);
+    }
+
+    /// Set a field in the source paragraph, using canonical field ordering for source packages
+    pub fn set(&mut self, key: &str, value: &str) {
+        self.0.set_with_field_order(key, value, SOURCE_FIELD_ORDER);
     }
 
     /// Return the Vcs-Browser field
@@ -558,7 +663,7 @@ impl Source {
     /// Set the Vcs-Browser field
     pub fn set_vcs_browser(&mut self, url: Option<&str>) {
         if let Some(url) = url {
-            self.0.set("Vcs-Browser", url);
+            self.set("Vcs-Browser", url);
         } else {
             self.0.remove("Vcs-Browser");
         }
@@ -573,7 +678,7 @@ impl Source {
 
     /// Set the uploaders field
     pub fn set_uploaders(&mut self, uploaders: &[&str]) {
-        self.0.set(
+        self.set(
             "Uploaders",
             uploaders
                 .iter()
@@ -592,7 +697,7 @@ impl Source {
     /// Set the architecture field
     pub fn set_architecture(&mut self, arch: Option<&str>) {
         if let Some(arch) = arch {
-            self.0.set("Architecture", arch);
+            self.set("Architecture", arch);
         } else {
             self.0.remove("Architecture");
         }
@@ -611,7 +716,7 @@ impl Source {
 
     /// Set the Rules-Requires-Root field
     pub fn set_rules_requires_root(&mut self, requires_root: bool) {
-        self.0.set(
+        self.set(
             "Rules-Requires-Root",
             if requires_root { "yes" } else { "no" },
         );
@@ -624,7 +729,7 @@ impl Source {
 
     /// Set the Testsuite field
     pub fn set_testsuite(&mut self, testsuite: &str) {
-        self.0.set("Testsuite", testsuite);
+        self.set("Testsuite", testsuite);
     }
 
     /// Check if this source paragraph's range overlaps with the given range
@@ -680,9 +785,10 @@ impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Source {
 }
 
 #[cfg(feature = "python-debian")]
-impl pyo3::FromPyObject<'_> for Source {
-    fn extract_bound(ob: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        use pyo3::prelude::*;
+impl<'py> pyo3::FromPyObject<'_, 'py> for Source {
+    type Error = pyo3::PyErr;
+
+    fn extract(ob: pyo3::Borrowed<'_, 'py, pyo3::PyAny>) -> Result<Self, Self::Error> {
         Ok(Source(ob.extract()?))
     }
 }
@@ -748,9 +854,10 @@ impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Binary {
 }
 
 #[cfg(feature = "python-debian")]
-impl pyo3::FromPyObject<'_> for Binary {
-    fn extract_bound(ob: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        use pyo3::prelude::*;
+impl<'py> pyo3::FromPyObject<'_, 'py> for Binary {
+    type Error = pyo3::PyErr;
+
+    fn extract(ob: pyo3::Borrowed<'_, 'py, pyo3::PyAny>) -> Result<Self, Self::Error> {
         Ok(Binary(ob.extract()?))
     }
 }
@@ -758,6 +865,12 @@ impl pyo3::FromPyObject<'_> for Binary {
 impl Default for Binary {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Display for Binary {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -800,7 +913,7 @@ impl Binary {
 
     /// Set the name of the package
     pub fn set_name(&mut self, name: &str) {
-        self.0.set("Package", name);
+        self.set("Package", name);
     }
 
     /// The section of the package.
@@ -811,7 +924,7 @@ impl Binary {
     /// Set the section
     pub fn set_section(&mut self, section: Option<&str>) {
         if let Some(section) = section {
-            self.0.set("Section", section);
+            self.set("Section", section);
         } else {
             self.0.remove("Section");
         }
@@ -825,7 +938,7 @@ impl Binary {
     /// Set the priority of the package
     pub fn set_priority(&mut self, priority: Option<Priority>) {
         if let Some(priority) = priority {
-            self.0.set("Priority", priority.to_string().as_str());
+            self.set("Priority", priority.to_string().as_str());
         } else {
             self.0.remove("Priority");
         }
@@ -839,7 +952,7 @@ impl Binary {
     /// Set the architecture of the package
     pub fn set_architecture(&mut self, arch: Option<&str>) {
         if let Some(arch) = arch {
-            self.0.set("Architecture", arch);
+            self.set("Architecture", arch);
         } else {
             self.0.remove("Architecture");
         }
@@ -853,7 +966,7 @@ impl Binary {
     /// Set the Depends field
     pub fn set_depends(&mut self, depends: Option<&Relations>) {
         if let Some(depends) = depends {
-            self.0.set("Depends", depends.to_string().as_str());
+            self.set("Depends", depends.to_string().as_str());
         } else {
             self.0.remove("Depends");
         }
@@ -867,7 +980,7 @@ impl Binary {
     /// Set the Recommends field
     pub fn set_recommends(&mut self, recommends: Option<&Relations>) {
         if let Some(recommends) = recommends {
-            self.0.set("Recommends", recommends.to_string().as_str());
+            self.set("Recommends", recommends.to_string().as_str());
         } else {
             self.0.remove("Recommends");
         }
@@ -881,7 +994,7 @@ impl Binary {
     /// Set the Suggests field
     pub fn set_suggests(&mut self, suggests: Option<&Relations>) {
         if let Some(suggests) = suggests {
-            self.0.set("Suggests", suggests.to_string().as_str());
+            self.set("Suggests", suggests.to_string().as_str());
         } else {
             self.0.remove("Suggests");
         }
@@ -895,7 +1008,7 @@ impl Binary {
     /// Set the Enhances field
     pub fn set_enhances(&mut self, enhances: Option<&Relations>) {
         if let Some(enhances) = enhances {
-            self.0.set("Enhances", enhances.to_string().as_str());
+            self.set("Enhances", enhances.to_string().as_str());
         } else {
             self.0.remove("Enhances");
         }
@@ -909,7 +1022,7 @@ impl Binary {
     /// Set the Pre-Depends field
     pub fn set_pre_depends(&mut self, pre_depends: Option<&Relations>) {
         if let Some(pre_depends) = pre_depends {
-            self.0.set("Pre-Depends", pre_depends.to_string().as_str());
+            self.set("Pre-Depends", pre_depends.to_string().as_str());
         } else {
             self.0.remove("Pre-Depends");
         }
@@ -923,7 +1036,7 @@ impl Binary {
     /// Set the Breaks field
     pub fn set_breaks(&mut self, breaks: Option<&Relations>) {
         if let Some(breaks) = breaks {
-            self.0.set("Breaks", breaks.to_string().as_str());
+            self.set("Breaks", breaks.to_string().as_str());
         } else {
             self.0.remove("Breaks");
         }
@@ -937,7 +1050,7 @@ impl Binary {
     /// Set the Conflicts field
     pub fn set_conflicts(&mut self, conflicts: Option<&Relations>) {
         if let Some(conflicts) = conflicts {
-            self.0.set("Conflicts", conflicts.to_string().as_str());
+            self.set("Conflicts", conflicts.to_string().as_str());
         } else {
             self.0.remove("Conflicts");
         }
@@ -951,7 +1064,7 @@ impl Binary {
     /// Set the Replaces field
     pub fn set_replaces(&mut self, replaces: Option<&Relations>) {
         if let Some(replaces) = replaces {
-            self.0.set("Replaces", replaces.to_string().as_str());
+            self.set("Replaces", replaces.to_string().as_str());
         } else {
             self.0.remove("Replaces");
         }
@@ -965,7 +1078,7 @@ impl Binary {
     /// Set the Provides field
     pub fn set_provides(&mut self, provides: Option<&Relations>) {
         if let Some(provides) = provides {
-            self.0.set("Provides", provides.to_string().as_str());
+            self.set("Provides", provides.to_string().as_str());
         } else {
             self.0.remove("Provides");
         }
@@ -979,7 +1092,7 @@ impl Binary {
     /// Set the Built-Using field
     pub fn set_built_using(&mut self, built_using: Option<&Relations>) {
         if let Some(built_using) = built_using {
-            self.0.set("Built-Using", built_using.to_string().as_str());
+            self.set("Built-Using", built_using.to_string().as_str());
         } else {
             self.0.remove("Built-Using");
         }
@@ -993,7 +1106,7 @@ impl Binary {
     /// Set the Multi-Arch field
     pub fn set_multi_arch(&mut self, multi_arch: Option<MultiArch>) {
         if let Some(multi_arch) = multi_arch {
-            self.0.set("Multi-Arch", multi_arch.to_string().as_str());
+            self.set("Multi-Arch", multi_arch.to_string().as_str());
         } else {
             self.0.remove("Multi-Arch");
         }
@@ -1007,7 +1120,7 @@ impl Binary {
     /// Set whether the package is essential
     pub fn set_essential(&mut self, essential: bool) {
         if essential {
-            self.0.set("Essential", "yes");
+            self.set("Essential", "yes");
         } else {
             self.0.remove("Essential");
         }
@@ -1021,7 +1134,7 @@ impl Binary {
     /// Set the binary package description
     pub fn set_description(&mut self, description: Option<&str>) {
         if let Some(description) = description {
-            self.0.set("Description", description);
+            self.set("Description", description);
         } else {
             self.0.remove("Description");
         }
@@ -1034,7 +1147,12 @@ impl Binary {
 
     /// Set the upstream homepage
     pub fn set_homepage(&mut self, url: &url::Url) {
-        self.0.set("Homepage", url.as_str());
+        self.set("Homepage", url.as_str());
+    }
+
+    /// Set a field in the binary paragraph, using canonical field ordering for binary packages
+    pub fn set(&mut self, key: &str, value: &str) {
+        self.0.set_with_field_order(key, value, BINARY_FIELD_ORDER);
     }
 
     /// Check if this binary paragraph's range overlaps with the given range
@@ -1071,6 +1189,183 @@ impl Binary {
 mod tests {
     use super::*;
     use crate::relations::VersionConstraint;
+
+    #[test]
+    fn test_source_set_field_ordering() {
+        let mut control = Control::new();
+        let mut source = control.add_source("mypackage");
+
+        // Add fields in random order
+        source.set("Homepage", "https://example.com");
+        source.set("Build-Depends", "debhelper");
+        source.set("Standards-Version", "4.5.0");
+        source.set("Maintainer", "Test <test@example.com>");
+
+        // Convert to string and check field order
+        let output = source.to_string();
+        let lines: Vec<&str> = output.lines().collect();
+
+        // Source should be first
+        assert!(lines[0].starts_with("Source:"));
+
+        // Find the positions of each field
+        let maintainer_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Maintainer:"))
+            .unwrap();
+        let build_depends_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Build-Depends:"))
+            .unwrap();
+        let standards_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Standards-Version:"))
+            .unwrap();
+        let homepage_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Homepage:"))
+            .unwrap();
+
+        // Check ordering according to SOURCE_FIELD_ORDER
+        assert!(maintainer_pos < build_depends_pos);
+        assert!(build_depends_pos < standards_pos);
+        assert!(standards_pos < homepage_pos);
+    }
+
+    #[test]
+    fn test_binary_set_field_ordering() {
+        let mut control = Control::new();
+        let mut binary = control.add_binary("mypackage");
+
+        // Add fields in random order
+        binary.set("Description", "A test package");
+        binary.set("Architecture", "amd64");
+        binary.set("Depends", "libc6");
+        binary.set("Section", "utils");
+
+        // Convert to string and check field order
+        let output = binary.to_string();
+        let lines: Vec<&str> = output.lines().collect();
+
+        // Package should be first
+        assert!(lines[0].starts_with("Package:"));
+
+        // Find the positions of each field
+        let arch_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Architecture:"))
+            .unwrap();
+        let section_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Section:"))
+            .unwrap();
+        let depends_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Depends:"))
+            .unwrap();
+        let desc_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Description:"))
+            .unwrap();
+
+        // Check ordering according to BINARY_FIELD_ORDER
+        assert!(arch_pos < section_pos);
+        assert!(section_pos < depends_pos);
+        assert!(depends_pos < desc_pos);
+    }
+
+    #[test]
+    fn test_source_specific_set_methods_use_field_ordering() {
+        let mut control = Control::new();
+        let mut source = control.add_source("mypackage");
+
+        // Use specific set_* methods in random order
+        source.set_homepage(&"https://example.com".parse().unwrap());
+        source.set_maintainer("Test <test@example.com>");
+        source.set_standards_version("4.5.0");
+        source.set_vcs_git("https://github.com/example/repo");
+
+        // Convert to string and check field order
+        let output = source.to_string();
+        let lines: Vec<&str> = output.lines().collect();
+
+        // Find the positions of each field
+        let source_pos = lines.iter().position(|l| l.starts_with("Source:")).unwrap();
+        let maintainer_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Maintainer:"))
+            .unwrap();
+        let standards_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Standards-Version:"))
+            .unwrap();
+        let vcs_git_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Vcs-Git:"))
+            .unwrap();
+        let homepage_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Homepage:"))
+            .unwrap();
+
+        // Check ordering according to SOURCE_FIELD_ORDER
+        assert!(source_pos < maintainer_pos);
+        assert!(maintainer_pos < standards_pos);
+        assert!(standards_pos < vcs_git_pos);
+        assert!(vcs_git_pos < homepage_pos);
+    }
+
+    #[test]
+    fn test_binary_specific_set_methods_use_field_ordering() {
+        let mut control = Control::new();
+        let mut binary = control.add_binary("mypackage");
+
+        // Use specific set_* methods in random order
+        binary.set_description(Some("A test package"));
+        binary.set_architecture(Some("amd64"));
+        let depends = "libc6".parse().unwrap();
+        binary.set_depends(Some(&depends));
+        binary.set_section(Some("utils"));
+        binary.set_priority(Some(Priority::Optional));
+
+        // Convert to string and check field order
+        let output = binary.to_string();
+        let lines: Vec<&str> = output.lines().collect();
+
+        // Find the positions of each field
+        let package_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Package:"))
+            .unwrap();
+        let arch_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Architecture:"))
+            .unwrap();
+        let section_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Section:"))
+            .unwrap();
+        let priority_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Priority:"))
+            .unwrap();
+        let depends_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Depends:"))
+            .unwrap();
+        let desc_pos = lines
+            .iter()
+            .position(|l| l.starts_with("Description:"))
+            .unwrap();
+
+        // Check ordering according to BINARY_FIELD_ORDER
+        assert!(package_pos < arch_pos);
+        assert!(arch_pos < section_pos);
+        assert!(section_pos < priority_pos);
+        assert!(priority_pos < depends_pos);
+        assert!(depends_pos < desc_pos);
+    }
+
     #[test]
     fn test_parse() {
         let control: Control = r#"Source: foo
@@ -1538,5 +1833,312 @@ Description: Example package
         let string_errors = parsed.errors();
         assert!(!string_errors.is_empty());
         assert_eq!(string_errors.len(), positioned_errors.len());
+    }
+
+    #[test]
+    fn test_sort_binaries_basic() {
+        let input = r#"Source: foo
+
+Package: libfoo
+Architecture: all
+
+Package: libbar
+Architecture: all
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(false);
+
+        let binaries: Vec<_> = control.binaries().collect();
+        assert_eq!(binaries.len(), 2);
+        assert_eq!(binaries[0].name(), Some("libbar".to_string()));
+        assert_eq!(binaries[1].name(), Some("libfoo".to_string()));
+    }
+
+    #[test]
+    fn test_sort_binaries_keep_first() {
+        let input = r#"Source: foo
+
+Package: zzz-first
+Architecture: all
+
+Package: libbar
+Architecture: all
+
+Package: libaaa
+Architecture: all
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(true);
+
+        let binaries: Vec<_> = control.binaries().collect();
+        assert_eq!(binaries.len(), 3);
+        // First binary should remain in place
+        assert_eq!(binaries[0].name(), Some("zzz-first".to_string()));
+        // The rest should be sorted
+        assert_eq!(binaries[1].name(), Some("libaaa".to_string()));
+        assert_eq!(binaries[2].name(), Some("libbar".to_string()));
+    }
+
+    #[test]
+    fn test_sort_binaries_already_sorted() {
+        let input = r#"Source: foo
+
+Package: aaa
+Architecture: all
+
+Package: bbb
+Architecture: all
+
+Package: ccc
+Architecture: all
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(false);
+
+        let binaries: Vec<_> = control.binaries().collect();
+        assert_eq!(binaries.len(), 3);
+        assert_eq!(binaries[0].name(), Some("aaa".to_string()));
+        assert_eq!(binaries[1].name(), Some("bbb".to_string()));
+        assert_eq!(binaries[2].name(), Some("ccc".to_string()));
+    }
+
+    #[test]
+    fn test_sort_binaries_no_binaries() {
+        let input = r#"Source: foo
+Maintainer: test@example.com
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(false);
+
+        // Should not crash, just do nothing
+        assert_eq!(control.binaries().count(), 0);
+    }
+
+    #[test]
+    fn test_sort_binaries_one_binary() {
+        let input = r#"Source: foo
+
+Package: bar
+Architecture: all
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(false);
+
+        let binaries: Vec<_> = control.binaries().collect();
+        assert_eq!(binaries.len(), 1);
+        assert_eq!(binaries[0].name(), Some("bar".to_string()));
+    }
+
+    #[test]
+    fn test_sort_binaries_preserves_fields() {
+        let input = r#"Source: foo
+
+Package: zzz
+Architecture: any
+Depends: libc6
+Description: ZZZ package
+
+Package: aaa
+Architecture: all
+Depends: ${misc:Depends}
+Description: AAA package
+"#;
+
+        let mut control: Control = input.parse().unwrap();
+        control.sort_binaries(false);
+
+        let binaries: Vec<_> = control.binaries().collect();
+        assert_eq!(binaries.len(), 2);
+
+        // First binary should be aaa
+        assert_eq!(binaries[0].name(), Some("aaa".to_string()));
+        assert_eq!(binaries[0].architecture(), Some("all".to_string()));
+        assert_eq!(binaries[0].description(), Some("AAA package".to_string()));
+
+        // Second binary should be zzz
+        assert_eq!(binaries[1].name(), Some("zzz".to_string()));
+        assert_eq!(binaries[1].architecture(), Some("any".to_string()));
+        assert_eq!(binaries[1].description(), Some("ZZZ package".to_string()));
+    }
+
+    #[test]
+    fn test_remove_binary_basic() {
+        let mut control = Control::new();
+        control.add_binary("foo");
+        assert_eq!(control.binaries().count(), 1);
+        assert!(control.remove_binary("foo"));
+        assert_eq!(control.binaries().count(), 0);
+    }
+
+    #[test]
+    fn test_remove_binary_nonexistent() {
+        let mut control = Control::new();
+        control.add_binary("foo");
+        assert!(!control.remove_binary("bar"));
+        assert_eq!(control.binaries().count(), 1);
+    }
+
+    #[test]
+    fn test_remove_binary_multiple() {
+        let mut control = Control::new();
+        control.add_binary("foo");
+        control.add_binary("bar");
+        control.add_binary("baz");
+        assert_eq!(control.binaries().count(), 3);
+
+        assert!(control.remove_binary("bar"));
+        assert_eq!(control.binaries().count(), 2);
+
+        let names: Vec<_> = control.binaries().map(|b| b.name().unwrap()).collect();
+        assert_eq!(names, vec!["foo", "baz"]);
+    }
+
+    #[test]
+    fn test_remove_binary_preserves_source() {
+        let input = r#"Source: mypackage
+
+Package: foo
+Architecture: all
+
+Package: bar
+Architecture: all
+"#;
+        let mut control: Control = input.parse().unwrap();
+        assert!(control.source().is_some());
+        assert_eq!(control.binaries().count(), 2);
+
+        assert!(control.remove_binary("foo"));
+
+        // Source should still be present
+        assert!(control.source().is_some());
+        assert_eq!(
+            control.source().unwrap().name(),
+            Some("mypackage".to_string())
+        );
+
+        // Only bar should remain
+        assert_eq!(control.binaries().count(), 1);
+        assert_eq!(
+            control.binaries().next().unwrap().name(),
+            Some("bar".to_string())
+        );
+    }
+
+    #[test]
+    fn test_remove_binary_from_parsed() {
+        let input = r#"Source: test
+
+Package: test-bin
+Architecture: any
+Depends: libc6
+Description: Test binary
+
+Package: test-lib
+Architecture: all
+Description: Test library
+"#;
+        let mut control: Control = input.parse().unwrap();
+        assert_eq!(control.binaries().count(), 2);
+
+        assert!(control.remove_binary("test-bin"));
+
+        let output = control.to_string();
+        assert!(!output.contains("test-bin"));
+        assert!(output.contains("test-lib"));
+        assert!(output.contains("Source: test"));
+    }
+
+    #[test]
+    fn test_build_depends_preserves_indentation_after_removal() {
+        let input = r#"Source: acpi-support
+Section: admin
+Priority: optional
+Maintainer: Debian Acpi Team <pkg-acpi-devel@lists.alioth.debian.org>
+Build-Depends: debhelper (>= 10), quilt (>= 0.40),
+    libsystemd-dev [linux-any], dh-systemd (>= 1.5), pkg-config
+"#;
+        let control: Control = input.parse().unwrap();
+        let mut source = control.source().unwrap();
+
+        // Get the Build-Depends
+        let mut build_depends = source.build_depends().unwrap();
+
+        // Find and remove dh-systemd entry
+        let mut to_remove = Vec::new();
+        for (idx, entry) in build_depends.entries().enumerate() {
+            for relation in entry.relations() {
+                if relation.name() == "dh-systemd" {
+                    to_remove.push(idx);
+                    break;
+                }
+            }
+        }
+
+        for idx in to_remove.into_iter().rev() {
+            build_depends.remove_entry(idx);
+        }
+
+        // Set it back
+        source.set_build_depends(&build_depends);
+
+        let output = source.to_string();
+
+        // The indentation should be preserved (4 spaces on the continuation line)
+        assert!(
+            output.contains("Build-Depends: debhelper (>= 10), quilt (>= 0.40),\n    libsystemd-dev [linux-any], pkg-config"),
+            "Expected 4-space indentation to be preserved, but got:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_build_depends_direct_string_set_loses_indentation() {
+        let input = r#"Source: acpi-support
+Section: admin
+Priority: optional
+Maintainer: Debian Acpi Team <pkg-acpi-devel@lists.alioth.debian.org>
+Build-Depends: debhelper (>= 10), quilt (>= 0.40),
+    libsystemd-dev [linux-any], dh-systemd (>= 1.5), pkg-config
+"#;
+        let control: Control = input.parse().unwrap();
+        let mut source = control.source().unwrap();
+
+        // Get the Build-Depends as Relations
+        let mut build_depends = source.build_depends().unwrap();
+
+        // Find and remove dh-systemd entry
+        let mut to_remove = Vec::new();
+        for (idx, entry) in build_depends.entries().enumerate() {
+            for relation in entry.relations() {
+                if relation.name() == "dh-systemd" {
+                    to_remove.push(idx);
+                    break;
+                }
+            }
+        }
+
+        for idx in to_remove.into_iter().rev() {
+            build_depends.remove_entry(idx);
+        }
+
+        // Set it back using the string representation - this is what might cause the bug
+        source.set("Build-Depends", &build_depends.to_string());
+
+        let output = source.to_string();
+        println!("Output with string set:");
+        println!("{}", output);
+
+        // Check if indentation is preserved
+        // This test documents the current behavior - it may fail if indentation is lost
+        assert!(
+            output.contains("Build-Depends: debhelper (>= 10), quilt (>= 0.40),\n    libsystemd-dev [linux-any], pkg-config"),
+            "Expected 4-space indentation to be preserved, but got:\n{}",
+            output
+        );
     }
 }

@@ -549,6 +549,117 @@ impl Default for Relations {
     }
 }
 
+/// Check if a package name should be treated as special for sorting purposes.
+///
+/// Special names include substitution variables (like `${misc:Depends}`)
+/// and template variables (like `@cdbs@`).
+fn is_special_package_name(name: &str) -> bool {
+    // Substitution variables like ${misc:Depends}
+    if name.starts_with("${") && name.ends_with('}') {
+        return true;
+    }
+    // Template variables like @cdbs@
+    if name.starts_with('@') && name.ends_with('@') {
+        return true;
+    }
+    false
+}
+
+/// Trait for defining sorting order of package relations.
+pub trait SortingOrder {
+    /// Compare two package names for sorting.
+    ///
+    /// Returns true if `name1` should come before `name2`.
+    fn lt(&self, name1: &str, name2: &str) -> bool;
+
+    /// Check if a package name should be ignored for sorting purposes.
+    fn ignore(&self, name: &str) -> bool;
+}
+
+/// Default sorting order (lexicographical with special items last).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DefaultSortingOrder;
+
+impl SortingOrder for DefaultSortingOrder {
+    fn lt(&self, name1: &str, name2: &str) -> bool {
+        let special1 = is_special_package_name(name1);
+        let special2 = is_special_package_name(name2);
+
+        // Special items always come last
+        if special1 && !special2 {
+            return false;
+        }
+        if !special1 && special2 {
+            return true;
+        }
+        if special1 && special2 {
+            // Both special - maintain original order
+            return false;
+        }
+
+        // Both are regular packages, use alphabetical order
+        name1 < name2
+    }
+
+    fn ignore(&self, name: &str) -> bool {
+        is_special_package_name(name)
+    }
+}
+
+/// Sorting order matching wrap-and-sort behavior.
+///
+/// This sorting order matches the behavior of the devscripts wrap-and-sort tool.
+/// It sorts packages into three groups:
+/// 1. Build-system packages (debhelper-compat, cdbs, etc.) - sorted first
+/// 2. Regular packages starting with [a-z0-9] - sorted in the middle
+/// 3. Substvars and other special packages - sorted last
+///
+/// Within each group, packages are sorted lexicographically.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WrapAndSortOrder;
+
+impl WrapAndSortOrder {
+    /// Build systems that should be sorted first, matching wrap-and-sort
+    const BUILD_SYSTEMS: &'static [&'static str] = &[
+        "cdbs",
+        "debhelper-compat",
+        "debhelper",
+        "debputy",
+        "dpkg-build-api",
+        "dpkg-dev",
+    ];
+
+    fn get_sort_key<'a>(&self, name: &'a str) -> (i32, &'a str) {
+        // Check if it's a build system (including dh-* packages)
+        if Self::BUILD_SYSTEMS.contains(&name) || name.starts_with("dh-") {
+            return (-1, name);
+        }
+
+        // Check if it starts with a regular character
+        if name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
+            return (0, name);
+        }
+
+        // Special packages (substvars, etc.) go last
+        (1, name)
+    }
+}
+
+impl SortingOrder for WrapAndSortOrder {
+    fn lt(&self, name1: &str, name2: &str) -> bool {
+        self.get_sort_key(name1) < self.get_sort_key(name2)
+    }
+
+    fn ignore(&self, _name: &str) -> bool {
+        // wrap-and-sort doesn't ignore any packages - it sorts everything
+        false
+    }
+}
+
 impl Relations {
     /// Create a new relations field
     pub fn new() -> Self {
@@ -589,35 +700,229 @@ impl Relations {
         entry
     }
 
+    /// Helper to collect all consecutive WHITESPACE/NEWLINE tokens starting from a node
+    fn collect_whitespace(start: Option<NodeOrToken<SyntaxNode, SyntaxToken>>) -> String {
+        let mut pattern = String::new();
+        let mut current = start;
+        while let Some(token) = current {
+            if matches!(token.kind(), WHITESPACE | NEWLINE) {
+                if let NodeOrToken::Token(t) = &token {
+                    pattern.push_str(t.text());
+                }
+                current = token.next_sibling_or_token();
+            } else {
+                break;
+            }
+        }
+        pattern
+    }
+
+    /// Helper to convert a NodeOrToken to its green equivalent
+    fn to_green(node: &NodeOrToken<SyntaxNode, SyntaxToken>) -> NodeOrToken<GreenNode, GreenToken> {
+        match node {
+            NodeOrToken::Node(n) => NodeOrToken::Node(n.green().into()),
+            NodeOrToken::Token(t) => NodeOrToken::Token(t.green().to_owned()),
+        }
+    }
+
+    /// Helper to check if a token is whitespace
+    fn is_whitespace_token(token: &GreenToken) -> bool {
+        token.kind() == rowan::SyntaxKind(WHITESPACE as u16)
+            || token.kind() == rowan::SyntaxKind(NEWLINE as u16)
+    }
+
+    /// Helper to strip trailing whitespace tokens from a list of green children
+    fn strip_trailing_ws_from_children(
+        mut children: Vec<NodeOrToken<GreenNode, GreenToken>>,
+    ) -> Vec<NodeOrToken<GreenNode, GreenToken>> {
+        while let Some(last) = children.last() {
+            if let NodeOrToken::Token(t) = last {
+                if Self::is_whitespace_token(t) {
+                    children.pop();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        children
+    }
+
+    /// Helper to strip trailing whitespace from a RELATION node's children
+    fn strip_relation_trailing_ws(relation: &SyntaxNode) -> GreenNode {
+        let children: Vec<_> = relation
+            .children_with_tokens()
+            .map(|c| Self::to_green(&c))
+            .collect();
+        let stripped = Self::strip_trailing_ws_from_children(children);
+        GreenNode::new(relation.kind().into(), stripped)
+    }
+
+    /// Helper to build nodes for insertion with odd syntax
+    fn build_odd_syntax_nodes(
+        before_ws: &str,
+        after_ws: &str,
+    ) -> Vec<NodeOrToken<GreenNode, GreenToken>> {
+        [
+            (!before_ws.is_empty())
+                .then(|| NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), before_ws))),
+            Some(NodeOrToken::Token(GreenToken::new(COMMA.into(), ","))),
+            (!after_ws.is_empty())
+                .then(|| NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), after_ws))),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    /// Detect if relations use odd syntax (whitespace before comma) and return whitespace parts
+    fn detect_odd_syntax(&self) -> Option<(String, String)> {
+        for entry_node in self.entries() {
+            let mut node = entry_node.0.next_sibling_or_token()?;
+
+            // Skip whitespace tokens and collect their text
+            let mut before = String::new();
+            while matches!(node.kind(), WHITESPACE | NEWLINE) {
+                if let NodeOrToken::Token(t) = &node {
+                    before.push_str(t.text());
+                }
+                node = node.next_sibling_or_token()?;
+            }
+
+            // Check if we found a comma after whitespace
+            if node.kind() == COMMA && !before.is_empty() {
+                let after = Self::collect_whitespace(node.next_sibling_or_token());
+                return Some((before, after));
+            }
+        }
+        None
+    }
+
+    /// Detect the most common whitespace pattern after commas in the relations.
+    ///
+    /// This matches debmutate's behavior of analyzing existing whitespace
+    /// patterns to preserve formatting when adding entries.
+    ///
+    /// # Arguments
+    /// * `default` - The default whitespace pattern to use if no pattern is detected
+    fn detect_whitespace_pattern(&self, default: &str) -> String {
+        use std::collections::HashMap;
+
+        let entries: Vec<_> = self.entries().collect();
+        let num_entries = entries.len();
+
+        if num_entries == 0 {
+            return String::from(""); // Empty list - first entry gets no prefix
+        }
+
+        if num_entries == 1 {
+            // Single entry - check if there's a pattern after it
+            if let Some(node) = entries[0].0.next_sibling_or_token() {
+                if node.kind() == COMMA {
+                    let pattern = Self::collect_whitespace(node.next_sibling_or_token());
+                    if !pattern.is_empty() {
+                        return pattern;
+                    }
+                }
+            }
+            return default.to_string(); // Use default for single entry with no pattern
+        }
+
+        // Count whitespace patterns after commas (excluding the last entry)
+        let mut whitespace_counts: HashMap<String, usize> = HashMap::new();
+
+        for (i, entry) in entries.iter().enumerate() {
+            if i == num_entries - 1 {
+                break; // Skip the last entry
+            }
+
+            // Look for comma and whitespace after this entry
+            if let Some(mut node) = entry.0.next_sibling_or_token() {
+                // Skip any whitespace/newlines before the comma (odd syntax)
+                while matches!(node.kind(), WHITESPACE | NEWLINE) {
+                    if let Some(next) = node.next_sibling_or_token() {
+                        node = next;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Found comma, collect all whitespace/newlines after it
+                if node.kind() == COMMA {
+                    let pattern = Self::collect_whitespace(node.next_sibling_or_token());
+                    if !pattern.is_empty() {
+                        *whitespace_counts.entry(pattern).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        // If there's exactly one pattern, use it
+        if whitespace_counts.len() == 1 {
+            if let Some((ws, _)) = whitespace_counts.iter().next() {
+                return ws.clone();
+            }
+        }
+
+        // Multiple patterns - use the most common
+        if let Some((ws, _)) = whitespace_counts.iter().max_by_key(|(_, count)| *count) {
+            return ws.clone();
+        }
+
+        // Use the provided default
+        default.to_string()
+    }
+
     /// Insert a new entry at the given index
-    pub fn insert(&mut self, idx: usize, entry: Entry) {
-        let is_empty = !self.0.children_with_tokens().any(|n| n.kind() == COMMA);
+    ///
+    /// # Arguments
+    /// * `idx` - The index to insert at
+    /// * `entry` - The entry to insert
+    /// * `default_sep` - Optional default separator to use if no pattern is detected (defaults to " ")
+    pub fn insert_with_separator(&mut self, idx: usize, entry: Entry, default_sep: Option<&str>) {
+        let is_empty = self.entries().next().is_none();
+        let whitespace = self.detect_whitespace_pattern(default_sep.unwrap_or(" "));
+
+        // Strip trailing whitespace first
+        self.strip_trailing_whitespace();
+
+        // Detect odd syntax (whitespace before comma)
+        let odd_syntax = self.detect_odd_syntax();
+
         let (position, new_children) = if let Some(current_entry) = self.entries().nth(idx) {
-            let to_insert: Vec<NodeOrToken<GreenNode, GreenToken>> = if idx == 0 && is_empty {
+            let to_insert = if idx == 0 && is_empty {
                 vec![entry.0.green().into()]
+            } else if let Some((before_ws, after_ws)) = &odd_syntax {
+                let mut nodes = vec![entry.0.green().into()];
+                nodes.extend(Self::build_odd_syntax_nodes(before_ws, after_ws));
+                nodes
             } else {
                 vec![
                     entry.0.green().into(),
                     NodeOrToken::Token(GreenToken::new(COMMA.into(), ",")),
-                    NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), " ")),
+                    NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), whitespace.as_str())),
                 ]
             };
 
             (current_entry.0.index(), to_insert)
         } else {
             let child_count = self.0.children_with_tokens().count();
-            (
-                child_count,
-                if idx == 0 {
-                    vec![entry.0.green().into()]
-                } else {
-                    vec![
-                        NodeOrToken::Token(GreenToken::new(COMMA.into(), ",")),
-                        NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), " ")),
-                        entry.0.green().into(),
-                    ]
-                },
-            )
+            let to_insert = if idx == 0 {
+                vec![entry.0.green().into()]
+            } else if let Some((before_ws, after_ws)) = &odd_syntax {
+                let mut nodes = Self::build_odd_syntax_nodes(before_ws, after_ws);
+                nodes.push(entry.0.green().into());
+                nodes
+            } else {
+                vec![
+                    NodeOrToken::Token(GreenToken::new(COMMA.into(), ",")),
+                    NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), whitespace.as_str())),
+                    entry.0.green().into(),
+                ]
+            };
+
+            (child_count, to_insert)
         };
         // We can safely replace the root here since Relations is a root node
         self.0 = SyntaxNode::new_root_mut(
@@ -626,6 +931,63 @@ impl Relations {
                     .green()
                     .splice_children(position..position, new_children),
             ),
+        );
+    }
+
+    /// Insert a new entry at the given index with default separator
+    pub fn insert(&mut self, idx: usize, entry: Entry) {
+        self.insert_with_separator(idx, entry, None);
+    }
+
+    /// Helper to recursively strip trailing whitespace from an ENTRY node
+    fn strip_entry_trailing_ws(entry: &SyntaxNode) -> GreenNode {
+        let mut children: Vec<_> = entry
+            .children_with_tokens()
+            .map(|c| Self::to_green(&c))
+            .collect();
+
+        // Strip trailing whitespace from the last RELATION if present
+        if let Some(NodeOrToken::Node(last)) = children.last() {
+            if last.kind() == rowan::SyntaxKind(RELATION as u16) {
+                // Replace last child with stripped version
+                let relation_node = entry.children().last().unwrap();
+                children.pop();
+                children.push(NodeOrToken::Node(
+                    Self::strip_relation_trailing_ws(&relation_node).into(),
+                ));
+            }
+        }
+
+        // Strip trailing whitespace tokens at entry level
+        let stripped = Self::strip_trailing_ws_from_children(children);
+        GreenNode::new(ENTRY.into(), stripped)
+    }
+
+    fn strip_trailing_whitespace(&mut self) {
+        let mut children: Vec<_> = self
+            .0
+            .children_with_tokens()
+            .map(|c| Self::to_green(&c))
+            .collect();
+
+        // Strip trailing whitespace from the last ENTRY if present
+        if let Some(NodeOrToken::Node(last)) = children.last() {
+            if last.kind() == rowan::SyntaxKind(ENTRY as u16) {
+                let last_entry = self.0.children().last().unwrap();
+                children.pop();
+                children.push(NodeOrToken::Node(
+                    Self::strip_entry_trailing_ws(&last_entry).into(),
+                ));
+            }
+        }
+
+        // Strip trailing whitespace tokens at root level
+        let stripped = Self::strip_trailing_ws_from_children(children);
+
+        let nc = self.0.children_with_tokens().count();
+        self.0 = SyntaxNode::new_root_mut(
+            self.0
+                .replace_with(self.0.green().splice_children(0..nc, stripped)),
         );
     }
 
@@ -671,6 +1033,646 @@ impl Relations {
     /// Get the number of entries in this relations field
     pub fn len(&self) -> usize {
         self.entries().count()
+    }
+
+    /// Ensure that a package has at least a minimum version constraint.
+    ///
+    /// If the package already exists with a version constraint that satisfies
+    /// the minimum version, it is left unchanged. Otherwise, the constraint
+    /// is updated or added.
+    ///
+    /// # Arguments
+    /// * `package` - The package name
+    /// * `minimum_version` - The minimum version required
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "debhelper (>= 9)".parse().unwrap();
+    /// relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+    /// assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    ///
+    /// let mut relations: Relations = "python3".parse().unwrap();
+    /// relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+    /// assert!(relations.to_string().contains("debhelper (>= 12)"));
+    /// ```
+    pub fn ensure_minimum_version(&mut self, package: &str, minimum_version: &Version) {
+        let mut found = false;
+        let mut obsolete_indices = vec![];
+        let mut update_idx = None;
+
+        let entries: Vec<_> = self.entries().collect();
+        for (idx, entry) in entries.iter().enumerate() {
+            let relations: Vec<_> = entry.relations().collect();
+
+            // Check if this entry has multiple alternatives with our package
+            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+            if names.len() > 1 && names.contains(&package.to_string()) {
+                // This is a complex alternative relation, mark for removal if obsolete
+                let is_obsolete = relations.iter().any(|r| {
+                    if r.name() != package {
+                        return false;
+                    }
+                    if let Some((vc, ver)) = r.version() {
+                        matches!(vc, VersionConstraint::GreaterThan if &ver < minimum_version)
+                            || matches!(vc, VersionConstraint::GreaterThanEqual if &ver <= minimum_version)
+                    } else {
+                        false
+                    }
+                });
+                if is_obsolete {
+                    obsolete_indices.push(idx);
+                }
+                continue;
+            }
+
+            // Single package entry
+            if names.len() == 1 && names[0] == package {
+                found = true;
+                let relation = relations.into_iter().next().unwrap();
+
+                // Check if update is needed
+                let should_update = if let Some((vc, ver)) = relation.version() {
+                    match vc {
+                        VersionConstraint::GreaterThanEqual | VersionConstraint::GreaterThan => {
+                            &ver < minimum_version
+                        }
+                        _ => false,
+                    }
+                } else {
+                    true
+                };
+
+                if should_update {
+                    update_idx = Some(idx);
+                }
+                break;
+            }
+        }
+
+        // Perform updates after iteration
+        if let Some(idx) = update_idx {
+            let relation = Relation::new(
+                package,
+                Some((VersionConstraint::GreaterThanEqual, minimum_version.clone())),
+            );
+            // Get the existing entry and replace its relation to preserve formatting
+            let mut entry = self.get_entry(idx).unwrap();
+            entry.replace(0, relation);
+            self.replace(idx, entry);
+        }
+
+        // Remove obsolete entries
+        for idx in obsolete_indices.into_iter().rev() {
+            self.remove_entry(idx);
+        }
+
+        // Add if not found
+        if !found {
+            let relation = Relation::new(
+                package,
+                Some((VersionConstraint::GreaterThanEqual, minimum_version.clone())),
+            );
+            self.push(Entry::from(relation));
+        }
+    }
+
+    /// Ensure that a package has an exact version constraint.
+    ///
+    /// # Arguments
+    /// * `package` - The package name
+    /// * `version` - The exact version required
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "debhelper (>= 9)".parse().unwrap();
+    /// relations.ensure_exact_version("debhelper", &"12".parse().unwrap());
+    /// assert_eq!(relations.to_string(), "debhelper (= 12)");
+    /// ```
+    pub fn ensure_exact_version(&mut self, package: &str, version: &Version) {
+        let mut found = false;
+        let mut update_idx = None;
+
+        let entries: Vec<_> = self.entries().collect();
+        for (idx, entry) in entries.iter().enumerate() {
+            let relations: Vec<_> = entry.relations().collect();
+            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+
+            if names.len() > 1 && names[0] == package {
+                panic!("Complex rule for {}, aborting", package);
+            }
+
+            if names.len() == 1 && names[0] == package {
+                found = true;
+                let relation = relations.into_iter().next().unwrap();
+
+                let should_update = if let Some((vc, ver)) = relation.version() {
+                    vc != VersionConstraint::Equal || &ver != version
+                } else {
+                    true
+                };
+
+                if should_update {
+                    update_idx = Some(idx);
+                }
+                break;
+            }
+        }
+
+        // Perform update after iteration
+        if let Some(idx) = update_idx {
+            let relation =
+                Relation::new(package, Some((VersionConstraint::Equal, version.clone())));
+            // Get the existing entry and replace its relation to preserve formatting
+            let mut entry = self.get_entry(idx).unwrap();
+            entry.replace(0, relation);
+            self.replace(idx, entry);
+        }
+
+        if !found {
+            let relation =
+                Relation::new(package, Some((VersionConstraint::Equal, version.clone())));
+            self.push(Entry::from(relation));
+        }
+    }
+
+    /// Ensure that a package dependency exists, without specifying a version.
+    ///
+    /// If the package already exists (with or without a version constraint),
+    /// the relations field is left unchanged. Otherwise, the package is added
+    /// without a version constraint.
+    ///
+    /// # Arguments
+    /// * `package` - The package name
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "python3".parse().unwrap();
+    /// relations.ensure_some_version("debhelper");
+    /// assert!(relations.to_string().contains("debhelper"));
+    /// ```
+    pub fn ensure_some_version(&mut self, package: &str) {
+        for entry in self.entries() {
+            let relations: Vec<_> = entry.relations().collect();
+            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+
+            if names.len() > 1 && names[0] == package {
+                panic!("Complex rule for {}, aborting", package);
+            }
+
+            if names.len() == 1 && names[0] == package {
+                // Package already exists, don't modify
+                return;
+            }
+        }
+
+        // Package not found, add it
+        let relation = Relation::simple(package);
+        self.push(Entry::from(relation));
+    }
+
+    /// Ensure that a substitution variable is present in the relations.
+    ///
+    /// If the substvar already exists, it is left unchanged. Otherwise, it is added
+    /// at the end of the relations list.
+    ///
+    /// # Arguments
+    /// * `substvar` - The substitution variable (e.g., "${misc:Depends}")
+    ///
+    /// # Returns
+    /// `Ok(())` on success, or `Err` with an error message if parsing fails
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "python3".parse().unwrap();
+    /// relations.ensure_substvar("${misc:Depends}").unwrap();
+    /// assert_eq!(relations.to_string(), "python3, ${misc:Depends}");
+    /// ```
+    pub fn ensure_substvar(&mut self, substvar: &str) -> Result<(), String> {
+        // Check if the substvar already exists
+        for existing in self.substvars() {
+            if existing.trim() == substvar.trim() {
+                return Ok(());
+            }
+        }
+
+        // Parse the substvar
+        let (parsed, errors) = Relations::parse_relaxed(substvar, true);
+        if !errors.is_empty() {
+            return Err(errors.join("\n"));
+        }
+
+        // Detect whitespace pattern to preserve formatting
+        let whitespace = self.detect_whitespace_pattern(" ");
+
+        // Find the substvar node and inject it
+        for substvar_node in parsed.0.children().filter(|n| n.kind() == SUBSTVAR) {
+            let has_content = self.entries().next().is_some() || self.substvars().next().is_some();
+
+            let mut builder = GreenNodeBuilder::new();
+            builder.start_node(ROOT.into());
+
+            // Copy existing content
+            for child in self.0.children_with_tokens() {
+                match child {
+                    NodeOrToken::Node(n) => inject(&mut builder, n),
+                    NodeOrToken::Token(t) => builder.token(t.kind().into(), t.text()),
+                }
+            }
+
+            // Add separator if needed, using detected whitespace pattern
+            if has_content {
+                builder.token(COMMA.into(), ",");
+                builder.token(WHITESPACE.into(), whitespace.as_str());
+            }
+
+            // Inject the substvar node
+            inject(&mut builder, substvar_node);
+
+            builder.finish_node();
+            self.0 = SyntaxNode::new_root_mut(builder.finish());
+        }
+
+        Ok(())
+    }
+
+    /// Remove a substitution variable from the relations.
+    ///
+    /// If the substvar exists, it is removed along with its surrounding separators.
+    /// If the substvar does not exist, this is a no-op.
+    ///
+    /// # Arguments
+    /// * `substvar` - The substitution variable to remove (e.g., "${misc:Depends}")
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let (mut relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}", true);
+    /// relations.drop_substvar("${misc:Depends}");
+    /// assert_eq!(relations.to_string(), "python3");
+    /// ```
+    pub fn drop_substvar(&mut self, substvar: &str) {
+        // Find all substvar nodes that match the given string
+        let substvars_to_remove: Vec<_> = self
+            .0
+            .children()
+            .filter_map(Substvar::cast)
+            .filter(|s| s.to_string().trim() == substvar.trim())
+            .collect();
+
+        for substvar_node in substvars_to_remove {
+            // Determine if this is the first substvar (no previous ENTRY or SUBSTVAR siblings)
+            let is_first = !substvar_node
+                .0
+                .siblings(Direction::Prev)
+                .skip(1)
+                .any(|n| n.kind() == ENTRY || n.kind() == SUBSTVAR);
+
+            let mut removed_comma = false;
+
+            // Remove whitespace and comma after the substvar
+            while let Some(n) = substvar_node.0.next_sibling_or_token() {
+                if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                    n.detach();
+                } else if n.kind() == COMMA {
+                    n.detach();
+                    removed_comma = true;
+                    break;
+                } else {
+                    break;
+                }
+            }
+
+            // If not first, remove preceding whitespace and comma
+            if !is_first {
+                while let Some(n) = substvar_node.0.prev_sibling_or_token() {
+                    if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                        n.detach();
+                    } else if !removed_comma && n.kind() == COMMA {
+                        n.detach();
+                        break;
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                // If first and we didn't remove a comma after, clean up any leading whitespace
+                while let Some(n) = substvar_node.0.next_sibling_or_token() {
+                    if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                        n.detach();
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            // Finally, detach the substvar node itself
+            substvar_node.0.detach();
+        }
+    }
+
+    /// Filter entries based on a predicate function.
+    ///
+    /// # Arguments
+    /// * `keep` - A function that returns true for entries to keep
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+    /// relations.filter_entries(|entry| {
+    ///     entry.relations().any(|r| r.name().starts_with("python"))
+    /// });
+    /// assert_eq!(relations.to_string(), "python3");
+    /// ```
+    pub fn filter_entries<F>(&mut self, keep: F)
+    where
+        F: Fn(&Entry) -> bool,
+    {
+        let indices_to_remove: Vec<_> = self
+            .entries()
+            .enumerate()
+            .filter_map(|(idx, entry)| if keep(&entry) { None } else { Some(idx) })
+            .collect();
+
+        // Remove in reverse order to maintain correct indices
+        for idx in indices_to_remove.into_iter().rev() {
+            self.remove_entry(idx);
+        }
+    }
+
+    /// Check whether the relations are sorted according to a given sorting order.
+    ///
+    /// # Arguments
+    /// * `sorting_order` - The sorting order to check against
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::{Relations, WrapAndSortOrder};
+    ///
+    /// let relations: Relations = "debhelper, python3, rustc".parse().unwrap();
+    /// assert!(relations.is_sorted(&WrapAndSortOrder));
+    ///
+    /// let relations: Relations = "rustc, debhelper, python3".parse().unwrap();
+    /// assert!(!relations.is_sorted(&WrapAndSortOrder));
+    /// ```
+    pub fn is_sorted(&self, sorting_order: &impl SortingOrder) -> bool {
+        let mut last_name: Option<String> = None;
+        for entry in self.entries() {
+            // Skip empty entries
+            let mut relations = entry.relations();
+            let Some(relation) = relations.next() else {
+                continue;
+            };
+
+            let name = relation.name();
+
+            // Skip items that should be ignored
+            if sorting_order.ignore(&name) {
+                continue;
+            }
+
+            // Check if this breaks the sort order
+            if let Some(ref last) = last_name {
+                if sorting_order.lt(&name, last) {
+                    return false;
+                }
+            }
+
+            last_name = Some(name);
+        }
+        true
+    }
+
+    /// Find the position to insert an entry while maintaining sort order.
+    ///
+    /// This method detects the current sorting order and returns the appropriate
+    /// insertion position. If there are fewer than 2 entries, it defaults to
+    /// WrapAndSortOrder. If no sorting order is detected, it returns the end position.
+    ///
+    /// # Arguments
+    /// * `entry` - The entry to insert
+    ///
+    /// # Returns
+    /// The index where the entry should be inserted
+    fn find_insert_position(&self, entry: &Entry) -> usize {
+        // Get the package name from the first relation in the entry
+        let Some(relation) = entry.relations().next() else {
+            // Empty entry, just append at the end
+            return self.len();
+        };
+        let package_name = relation.name();
+
+        // Count non-empty entries
+        let count = self.entries().filter(|e| !e.is_empty()).count();
+
+        // If there are less than 2 items, default to WrapAndSortOrder
+        let sorting_order: Box<dyn SortingOrder> = if count < 2 {
+            Box::new(WrapAndSortOrder)
+        } else {
+            // Try to detect which sorting order is being used
+            // Try WrapAndSortOrder first, then DefaultSortingOrder
+            if self.is_sorted(&WrapAndSortOrder) {
+                Box::new(WrapAndSortOrder)
+            } else if self.is_sorted(&DefaultSortingOrder) {
+                Box::new(DefaultSortingOrder)
+            } else {
+                // No sorting order detected, just append at the end
+                return self.len();
+            }
+        };
+
+        // If adding a special item that should be ignored by this sort order, append at the end
+        if sorting_order.ignore(&package_name) {
+            return self.len();
+        }
+
+        // Insert in sorted order among regular items
+        let mut position = 0;
+        for (idx, existing_entry) in self.entries().enumerate() {
+            let mut existing_relations = existing_entry.relations();
+            let Some(existing_relation) = existing_relations.next() else {
+                // Empty entry, skip
+                position += 1;
+                continue;
+            };
+
+            let existing_name = existing_relation.name();
+
+            // Skip special items when finding insertion position
+            if sorting_order.ignore(&existing_name) {
+                position += 1;
+                continue;
+            }
+
+            // Compare with regular items only
+            if sorting_order.lt(&package_name, &existing_name) {
+                return idx;
+            }
+            position += 1;
+        }
+
+        position
+    }
+
+    /// Drop a dependency from the relations by package name.
+    ///
+    /// # Arguments
+    /// * `package` - The package name to remove
+    ///
+    /// # Returns
+    /// `true` if the package was found and removed, `false` otherwise
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let mut relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+    /// assert!(relations.drop_dependency("debhelper"));
+    /// assert_eq!(relations.to_string(), "python3, rustc");
+    /// assert!(!relations.drop_dependency("nonexistent"));
+    /// ```
+    pub fn drop_dependency(&mut self, package: &str) -> bool {
+        let indices_to_remove: Vec<_> = self
+            .entries()
+            .enumerate()
+            .filter_map(|(idx, entry)| {
+                let relations: Vec<_> = entry.relations().collect();
+                let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+                if names == vec![package] {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let found = !indices_to_remove.is_empty();
+
+        // Remove in reverse order to maintain correct indices
+        for idx in indices_to_remove.into_iter().rev() {
+            self.remove_entry(idx);
+        }
+
+        found
+    }
+
+    /// Add a dependency at a specific position or auto-detect the position.
+    ///
+    /// If `position` is `None`, the position is automatically determined based
+    /// on the detected sorting order. If a sorting order is detected, the entry
+    /// is inserted in the appropriate position to maintain that order. Otherwise,
+    /// it is appended at the end.
+    ///
+    /// # Arguments
+    /// * `entry` - The entry to add
+    /// * `position` - Optional position to insert at
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::{Relations, Relation, Entry};
+    ///
+    /// let mut relations: Relations = "python3, rustc".parse().unwrap();
+    /// let entry = Entry::from(Relation::simple("debhelper"));
+    /// relations.add_dependency(entry, None);
+    /// // debhelper is inserted in sorted order (if order is detected)
+    /// ```
+    pub fn add_dependency(&mut self, entry: Entry, position: Option<usize>) {
+        let pos = position.unwrap_or_else(|| self.find_insert_position(&entry));
+        self.insert(pos, entry);
+    }
+
+    /// Get the entry containing a specific package.
+    ///
+    /// This returns the first entry that contains exactly one relation with the
+    /// specified package name (no alternatives).
+    ///
+    /// # Arguments
+    /// * `package` - The package name to search for
+    ///
+    /// # Returns
+    /// A tuple of (index, Entry) if found
+    ///
+    /// # Errors
+    /// Returns `Err` with a message if the package is found in a complex rule (with alternatives)
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let relations: Relations = "python3, debhelper (>= 12), rustc".parse().unwrap();
+    /// let (idx, entry) = relations.get_relation("debhelper").unwrap();
+    /// assert_eq!(idx, 1);
+    /// assert_eq!(entry.to_string(), "debhelper (>= 12)");
+    /// ```
+    pub fn get_relation(&self, package: &str) -> Result<(usize, Entry), String> {
+        for (idx, entry) in self.entries().enumerate() {
+            let relations: Vec<_> = entry.relations().collect();
+            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+
+            if names.len() > 1 && names.contains(&package.to_string()) {
+                return Err(format!("Complex rule for {}, aborting", package));
+            }
+
+            if names.len() == 1 && names[0] == package {
+                return Ok((idx, entry));
+            }
+        }
+        Err(format!("Package {} not found", package))
+    }
+
+    /// Iterate over all entries containing a specific package.
+    ///
+    /// # Arguments
+    /// * `package` - The package name to search for
+    ///
+    /// # Returns
+    /// An iterator over tuples of (index, Entry)
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let relations: Relations = "python3 | python3-minimal, python3-dev".parse().unwrap();
+    /// let entries: Vec<_> = relations.iter_relations_for("python3").collect();
+    /// assert_eq!(entries.len(), 1);
+    /// ```
+    pub fn iter_relations_for(&self, package: &str) -> impl Iterator<Item = (usize, Entry)> + '_ {
+        let package = package.to_string();
+        self.entries().enumerate().filter(move |(_, entry)| {
+            let names: Vec<_> = entry.relations().map(|r| r.name()).collect();
+            names.contains(&package)
+        })
+    }
+
+    /// Check whether a package exists in the relations.
+    ///
+    /// # Arguments
+    /// * `package` - The package name to search for
+    ///
+    /// # Returns
+    /// `true` if the package is found, `false` otherwise
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    ///
+    /// let relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+    /// assert!(relations.has_relation("debhelper"));
+    /// assert!(!relations.has_relation("nonexistent"));
+    /// ```
+    pub fn has_relation(&self, package: &str) -> bool {
+        self.entries()
+            .any(|entry| entry.relations().any(|r| r.name() == package))
     }
 }
 
@@ -1672,7 +2674,7 @@ pub struct RelationBuilder {
     name: String,
     version_constraint: Option<(VersionConstraint, Version)>,
     archqual: Option<String>,
-    architectures: Vec<String>,
+    architectures: Option<Vec<String>>,
     profiles: Vec<Vec<BuildProfile>>,
 }
 
@@ -1683,7 +2685,7 @@ impl RelationBuilder {
             name: name.to_string(),
             version_constraint: None,
             archqual: None,
-            architectures: vec![],
+            architectures: None,
             profiles: vec![],
         }
     }
@@ -1702,7 +2704,7 @@ impl RelationBuilder {
 
     /// Set the architectures for this relation
     pub fn architectures(mut self, architectures: Vec<String>) -> Self {
-        self.architectures = architectures;
+        self.architectures = Some(architectures);
         self
     }
 
@@ -1724,7 +2726,9 @@ impl RelationBuilder {
         if let Some(archqual) = &self.archqual {
             relation.set_archqual(archqual);
         }
-        relation.set_architectures(self.architectures.iter().map(|s| s.as_str()));
+        if let Some(architectures) = &self.architectures {
+            relation.set_architectures(architectures.iter().map(|s| s.as_str()));
+        }
         for profile in &self.profiles {
             relation.add_profile(profile);
         }
@@ -2093,6 +3097,23 @@ mod tests {
             rels.to_string(),
             "python3-dulwich (>= 0.20.21), python3-dulwich"
         );
+    }
+
+    #[test]
+    fn test_insert_with_custom_separator() {
+        let mut rels: Relations = "python3".parse().unwrap();
+        let entry = Entry::from(vec![Relation::simple("debhelper")]);
+        rels.insert_with_separator(1, entry, Some("\n "));
+        assert_eq!(rels.to_string(), "python3,\n debhelper");
+    }
+
+    #[test]
+    fn test_insert_with_wrap_and_sort_separator() {
+        let mut rels: Relations = "python3".parse().unwrap();
+        let entry = Entry::from(vec![Relation::simple("rustc")]);
+        // Simulate wrap-and-sort -a style with field name "Depends: " (9 chars)
+        rels.insert_with_separator(1, entry, Some("\n         "));
+        assert_eq!(rels.to_string(), "python3,\n         rustc");
     }
 
     #[test]
@@ -2548,5 +3569,667 @@ mod tests {
         let mut relation = Relation::simple("samba");
         relation.set_architectures(vec!["amd64", "i386"].into_iter());
         assert_eq!(relation.to_string(), "samba [amd64 i386]");
+    }
+
+    #[test]
+    fn test_relation_builder_no_architectures() {
+        // Test that building a relation without architectures doesn't add empty brackets
+        let relation = Relation::build("debhelper").build();
+        assert_eq!(relation.to_string(), "debhelper");
+    }
+
+    #[test]
+    fn test_relation_builder_with_architectures() {
+        // Test that building a relation with architectures works correctly
+        let relation = Relation::build("samba")
+            .architectures(vec!["amd64".to_string(), "i386".to_string()])
+            .build();
+        assert_eq!(relation.to_string(), "samba [amd64 i386]");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_add_new() {
+        let mut relations: Relations = "python3".parse().unwrap();
+        relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "python3, debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_update() {
+        let mut relations: Relations = "debhelper (>= 9)".parse().unwrap();
+        relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_no_change() {
+        let mut relations: Relations = "debhelper (>= 13)".parse().unwrap();
+        relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "debhelper (>= 13)");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_no_version() {
+        let mut relations: Relations = "debhelper".parse().unwrap();
+        relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_preserves_newline() {
+        // Test that newline after the field name is preserved
+        // This is the format often used in Debian control files:
+        // Build-Depends:
+        //  debhelper (>= 9),
+        //  pkg-config
+        let input = "\n debhelper (>= 9),\n pkg-config,\n uuid-dev";
+        let mut relations: Relations = input.parse().unwrap();
+        relations.ensure_minimum_version("debhelper", &"12~".parse().unwrap());
+        let result = relations.to_string();
+
+        // The newline before the first entry should be preserved
+        assert!(
+            result.starts_with('\n'),
+            "Expected result to start with newline, got: {:?}",
+            result
+        );
+        assert_eq!(result, "\n debhelper (>= 12~),\n pkg-config,\n uuid-dev");
+    }
+
+    #[test]
+    fn test_ensure_minimum_version_preserves_newline_in_control() {
+        // Test the full scenario from the bug report
+        use crate::lossless::Control;
+        use std::str::FromStr;
+
+        let input = r#"Source: f2fs-tools
+Section: admin
+Priority: optional
+Maintainer: Test <test@example.com>
+Build-Depends:
+ debhelper (>= 9),
+ pkg-config,
+ uuid-dev
+
+Package: f2fs-tools
+Description: test
+"#;
+
+        let control = Control::from_str(input).unwrap();
+        let mut source = control.source().unwrap();
+        let mut build_depends = source.build_depends().unwrap();
+
+        let version = Version::from_str("12~").unwrap();
+        build_depends.ensure_minimum_version("debhelper", &version);
+
+        source.set_build_depends(&build_depends);
+
+        let output = control.to_string();
+
+        // Check that the formatting is preserved - the newline after "Build-Depends:" should still be there
+        assert!(
+            output.contains("Build-Depends:\n debhelper (>= 12~)"),
+            "Expected 'Build-Depends:\\n debhelper (>= 12~)' but got:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_ensure_exact_version_add_new() {
+        let mut relations: Relations = "python3".parse().unwrap();
+        relations.ensure_exact_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "python3, debhelper (= 12)");
+    }
+
+    #[test]
+    fn test_ensure_exact_version_update() {
+        let mut relations: Relations = "debhelper (>= 9)".parse().unwrap();
+        relations.ensure_exact_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "debhelper (= 12)");
+    }
+
+    #[test]
+    fn test_ensure_exact_version_no_change() {
+        let mut relations: Relations = "debhelper (= 12)".parse().unwrap();
+        relations.ensure_exact_version("debhelper", &"12".parse().unwrap());
+        assert_eq!(relations.to_string(), "debhelper (= 12)");
+    }
+
+    #[test]
+    fn test_ensure_some_version_add_new() {
+        let mut relations: Relations = "python3".parse().unwrap();
+        relations.ensure_some_version("debhelper");
+        assert_eq!(relations.to_string(), "python3, debhelper");
+    }
+
+    #[test]
+    fn test_ensure_some_version_exists_with_version() {
+        let mut relations: Relations = "debhelper (>= 12)".parse().unwrap();
+        relations.ensure_some_version("debhelper");
+        assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_some_version_exists_no_version() {
+        let mut relations: Relations = "debhelper".parse().unwrap();
+        relations.ensure_some_version("debhelper");
+        assert_eq!(relations.to_string(), "debhelper");
+    }
+
+    #[test]
+    fn test_ensure_substvar() {
+        let mut relations: Relations = "python3".parse().unwrap();
+        relations.ensure_substvar("${misc:Depends}").unwrap();
+        assert_eq!(relations.to_string(), "python3, ${misc:Depends}");
+    }
+
+    #[test]
+    fn test_ensure_substvar_already_exists() {
+        let (mut relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}", true);
+        relations.ensure_substvar("${misc:Depends}").unwrap();
+        assert_eq!(relations.to_string(), "python3, ${misc:Depends}");
+    }
+
+    #[test]
+    fn test_ensure_substvar_empty_relations() {
+        let mut relations: Relations = Relations::new();
+        relations.ensure_substvar("${misc:Depends}").unwrap();
+        assert_eq!(relations.to_string(), "${misc:Depends}");
+    }
+
+    #[test]
+    fn test_ensure_substvar_preserves_whitespace() {
+        // Test with non-standard whitespace (multiple spaces)
+        let (mut relations, _) = Relations::parse_relaxed("python3,  rustc", false);
+        relations.ensure_substvar("${misc:Depends}").unwrap();
+        // Should preserve the double-space pattern
+        assert_eq!(relations.to_string(), "python3,  rustc,  ${misc:Depends}");
+    }
+
+    #[test]
+    fn test_drop_substvar_basic() {
+        let (mut relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_drop_substvar_first_position() {
+        let (mut relations, _) = Relations::parse_relaxed("${misc:Depends}, python3", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_drop_substvar_middle_position() {
+        let (mut relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}, rustc", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3, rustc");
+    }
+
+    #[test]
+    fn test_drop_substvar_only_substvar() {
+        let (mut relations, _) = Relations::parse_relaxed("${misc:Depends}", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "");
+    }
+
+    #[test]
+    fn test_drop_substvar_not_exists() {
+        let (mut relations, _) = Relations::parse_relaxed("python3, rustc", false);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3, rustc");
+    }
+
+    #[test]
+    fn test_drop_substvar_multiple_substvars() {
+        let (mut relations, _) =
+            Relations::parse_relaxed("python3, ${misc:Depends}, ${shlibs:Depends}", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3, ${shlibs:Depends}");
+    }
+
+    #[test]
+    fn test_drop_substvar_preserves_whitespace() {
+        let (mut relations, _) = Relations::parse_relaxed("python3,  ${misc:Depends}", true);
+        relations.drop_substvar("${misc:Depends}");
+        assert_eq!(relations.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_filter_entries_basic() {
+        let mut relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+        relations.filter_entries(|entry| entry.relations().any(|r| r.name().starts_with("python")));
+        assert_eq!(relations.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_filter_entries_keep_all() {
+        let mut relations: Relations = "python3, debhelper".parse().unwrap();
+        relations.filter_entries(|_| true);
+        assert_eq!(relations.to_string(), "python3, debhelper");
+    }
+
+    #[test]
+    fn test_filter_entries_remove_all() {
+        let mut relations: Relations = "python3, debhelper".parse().unwrap();
+        relations.filter_entries(|_| false);
+        assert_eq!(relations.to_string(), "");
+    }
+
+    #[test]
+    fn test_filter_entries_keep_middle() {
+        let mut relations: Relations = "aaa, bbb, ccc".parse().unwrap();
+        relations.filter_entries(|entry| entry.relations().any(|r| r.name() == "bbb"));
+        assert_eq!(relations.to_string(), "bbb");
+    }
+
+    // Tests for new convenience methods
+
+    #[test]
+    fn test_is_sorted_wrap_and_sort_order() {
+        // Sorted according to WrapAndSortOrder
+        let relations: Relations = "debhelper, python3, rustc".parse().unwrap();
+        assert!(relations.is_sorted(&WrapAndSortOrder));
+
+        // Not sorted
+        let relations: Relations = "rustc, debhelper, python3".parse().unwrap();
+        assert!(!relations.is_sorted(&WrapAndSortOrder));
+
+        // Build systems first (sorted alphabetically within their group)
+        let (relations, _) =
+            Relations::parse_relaxed("cdbs, debhelper-compat, python3, ${misc:Depends}", true);
+        assert!(relations.is_sorted(&WrapAndSortOrder));
+    }
+
+    #[test]
+    fn test_is_sorted_default_order() {
+        // Sorted alphabetically
+        let relations: Relations = "aaa, bbb, ccc".parse().unwrap();
+        assert!(relations.is_sorted(&DefaultSortingOrder));
+
+        // Not sorted
+        let relations: Relations = "ccc, aaa, bbb".parse().unwrap();
+        assert!(!relations.is_sorted(&DefaultSortingOrder));
+
+        // Special items at end
+        let (relations, _) = Relations::parse_relaxed("aaa, bbb, ${misc:Depends}", true);
+        assert!(relations.is_sorted(&DefaultSortingOrder));
+    }
+
+    #[test]
+    fn test_is_sorted_with_substvars() {
+        // Substvars should be ignored by DefaultSortingOrder
+        let (relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}, rustc", true);
+        // This is considered sorted because ${misc:Depends} is ignored
+        assert!(relations.is_sorted(&DefaultSortingOrder));
+    }
+
+    #[test]
+    fn test_drop_dependency_exists() {
+        let mut relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+        assert!(relations.drop_dependency("debhelper"));
+        assert_eq!(relations.to_string(), "python3, rustc");
+    }
+
+    #[test]
+    fn test_drop_dependency_not_exists() {
+        let mut relations: Relations = "python3, rustc".parse().unwrap();
+        assert!(!relations.drop_dependency("nonexistent"));
+        assert_eq!(relations.to_string(), "python3, rustc");
+    }
+
+    #[test]
+    fn test_drop_dependency_only_item() {
+        let mut relations: Relations = "python3".parse().unwrap();
+        assert!(relations.drop_dependency("python3"));
+        assert_eq!(relations.to_string(), "");
+    }
+
+    #[test]
+    fn test_add_dependency_to_empty() {
+        let mut relations: Relations = "".parse().unwrap();
+        let entry = Entry::from(Relation::simple("python3"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_add_dependency_sorted_position() {
+        let mut relations: Relations = "debhelper, rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("python3"));
+        relations.add_dependency(entry, None);
+        // Should be inserted in sorted position
+        assert_eq!(relations.to_string(), "debhelper, python3, rustc");
+    }
+
+    #[test]
+    fn test_add_dependency_explicit_position() {
+        let mut relations: Relations = "python3, rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper"));
+        relations.add_dependency(entry, Some(0));
+        assert_eq!(relations.to_string(), "debhelper, python3, rustc");
+    }
+
+    #[test]
+    fn test_add_dependency_build_system_first() {
+        let mut relations: Relations = "python3, rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper-compat"));
+        relations.add_dependency(entry, None);
+        // debhelper-compat should be inserted first (build system)
+        assert_eq!(relations.to_string(), "debhelper-compat, python3, rustc");
+    }
+
+    #[test]
+    fn test_add_dependency_at_end() {
+        let mut relations: Relations = "debhelper, python3".parse().unwrap();
+        let entry = Entry::from(Relation::simple("zzz-package"));
+        relations.add_dependency(entry, None);
+        // Should be added at the end (alphabetically after python3)
+        assert_eq!(relations.to_string(), "debhelper, python3, zzz-package");
+    }
+
+    #[test]
+    fn test_add_dependency_to_single_entry() {
+        // Regression test: ensure comma is added when inserting into single-entry Relations
+        let mut relations: Relations = "python3-dulwich".parse().unwrap();
+        let entry: Entry = "debhelper-compat (= 12)".parse().unwrap();
+        relations.add_dependency(entry, None);
+        // Should insert with comma separator
+        assert_eq!(
+            relations.to_string(),
+            "debhelper-compat (= 12), python3-dulwich"
+        );
+    }
+
+    #[test]
+    fn test_get_relation_exists() {
+        let relations: Relations = "python3, debhelper (>= 12), rustc".parse().unwrap();
+        let result = relations.get_relation("debhelper");
+        assert!(result.is_ok());
+        let (idx, entry) = result.unwrap();
+        assert_eq!(idx, 1);
+        assert_eq!(entry.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_get_relation_not_exists() {
+        let relations: Relations = "python3, rustc".parse().unwrap();
+        let result = relations.get_relation("nonexistent");
+        assert_eq!(result, Err("Package nonexistent not found".to_string()));
+    }
+
+    #[test]
+    fn test_get_relation_complex_rule() {
+        let relations: Relations = "python3 | python3-minimal, rustc".parse().unwrap();
+        let result = relations.get_relation("python3");
+        assert_eq!(
+            result,
+            Err("Complex rule for python3, aborting".to_string())
+        );
+    }
+
+    #[test]
+    fn test_iter_relations_for_simple() {
+        let relations: Relations = "python3, debhelper, python3-dev".parse().unwrap();
+        let entries: Vec<_> = relations.iter_relations_for("python3").collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, 0);
+        assert_eq!(entries[0].1.to_string(), "python3");
+    }
+
+    #[test]
+    fn test_iter_relations_for_alternatives() {
+        let relations: Relations = "python3 | python3-minimal, python3-dev".parse().unwrap();
+        let entries: Vec<_> = relations.iter_relations_for("python3").collect();
+        // Should find both the alternative entry and python3-dev is not included
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, 0);
+    }
+
+    #[test]
+    fn test_iter_relations_for_not_found() {
+        let relations: Relations = "python3, rustc".parse().unwrap();
+        let entries: Vec<_> = relations.iter_relations_for("debhelper").collect();
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_has_relation_exists() {
+        let relations: Relations = "python3, debhelper, rustc".parse().unwrap();
+        assert!(relations.has_relation("debhelper"));
+        assert!(relations.has_relation("python3"));
+        assert!(relations.has_relation("rustc"));
+    }
+
+    #[test]
+    fn test_has_relation_not_exists() {
+        let relations: Relations = "python3, rustc".parse().unwrap();
+        assert!(!relations.has_relation("debhelper"));
+    }
+
+    #[test]
+    fn test_has_relation_in_alternative() {
+        let relations: Relations = "python3 | python3-minimal".parse().unwrap();
+        assert!(relations.has_relation("python3"));
+        assert!(relations.has_relation("python3-minimal"));
+    }
+
+    #[test]
+    fn test_sorting_order_wrap_and_sort_build_systems() {
+        let order = WrapAndSortOrder;
+        // Build systems should come before regular packages
+        assert!(order.lt("debhelper", "python3"));
+        assert!(order.lt("debhelper-compat", "rustc"));
+        assert!(order.lt("cdbs", "aaa"));
+        assert!(order.lt("dh-python", "python3"));
+    }
+
+    #[test]
+    fn test_sorting_order_wrap_and_sort_regular_packages() {
+        let order = WrapAndSortOrder;
+        // Regular packages sorted alphabetically
+        assert!(order.lt("aaa", "bbb"));
+        assert!(order.lt("python3", "rustc"));
+        assert!(!order.lt("rustc", "python3"));
+    }
+
+    #[test]
+    fn test_sorting_order_wrap_and_sort_substvars() {
+        let order = WrapAndSortOrder;
+        // Substvars should come after regular packages
+        assert!(order.lt("python3", "${misc:Depends}"));
+        assert!(!order.lt("${misc:Depends}", "python3"));
+        // But wrap-and-sort doesn't ignore them
+        assert!(!order.ignore("${misc:Depends}"));
+    }
+
+    #[test]
+    fn test_sorting_order_default_special_items() {
+        let order = DefaultSortingOrder;
+        // Special items should come after regular items
+        assert!(order.lt("python3", "${misc:Depends}"));
+        assert!(order.lt("aaa", "@cdbs@"));
+        // And should be ignored
+        assert!(order.ignore("${misc:Depends}"));
+        assert!(order.ignore("@cdbs@"));
+        assert!(!order.ignore("python3"));
+    }
+
+    #[test]
+    fn test_is_special_package_name() {
+        assert!(is_special_package_name("${misc:Depends}"));
+        assert!(is_special_package_name("${shlibs:Depends}"));
+        assert!(is_special_package_name("@cdbs@"));
+        assert!(!is_special_package_name("python3"));
+        assert!(!is_special_package_name("debhelper"));
+    }
+
+    #[test]
+    fn test_add_dependency_with_explicit_position() {
+        // Test that add_dependency works with explicit position and preserves whitespace
+        let mut relations: Relations = "python3,  rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper"));
+        relations.add_dependency(entry, Some(1));
+        // Should preserve the 2-space pattern from the original
+        assert_eq!(relations.to_string(), "python3,  debhelper,  rustc");
+    }
+
+    #[test]
+    fn test_whitespace_detection_single_space() {
+        let mut relations: Relations = "python3, rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper"));
+        relations.add_dependency(entry, Some(1));
+        assert_eq!(relations.to_string(), "python3, debhelper, rustc");
+    }
+
+    #[test]
+    fn test_whitespace_detection_multiple_spaces() {
+        let mut relations: Relations = "python3,  rustc,  gcc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper"));
+        relations.add_dependency(entry, Some(1));
+        // Should detect and use the 2-space pattern
+        assert_eq!(relations.to_string(), "python3,  debhelper,  rustc,  gcc");
+    }
+
+    #[test]
+    fn test_whitespace_detection_mixed_patterns() {
+        // When patterns differ, use the most common one
+        let mut relations: Relations = "a, b, c,  d, e".parse().unwrap();
+        let entry = Entry::from(Relation::simple("x"));
+        relations.push(entry);
+        // Three single-space (after a, b, d), one double-space (after c)
+        // Should use single space as it's most common
+        assert_eq!(relations.to_string(), "a, b, c,  d, e, x");
+    }
+
+    #[test]
+    fn test_whitespace_detection_newlines() {
+        let mut relations: Relations = "python3,\n rustc".parse().unwrap();
+        let entry = Entry::from(Relation::simple("debhelper"));
+        relations.add_dependency(entry, Some(1));
+        // Detects full pattern including newline
+        assert_eq!(relations.to_string(), "python3,\n debhelper,\n rustc");
+    }
+
+    #[test]
+    fn test_append_with_newline_no_trailing() {
+        let mut relations: Relations = "foo,\n bar".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,\n bar,\n blah");
+    }
+
+    #[test]
+    fn test_append_with_trailing_newline() {
+        let mut relations: Relations = "foo,\n bar\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,\n bar,\n blah");
+    }
+
+    #[test]
+    fn test_append_with_4_space_indent() {
+        let mut relations: Relations = "foo,\n    bar".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,\n    bar,\n    blah");
+    }
+
+    #[test]
+    fn test_append_with_4_space_and_trailing_newline() {
+        let mut relations: Relations = "foo,\n    bar\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,\n    bar,\n    blah");
+    }
+
+    #[test]
+    fn test_odd_syntax_append_no_trailing() {
+        let mut relations: Relations = "\n foo\n , bar".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "\n foo\n , bar\n , blah");
+    }
+
+    #[test]
+    fn test_odd_syntax_append_with_trailing() {
+        let mut relations: Relations = "\n foo\n , bar\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "\n foo\n , bar\n , blah");
+    }
+
+    #[test]
+    fn test_insert_at_1_no_trailing() {
+        let mut relations: Relations = "foo,\n bar".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, Some(1));
+        assert_eq!(relations.to_string(), "foo,\n blah,\n bar");
+    }
+
+    #[test]
+    fn test_insert_at_1_with_trailing() {
+        let mut relations: Relations = "foo,\n bar\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, Some(1));
+        assert_eq!(relations.to_string(), "foo,\n blah,\n bar");
+    }
+
+    #[test]
+    fn test_odd_syntax_insert_at_1() {
+        let mut relations: Relations = "\n foo\n , bar\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("blah"));
+        relations.add_dependency(entry, Some(1));
+        assert_eq!(relations.to_string(), "\n foo\n , blah\n , bar");
+    }
+
+    #[test]
+    fn test_relations_preserves_exact_whitespace() {
+        // Test that Relations preserves exact whitespace from input
+        let input =
+            "debhelper (>= 10), quilt (>= 0.40),\n    libsystemd-dev [linux-any], pkg-config";
+
+        let relations: Relations = input.parse().unwrap();
+
+        // The whitespace should be preserved in the syntax tree
+        assert_eq!(
+            relations.to_string(),
+            input,
+            "Relations should preserve exact whitespace from input"
+        );
+    }
+
+    #[test]
+    fn test_remove_entry_preserves_indentation() {
+        // Test that removing an entry preserves the indentation pattern
+        let input = "debhelper (>= 10), quilt (>= 0.40),\n    libsystemd-dev [linux-any], dh-systemd (>= 1.5), pkg-config";
+
+        let mut relations: Relations = input.parse().unwrap();
+
+        // Find and remove dh-systemd entry (index 2)
+        let mut to_remove = Vec::new();
+        for (idx, entry) in relations.entries().enumerate() {
+            for relation in entry.relations() {
+                if relation.name() == "dh-systemd" {
+                    to_remove.push(idx);
+                    break;
+                }
+            }
+        }
+
+        for idx in to_remove.into_iter().rev() {
+            relations.remove_entry(idx);
+        }
+
+        let output = relations.to_string();
+        println!("After removal: '{}'", output);
+
+        // The 4-space indentation should be preserved
+        assert!(
+            output.contains("\n    libsystemd-dev"),
+            "Expected 4-space indentation to be preserved, but got:\n'{}'",
+            output
+        );
     }
 }

@@ -305,9 +305,10 @@ impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Changes {
 }
 
 #[cfg(feature = "python-debian")]
-impl pyo3::FromPyObject<'_> for Changes {
-    fn extract_bound(ob: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        use pyo3::prelude::*;
+impl<'py> pyo3::FromPyObject<'_, 'py> for Changes {
+    type Error = pyo3::PyErr;
+
+    fn extract(ob: pyo3::Borrowed<'_, 'py, pyo3::PyAny>) -> Result<Self, Self::Error> {
         Ok(Changes(ob.extract()?))
     }
 }

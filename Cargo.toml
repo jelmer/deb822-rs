@@ -8,4 +8,4 @@ homepage = "https://github.com/jelmer/deb822-lossless"
 
 [workspace.dependencies]
 rowan = "0.16"
-pyo3 = ">=0.24, <0.26"
+pyo3 = ">=0.27, <0.28"

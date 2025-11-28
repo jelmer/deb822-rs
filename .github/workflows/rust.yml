@@ -29,10 +29,20 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Build
-        run: cargo build-all-features --verbose --all
+        run: cargo build-all-features -- --workspace
         env:
           RUSTFLAGS: -Dwarnings
       - name: Run tests
-        run: cargo test-all-features --verbose --all
+        run: cargo test-all-features -- --workspace
         env:
           RUSTFLAGS: -Dwarnings
+
+  minimal-versions:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install cargo-minimal-versions and cargo-hack
+        run: cargo install cargo-minimal-versions cargo-hack
+      - name: Test with minimal versions
+        run: cargo minimal-versions test --workspace

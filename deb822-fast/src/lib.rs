@@ -2,20 +2,69 @@
 //!
 //! This parser is lossy in the sense that it will discard whitespace and comments
 //! in the input.
-use crate::lex::SyntaxKind;
 
 #[cfg(feature = "derive")]
 pub use deb822_derive::{FromDeb822, ToDeb822};
 
 pub mod convert;
 pub use convert::{FromDeb822Paragraph, ToDeb822Paragraph};
-mod lex;
+
+/// Canonical field order for source paragraphs in debian/control files
+pub const SOURCE_FIELD_ORDER: &[&str] = &[
+    "Source",
+    "Section",
+    "Priority",
+    "Maintainer",
+    "Uploaders",
+    "Build-Depends",
+    "Build-Depends-Indep",
+    "Build-Depends-Arch",
+    "Build-Conflicts",
+    "Build-Conflicts-Indep",
+    "Build-Conflicts-Arch",
+    "Standards-Version",
+    "Vcs-Browser",
+    "Vcs-Git",
+    "Vcs-Svn",
+    "Vcs-Bzr",
+    "Vcs-Hg",
+    "Vcs-Darcs",
+    "Vcs-Cvs",
+    "Vcs-Arch",
+    "Vcs-Mtn",
+    "Homepage",
+    "Rules-Requires-Root",
+    "Testsuite",
+    "Testsuite-Triggers",
+];
+
+/// Canonical field order for binary packages in debian/control files
+pub const BINARY_FIELD_ORDER: &[&str] = &[
+    "Package",
+    "Architecture",
+    "Section",
+    "Priority",
+    "Multi-Arch",
+    "Essential",
+    "Build-Profiles",
+    "Built-Using",
+    "Pre-Depends",
+    "Depends",
+    "Recommends",
+    "Suggests",
+    "Enhances",
+    "Conflicts",
+    "Breaks",
+    "Replaces",
+    "Provides",
+    "Description",
+];
 
 /// Error type for the parser.
 #[derive(Debug)]
 pub enum Error {
     /// An unexpected token was encountered.
-    UnexpectedToken(SyntaxKind, String),
+    UnexpectedToken(String),
 
     /// Unexpected end-of-file.
     UnexpectedEof,
@@ -36,10 +85,19 @@ impl From<std::io::Error> for Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
-            Self::UnexpectedToken(_k, t) => write!(f, "Unexpected token: {}", t),
+            Self::UnexpectedToken(t) => write!(f, "Unexpected token: {}", t),
             Self::UnexpectedEof => f.write_str("Unexpected end-of-file"),
             Self::Io(e) => write!(f, "IO error: {}", e),
             Self::ExpectedEof => f.write_str("Expected end-of-file"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
         }
     }
 }
@@ -109,18 +167,127 @@ impl Paragraph {
         });
     }
 
-    /// Set the value of a field.
+    /// Set the value of a field, inserting at the appropriate location if new.
     ///
-    /// If a field with the same name already exists, its value
-    /// will be updated.
+    /// If a field with the same name already exists, its value will be updated.
+    /// If the field doesn't exist, it will be inserted at the appropriate position
+    /// based on canonical field ordering.
     pub fn set(&mut self, name: &str, value: &str) {
+        // Check if field already exists and update it
         for field in &mut self.fields {
             if field.name == name {
                 field.value = value.to_string();
                 return;
             }
         }
-        self.insert(name, value);
+
+        // Field doesn't exist, insert at appropriate location
+        // Try to detect if this is a source or binary package paragraph
+        let field_order = if self.fields.iter().any(|f| f.name == "Source") {
+            SOURCE_FIELD_ORDER
+        } else if self.fields.iter().any(|f| f.name == "Package") {
+            BINARY_FIELD_ORDER
+        } else {
+            // Default based on what we're inserting
+            if name == "Source" {
+                SOURCE_FIELD_ORDER
+            } else if name == "Package" {
+                BINARY_FIELD_ORDER
+            } else {
+                // Try to determine based on existing fields
+                let has_source_fields = self.fields.iter().any(|f| {
+                    SOURCE_FIELD_ORDER.contains(&f.name.as_str())
+                        && !BINARY_FIELD_ORDER.contains(&f.name.as_str())
+                });
+                if has_source_fields {
+                    SOURCE_FIELD_ORDER
+                } else {
+                    BINARY_FIELD_ORDER
+                }
+            }
+        };
+
+        let insertion_index = self.find_insertion_index(name, field_order);
+        self.fields.insert(
+            insertion_index,
+            Field {
+                name: name.to_string(),
+                value: value.to_string(),
+            },
+        );
+    }
+
+    /// Set a field using a specific field ordering.
+    pub fn set_with_field_order(&mut self, name: &str, value: &str, field_order: &[&str]) {
+        // Check if field already exists and update it
+        for field in &mut self.fields {
+            if field.name == name {
+                field.value = value.to_string();
+                return;
+            }
+        }
+
+        let insertion_index = self.find_insertion_index(name, field_order);
+        self.fields.insert(
+            insertion_index,
+            Field {
+                name: name.to_string(),
+                value: value.to_string(),
+            },
+        );
+    }
+
+    /// Find the appropriate insertion index for a new field based on field ordering.
+    fn find_insertion_index(&self, name: &str, field_order: &[&str]) -> usize {
+        // Find position of the new field in the canonical order
+        let new_field_position = field_order.iter().position(|&field| field == name);
+
+        let mut insertion_index = self.fields.len();
+
+        // Find the right position based on canonical field order
+        for (i, field) in self.fields.iter().enumerate() {
+            let existing_position = field_order.iter().position(|&f| f == field.name);
+
+            match (new_field_position, existing_position) {
+                // Both fields are in the canonical order
+                (Some(new_pos), Some(existing_pos)) => {
+                    if new_pos < existing_pos {
+                        insertion_index = i;
+                        break;
+                    }
+                }
+                // New field is in canonical order, existing is not
+                (Some(_), None) => {
+                    // Continue looking - unknown fields go after known ones
+                }
+                // New field is not in canonical order, existing is
+                (None, Some(_)) => {
+                    // Continue until we find all known fields
+                }
+                // Neither field is in canonical order, maintain alphabetical
+                (None, None) => {
+                    if name < &field.name {
+                        insertion_index = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // If we have a position in canonical order but haven't found where to insert yet,
+        // we need to insert after all known fields that come before it
+        if new_field_position.is_some() && insertion_index == self.fields.len() {
+            // Look for the position after the last known field that comes before our field
+            for (i, field) in self.fields.iter().enumerate().rev() {
+                if field_order.iter().any(|&f| f == field.name) {
+                    // Found a known field, insert after it
+                    insertion_index = i + 1;
+                    break;
+                }
+            }
+        }
+
+        insertion_index
     }
 
     /// Remove a field from the paragraph.
@@ -169,7 +336,7 @@ impl std::str::FromStr for Paragraph {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let doc: Deb822 = s.parse().map_err(|_| Error::ExpectedEof)?;
+        let doc: Deb822 = s.parse()?;
         if doc.is_empty() {
             Err(Error::UnexpectedEof)
         } else if doc.len() > 1 {
@@ -253,123 +420,256 @@ impl Deb822 {
         r.read_to_string(&mut buf)?;
         buf.parse()
     }
+
+    /// Stream paragraphs from a reader.
+    ///
+    /// This returns an iterator that reads and parses paragraphs one at a time,
+    /// which is more memory-efficient for large files.
+    pub fn iter_paragraphs_from_reader<R: std::io::BufRead>(reader: R) -> ParagraphReader<R> {
+        ParagraphReader::new(reader)
+    }
+}
+
+/// Reader that streams paragraphs from a buffered reader.
+pub struct ParagraphReader<R: std::io::BufRead> {
+    reader: R,
+    buffer: String,
+    finished: bool,
+}
+
+impl<R: std::io::BufRead> ParagraphReader<R> {
+    /// Create a new paragraph reader from a buffered reader.
+    pub fn new(reader: R) -> Self {
+        Self {
+            reader,
+            buffer: String::new(),
+            finished: false,
+        }
+    }
+}
+
+impl<R: std::io::BufRead> Iterator for ParagraphReader<R> {
+    type Item = Result<Paragraph, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
+        self.buffer.clear();
+        let mut found_content = false;
+
+        loop {
+            let mut line = String::new();
+            match self.reader.read_line(&mut line) {
+                Ok(0) => {
+                    // End of file
+                    self.finished = true;
+                    if found_content {
+                        // Parse the buffered paragraph
+                        return Some(self.buffer.parse());
+                    }
+                    return None;
+                }
+                Ok(_) => {
+                    // Check if this is a blank line (paragraph separator)
+                    if line.trim().is_empty() && found_content {
+                        // End of current paragraph
+                        return Some(self.buffer.parse());
+                    }
+
+                    // Skip leading blank lines and comments before first field
+                    if !found_content
+                        && (line.trim().is_empty() || line.trim_start().starts_with('#'))
+                    {
+                        continue;
+                    }
+
+                    // Check if this starts a new field (not indented)
+                    if !line.starts_with(|c: char| c.is_whitespace()) && line.contains(':') {
+                        found_content = true;
+                    } else if found_content {
+                        // Continuation line or comment within paragraph
+                    } else if !line.trim_start().starts_with('#') {
+                        // Non-blank, non-comment line before any field - this is content
+                        found_content = true;
+                    }
+
+                    self.buffer.push_str(&line);
+                }
+                Err(e) => {
+                    self.finished = true;
+                    return Some(Err(Error::Io(e)));
+                }
+            }
+        }
+    }
 }
 
 impl std::str::FromStr for Deb822 {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut tokens = crate::lex::lex(s).peekable();
-
+        // Optimized zero-copy byte-level parser
+        let bytes = s.as_bytes();
         let mut paragraphs = Vec::new();
-        let mut current_paragraph = Vec::new();
+        let mut pos = 0;
+        let len = bytes.len();
 
-        while let Some((k, t)) = tokens.next() {
-            match k {
-                SyntaxKind::INDENT | SyntaxKind::COLON | SyntaxKind::ERROR => {
-                    return Err(Error::UnexpectedToken(k, t.to_string()));
-                }
-                SyntaxKind::WHITESPACE => {
-                    // ignore whitespace
-                }
-                SyntaxKind::KEY => {
-                    current_paragraph.push(Field {
-                        name: t.to_string(),
-                        value: String::new(),
-                    });
-
-                    match tokens.next() {
-                        Some((SyntaxKind::COLON, _)) => {}
-                        Some((k, t)) => {
-                            return Err(Error::UnexpectedToken(k, t.to_string()));
-                        }
-                        None => {
-                            return Err(Error::UnexpectedEof);
-                        }
+        while pos < len {
+            // Skip leading newlines and comments between paragraphs
+            while pos < len {
+                let b = bytes[pos];
+                if b == b'#' {
+                    while pos < len && bytes[pos] != b'\n' {
+                        pos += 1;
                     }
-
-                    while tokens.peek().map(|(k, _)| k) == Some(&SyntaxKind::WHITESPACE) {
-                        tokens.next();
+                    if pos < len {
+                        pos += 1;
                     }
-
-                    for (k, t) in tokens.by_ref() {
-                        match k {
-                            SyntaxKind::VALUE => {
-                                current_paragraph.last_mut().unwrap().value = t.to_string();
-                            }
-                            SyntaxKind::NEWLINE => {
-                                break;
-                            }
-                            _ => return Err(Error::UnexpectedToken(k, t.to_string())),
-                        }
-                    }
-
-                    current_paragraph.last_mut().unwrap().value.push('\n');
-
-                    // while the next line starts with INDENT, it's a continuation of the value
-                    while tokens.peek().map(|(k, _)| k) == Some(&SyntaxKind::INDENT) {
-                        tokens.next();
-                        loop {
-                            match tokens.peek() {
-                                Some((SyntaxKind::VALUE, t)) => {
-                                    current_paragraph.last_mut().unwrap().value.push_str(t);
-                                    tokens.next();
-                                }
-                                Some((SyntaxKind::COMMENT, _)) => {
-                                    // ignore comments
-                                    tokens.next();
-                                }
-                                Some((SyntaxKind::NEWLINE, n)) => {
-                                    current_paragraph.last_mut().unwrap().value.push_str(n);
-                                    tokens.next();
-                                    break;
-                                }
-                                Some((SyntaxKind::KEY, _)) => {
-                                    break;
-                                }
-                                Some((k, _)) => {
-                                    return Err(Error::UnexpectedToken(*k, t.to_string()));
-                                }
-                                None => {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    // Trim the trailing newline
-                    {
-                        let par = current_paragraph.last_mut().unwrap();
-                        if par.value.ends_with('\n') {
-                            par.value.pop();
-                        }
-                    }
-                }
-                SyntaxKind::VALUE => {
-                    return Err(Error::UnexpectedToken(k, t.to_string()));
-                }
-                SyntaxKind::COMMENT => {
-                    for (k, _) in tokens.by_ref() {
-                        if k == SyntaxKind::NEWLINE {
-                            break;
-                        }
-                    }
-                }
-                SyntaxKind::NEWLINE => {
-                    if !current_paragraph.is_empty() {
-                        paragraphs.push(Paragraph {
-                            fields: current_paragraph,
-                        });
-                        current_paragraph = Vec::new();
-                    }
+                } else if b == b'\n' || b == b'\r' {
+                    pos += 1;
+                } else {
+                    break;
                 }
             }
+
+            if pos >= len {
+                break;
+            }
+
+            // Check for unexpected leading space/tab before paragraph
+            if bytes[pos] == b' ' || bytes[pos] == b'\t' {
+                let line_start = pos;
+                while pos < len && bytes[pos] != b'\n' {
+                    pos += 1;
+                }
+                let token = unsafe { std::str::from_utf8_unchecked(&bytes[line_start..pos]) };
+                return Err(Error::UnexpectedToken(token.to_string()));
+            }
+
+            // Parse paragraph
+            let mut fields: Vec<Field> = Vec::new();
+
+            loop {
+                if pos >= len {
+                    break;
+                }
+
+                // Check for blank line (end of paragraph)
+                if bytes[pos] == b'\n' {
+                    pos += 1;
+                    break;
+                }
+
+                // Skip comment lines
+                if bytes[pos] == b'#' {
+                    while pos < len && bytes[pos] != b'\n' {
+                        pos += 1;
+                    }
+                    if pos < len {
+                        pos += 1;
+                    }
+                    continue;
+                }
+
+                // Check for continuation line (starts with space/tab)
+                if bytes[pos] == b' ' || bytes[pos] == b'\t' {
+                    if fields.is_empty() {
+                        // Indented line before any field - this is an error
+                        let line_start = pos;
+                        while pos < len && bytes[pos] != b'\n' {
+                            pos += 1;
+                        }
+                        let token =
+                            unsafe { std::str::from_utf8_unchecked(&bytes[line_start..pos]) };
+                        return Err(Error::UnexpectedToken(token.to_string()));
+                    }
+
+                    // Skip all leading whitespace (deb822 format strips leading spaces)
+                    while pos < len && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+                        pos += 1;
+                    }
+
+                    // Read the rest of the continuation line
+                    let line_start = pos;
+                    while pos < len && bytes[pos] != b'\n' {
+                        pos += 1;
+                    }
+
+                    // Add to previous field value
+                    if let Some(last_field) = fields.last_mut() {
+                        last_field.value.push('\n');
+                        last_field.value.push_str(unsafe {
+                            std::str::from_utf8_unchecked(&bytes[line_start..pos])
+                        });
+                    }
+
+                    if pos < len {
+                        pos += 1; // Skip newline
+                    }
+                    continue;
+                }
+
+                // Parse field name
+                let name_start = pos;
+                while pos < len && bytes[pos] != b':' && bytes[pos] != b'\n' {
+                    pos += 1;
+                }
+
+                if pos >= len || bytes[pos] != b':' {
+                    // Invalid line - missing colon or value without key
+                    let line_start = name_start;
+                    while pos < len && bytes[pos] != b'\n' {
+                        pos += 1;
+                    }
+                    let token = unsafe { std::str::from_utf8_unchecked(&bytes[line_start..pos]) };
+                    return Err(Error::UnexpectedToken(token.to_string()));
+                }
+
+                let name = unsafe { std::str::from_utf8_unchecked(&bytes[name_start..pos]) };
+
+                // Check for empty field name (e.g., line starting with ':')
+                if name.is_empty() {
+                    let line_start = name_start;
+                    let mut end = pos;
+                    while end < len && bytes[end] != b'\n' {
+                        end += 1;
+                    }
+                    let token = unsafe { std::str::from_utf8_unchecked(&bytes[line_start..end]) };
+                    return Err(Error::UnexpectedToken(token.to_string()));
+                }
+
+                pos += 1; // Skip colon
+
+                // Skip whitespace after colon
+                while pos < len && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+                    pos += 1;
+                }
+
+                // Read field value (rest of line)
+                let value_start = pos;
+                while pos < len && bytes[pos] != b'\n' {
+                    pos += 1;
+                }
+
+                let value = unsafe { std::str::from_utf8_unchecked(&bytes[value_start..pos]) };
+
+                fields.push(Field {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                });
+
+                if pos < len {
+                    pos += 1; // Skip newline
+                }
+            }
+
+            if !fields.is_empty() {
+                paragraphs.push(Paragraph { fields });
+            }
         }
-        if !current_paragraph.is_empty() {
-            paragraphs.push(Paragraph {
-                fields: current_paragraph,
-            });
-        }
+
         Ok(Deb822(paragraphs))
     }
 }
@@ -377,11 +677,10 @@ impl std::str::FromStr for Deb822 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lex::lex;
 
     #[test]
     fn test_error_display() {
-        let err = Error::UnexpectedToken(SyntaxKind::ERROR, "invalid".to_string());
+        let err = Error::UnexpectedToken("invalid".to_string());
         assert_eq!(err.to_string(), "Unexpected token: invalid");
 
         let err = Error::UnexpectedEof;
@@ -486,55 +785,6 @@ Another-Field: value
     }
 
     #[test]
-    fn test_lex() {
-        let input = r#"Package: hello
-Version: 2.10
-
-Package: world
-# Comment
-Version: 1.0
-Description: A program that says world
- And some more text
-"#;
-        assert_eq!(
-            lex(input).collect::<Vec<_>>(),
-            vec![
-                (SyntaxKind::KEY, "Package"),
-                (SyntaxKind::COLON, ":"),
-                (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::VALUE, "hello"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::KEY, "Version"),
-                (SyntaxKind::COLON, ":"),
-                (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::VALUE, "2.10"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::KEY, "Package"),
-                (SyntaxKind::COLON, ":"),
-                (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::VALUE, "world"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::COMMENT, "# Comment"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::KEY, "Version"),
-                (SyntaxKind::COLON, ":"),
-                (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::VALUE, "1.0"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::KEY, "Description"),
-                (SyntaxKind::COLON, ":"),
-                (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::VALUE, "A program that says world"),
-                (SyntaxKind::NEWLINE, "\n"),
-                (SyntaxKind::INDENT, " "),
-                (SyntaxKind::VALUE, "And some more text"),
-                (SyntaxKind::NEWLINE, "\n"),
-            ]
-        );
-    }
-
-    #[test]
     fn test_paragraph_iter() {
         let input = r#"Package: hello
 Version: 2.10
@@ -595,27 +845,59 @@ Version: 2.10
         // Test parsing with unexpected tokens
         let input = "Value before key\nPackage: hello\n";
         let result = input.parse::<Deb822>();
-        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+        assert!(matches!(result, Err(Error::UnexpectedToken(_))));
 
         // Test parsing with missing colon after key
         let input = "Package hello\n";
         let result = input.parse::<Deb822>();
-        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+        assert!(matches!(result, Err(Error::UnexpectedToken(_))));
 
         // Test parsing with unexpected indent
         let input = " Indented: value\n";
         let result = input.parse::<Deb822>();
-        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+        assert!(matches!(result, Err(Error::UnexpectedToken(_))));
 
         // Test parsing with unexpected value
         let input = "Key: value\nvalue without key\n";
         let result = input.parse::<Deb822>();
-        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+        assert!(matches!(result, Err(Error::UnexpectedToken(_))));
 
         // Test parsing with unexpected colon
         let input = "Key: value\n:\n";
         let result = input.parse::<Deb822>();
-        assert!(matches!(result, Err(Error::UnexpectedToken(_, _))));
+        assert!(matches!(result, Err(Error::UnexpectedToken(_))));
+    }
+
+    #[test]
+    fn test_parse_continuation_with_colon() {
+        // Test that continuation lines with colons are properly parsed
+        let input = "Package: test\nDescription: short\n line: with colon\n";
+        let result = input.parse::<Deb822>();
+        assert!(result.is_ok());
+
+        let deb822 = result.unwrap();
+        assert_eq!(deb822.0.len(), 1);
+        assert_eq!(deb822.0[0].fields.len(), 2);
+        assert_eq!(deb822.0[0].fields[0].name, "Package");
+        assert_eq!(deb822.0[0].fields[0].value, "test");
+        assert_eq!(deb822.0[0].fields[1].name, "Description");
+        assert_eq!(deb822.0[0].fields[1].value, "short\nline: with colon");
+    }
+
+    #[test]
+    fn test_parse_continuation_starting_with_colon() {
+        // Test continuation line STARTING with a colon (issue #315)
+        let input = "Package: test\nDescription: short\n :value\n";
+        let result = input.parse::<Deb822>();
+        assert!(result.is_ok());
+
+        let deb822 = result.unwrap();
+        assert_eq!(deb822.0.len(), 1);
+        assert_eq!(deb822.0[0].fields.len(), 2);
+        assert_eq!(deb822.0[0].fields[0].name, "Package");
+        assert_eq!(deb822.0[0].fields[0].value, "test");
+        assert_eq!(deb822.0[0].fields[1].name, "Description");
+        assert_eq!(deb822.0[0].fields[1].value, "short\n:value");
     }
 
     #[test]
@@ -877,5 +1159,77 @@ Version: 2.10
             deb822.iter().next().unwrap().get("Key"),
             Some("value\nline1\nline2")
         );
+    }
+
+    #[test]
+    fn test_iter_paragraphs_from_reader() {
+        use std::io::BufReader;
+
+        let input = r#"Package: hello
+Version: 2.10
+Description: A program that says hello
+ Some more text
+
+Package: world
+Version: 1.0
+Description: A program that says world
+ And some more text
+Another-Field: value
+
+# A comment
+
+"#;
+
+        let reader = BufReader::new(input.as_bytes());
+        let paragraphs: Result<Vec<_>, _> = Deb822::iter_paragraphs_from_reader(reader).collect();
+        let paragraphs = paragraphs.unwrap();
+
+        assert_eq!(paragraphs.len(), 2);
+
+        assert_eq!(paragraphs[0].get("Package"), Some("hello"));
+        assert_eq!(paragraphs[0].get("Version"), Some("2.10"));
+        assert_eq!(
+            paragraphs[0].get("Description"),
+            Some("A program that says hello\nSome more text")
+        );
+
+        assert_eq!(paragraphs[1].get("Package"), Some("world"));
+        assert_eq!(paragraphs[1].get("Version"), Some("1.0"));
+        assert_eq!(
+            paragraphs[1].get("Description"),
+            Some("A program that says world\nAnd some more text")
+        );
+        assert_eq!(paragraphs[1].get("Another-Field"), Some("value"));
+    }
+
+    #[test]
+    fn test_iter_paragraphs_from_reader_empty() {
+        use std::io::BufReader;
+
+        let input = "";
+        let reader = BufReader::new(input.as_bytes());
+        let paragraphs: Result<Vec<_>, _> = Deb822::iter_paragraphs_from_reader(reader).collect();
+        let paragraphs = paragraphs.unwrap();
+
+        assert_eq!(paragraphs.len(), 0);
+    }
+
+    #[test]
+    fn test_iter_paragraphs_from_reader_with_leading_comments() {
+        use std::io::BufReader;
+
+        let input = r#"# Leading comment
+# Another comment
+
+Package: test
+Version: 1.0
+"#;
+
+        let reader = BufReader::new(input.as_bytes());
+        let paragraphs: Result<Vec<_>, _> = Deb822::iter_paragraphs_from_reader(reader).collect();
+        let paragraphs = paragraphs.unwrap();
+
+        assert_eq!(paragraphs.len(), 1);
+        assert_eq!(paragraphs[0].get("Package"), Some("test"));
     }
 }

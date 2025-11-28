@@ -21,9 +21,7 @@ key-management = ["dep:sequoia-openpgp", "dep:sequoia-net", "dep:tokio"]
 tracing = ["dep:tracing"]
 
 [dependencies]
-deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = [
-    "derive",
-] }
+deb822-fast = { version = ">=0.1, <0.3", path = "../deb822-fast", features = ["derive"] }
 url = { version = "2.5.4", features = ["serde"] }
 url-macro = { version = "0.2.0" }
 tracing = { version = "0.1", optional = true }

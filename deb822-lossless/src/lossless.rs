@@ -42,6 +42,57 @@ use rowan::ast::AstNode;
 use std::path::Path;
 use std::str::FromStr;
 
+/// Canonical field order for source paragraphs in debian/control files
+pub const SOURCE_FIELD_ORDER: &[&str] = &[
+    "Source",
+    "Section",
+    "Priority",
+    "Maintainer",
+    "Uploaders",
+    "Build-Depends",
+    "Build-Depends-Indep",
+    "Build-Depends-Arch",
+    "Build-Conflicts",
+    "Build-Conflicts-Indep",
+    "Build-Conflicts-Arch",
+    "Standards-Version",
+    "Vcs-Browser",
+    "Vcs-Git",
+    "Vcs-Svn",
+    "Vcs-Bzr",
+    "Vcs-Hg",
+    "Vcs-Darcs",
+    "Vcs-Cvs",
+    "Vcs-Arch",
+    "Vcs-Mtn",
+    "Homepage",
+    "Rules-Requires-Root",
+    "Testsuite",
+    "Testsuite-Triggers",
+];
+
+/// Canonical field order for binary packages in debian/control files
+pub const BINARY_FIELD_ORDER: &[&str] = &[
+    "Package",
+    "Architecture",
+    "Section",
+    "Priority",
+    "Multi-Arch",
+    "Essential",
+    "Build-Profiles",
+    "Built-Using",
+    "Pre-Depends",
+    "Depends",
+    "Recommends",
+    "Suggests",
+    "Enhances",
+    "Conflicts",
+    "Breaks",
+    "Replaces",
+    "Provides",
+    "Description",
+];
+
 /// A positioned parse error containing location information.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PositionedParseError {
@@ -729,6 +780,46 @@ impl Deb822 {
         Self(SyntaxNode::new_root_mut(builder.finish()))
     }
 
+    /// Normalize the spacing around field separators (colons) for all entries in all paragraphs in place.
+    ///
+    /// This ensures that there is exactly one space after the colon and before the value
+    /// for each field in every paragraph. This is a lossless operation that preserves the
+    /// field names, values, and comments, but normalizes the whitespace formatting.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// use std::str::FromStr;
+    ///
+    /// let input = "Field1:    value1\nField2:value2\n\nField3:  value3\n";
+    /// let mut deb822 = Deb822::from_str(input).unwrap();
+    ///
+    /// deb822.normalize_field_spacing();
+    /// assert_eq!(deb822.to_string(), "Field1: value1\nField2: value2\n\nField3: value3\n");
+    /// ```
+    pub fn normalize_field_spacing(&mut self) {
+        // Collect paragraph indices and iterate through them
+        let para_indices: Vec<_> = self
+            .0
+            .children()
+            .filter_map(|c| {
+                if c.kind() == PARAGRAPH {
+                    Some(c.index())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for para_index in para_indices {
+            if let Some(para_node) = self.0.children().nth(para_index) {
+                let mut para = Paragraph::cast(para_node).unwrap();
+                para.normalize_field_spacing();
+            }
+        }
+    }
+
     /// Returns an iterator over all paragraphs in the file.
     pub fn paragraphs(&self) -> impl Iterator<Item = Paragraph> {
         self.0.children().filter_map(Paragraph::cast)
@@ -840,9 +931,198 @@ impl Deb822 {
         }
     }
 
+    /// Move a paragraph from one index to another.
+    ///
+    /// This moves the paragraph at `from_index` to `to_index`, shifting other paragraphs as needed.
+    /// If `from_index` equals `to_index`, no operation is performed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// let mut d: Deb822 = vec![
+    ///     vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
+    ///     vec![("A", "B"), ("C", "D")].into_iter().collect(),
+    ///     vec![("X", "Y"), ("Z", "W")].into_iter().collect(),
+    /// ]
+    /// .into_iter()
+    /// .collect();
+    /// d.move_paragraph(0, 2);
+    /// assert_eq!(d.to_string(), "A: B\nC: D\n\nX: Y\nZ: W\n\nFoo: Bar\nBaz: Qux\n");
+    /// ```
+    pub fn move_paragraph(&mut self, from_index: usize, to_index: usize) {
+        if from_index == to_index {
+            return;
+        }
+
+        // Get the paragraph count to validate indices
+        let paragraph_count = self.paragraphs().count();
+        if from_index >= paragraph_count || to_index >= paragraph_count {
+            return;
+        }
+
+        // Clone the paragraph node we want to move
+        let paragraph_to_move = self.paragraphs().nth(from_index).unwrap().0.clone();
+
+        // Remove the paragraph from its original position
+        let from_physical = self.convert_index(from_index).unwrap();
+
+        // Determine the range to remove (paragraph and possibly preceding EMPTY_LINE)
+        let mut start_idx = from_physical;
+        if from_physical > 0 {
+            if let Some(prev_node) = self.0.children_with_tokens().nth(from_physical - 1) {
+                if prev_node.kind() == EMPTY_LINE {
+                    start_idx = from_physical - 1;
+                }
+            }
+        }
+
+        // Remove the paragraph and any preceding EMPTY_LINE
+        self.0.splice_children(start_idx..from_physical + 1, []);
+        self.delete_trailing_space(start_idx);
+
+        // Calculate the physical insertion point
+        // After removal, we need to determine where to insert
+        // The semantics are: the moved paragraph ends up at logical index to_index in the final result
+        let insert_at = if to_index > from_index {
+            // Moving forward: after removal, to_index-1 paragraphs should be before the moved one
+            // So we insert after paragraph at index (to_index - 1)
+            let target_idx = to_index - 1;
+            if let Some(target_physical) = self.convert_index(target_idx) {
+                target_physical + 1
+            } else {
+                // If convert_index returns None, insert at the end
+                self.0.children().count()
+            }
+        } else {
+            // Moving backward: after removal, to_index paragraphs should be before the moved one
+            // So we insert at paragraph index to_index
+            if let Some(target_physical) = self.convert_index(to_index) {
+                target_physical
+            } else {
+                self.0.children().count()
+            }
+        };
+
+        // Build the nodes to insert
+        let mut to_insert = vec![];
+
+        // Determine if we need to add an EMPTY_LINE before the paragraph
+        let needs_empty_line_before = if insert_at == 0 {
+            // At the beginning - no empty line before
+            false
+        } else if insert_at > 0 {
+            // Check if there's already an EMPTY_LINE at the insertion point
+            if let Some(node_at_insert) = self.0.children_with_tokens().nth(insert_at - 1) {
+                node_at_insert.kind() != EMPTY_LINE
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if needs_empty_line_before {
+            let mut builder = GreenNodeBuilder::new();
+            builder.start_node(EMPTY_LINE.into());
+            builder.token(NEWLINE.into(), "\n");
+            builder.finish_node();
+            to_insert.push(SyntaxNode::new_root_mut(builder.finish()).into());
+        }
+
+        to_insert.push(paragraph_to_move.into());
+
+        // Determine if we need to add an EMPTY_LINE after the paragraph
+        let needs_empty_line_after = if insert_at < self.0.children().count() {
+            // There are nodes after - check if next node is EMPTY_LINE
+            if let Some(node_after) = self.0.children_with_tokens().nth(insert_at) {
+                node_after.kind() != EMPTY_LINE
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if needs_empty_line_after {
+            let mut builder = GreenNodeBuilder::new();
+            builder.start_node(EMPTY_LINE.into());
+            builder.token(NEWLINE.into(), "\n");
+            builder.finish_node();
+            to_insert.push(SyntaxNode::new_root_mut(builder.finish()).into());
+        }
+
+        // Insert at the new position
+        self.0.splice_children(insert_at..insert_at, to_insert);
+    }
+
     /// Add a new empty paragraph to the end of the file.
     pub fn add_paragraph(&mut self) -> Paragraph {
         self.insert_empty_paragraph(None)
+    }
+
+    /// Swap two paragraphs by their indices.
+    ///
+    /// This method swaps the positions of two paragraphs while preserving their
+    /// content, formatting, whitespace, and comments. The paragraphs at positions
+    /// `index1` and `index2` will exchange places.
+    ///
+    /// # Arguments
+    ///
+    /// * `index1` - The index of the first paragraph to swap
+    /// * `index2` - The index of the second paragraph to swap
+    ///
+    /// # Panics
+    ///
+    /// Panics if either `index1` or `index2` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// let mut d: Deb822 = vec![
+    ///     vec![("Foo", "Bar")].into_iter().collect(),
+    ///     vec![("A", "B")].into_iter().collect(),
+    ///     vec![("X", "Y")].into_iter().collect(),
+    /// ]
+    /// .into_iter()
+    /// .collect();
+    /// d.swap_paragraphs(0, 2);
+    /// assert_eq!(d.to_string(), "X: Y\n\nA: B\n\nFoo: Bar\n");
+    /// ```
+    pub fn swap_paragraphs(&mut self, index1: usize, index2: usize) {
+        if index1 == index2 {
+            return;
+        }
+
+        // Collect all children
+        let mut children: Vec<_> = self.0.children().map(|n| n.clone().into()).collect();
+
+        // Find the child indices for paragraphs
+        let mut para_child_indices = vec![];
+        for (child_idx, child) in self.0.children().enumerate() {
+            if child.kind() == PARAGRAPH {
+                para_child_indices.push(child_idx);
+            }
+        }
+
+        // Validate paragraph indices
+        if index1 >= para_child_indices.len() {
+            panic!("index1 {} out of bounds", index1);
+        }
+        if index2 >= para_child_indices.len() {
+            panic!("index2 {} out of bounds", index2);
+        }
+
+        let child_idx1 = para_child_indices[index1];
+        let child_idx2 = para_child_indices[index2];
+
+        // Swap the children in the vector
+        children.swap(child_idx1, child_idx2);
+
+        // Replace all children
+        let num_children = children.len();
+        self.0.splice_children(0..num_children, children);
     }
 
     /// Read a deb822 file from the given path.
@@ -970,6 +1250,25 @@ impl<'a> FromIterator<(&'a str, &'a str)> for Paragraph {
     }
 }
 
+/// Detected indentation pattern for multi-line field values
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum IndentPattern {
+    /// All fields use a fixed number of spaces for indentation
+    Fixed(usize),
+    /// Each field's indentation matches its field name length + 2 (for ": ")
+    FieldNameLength,
+}
+
+impl IndentPattern {
+    /// Convert the pattern to a concrete indentation string for a given field name
+    fn to_string(&self, field_name: &str) -> String {
+        match self {
+            IndentPattern::Fixed(spaces) => " ".repeat(*spaces),
+            IndentPattern::FieldNameLength => " ".repeat(field_name.len() + 2),
+        }
+    }
+}
+
 impl Paragraph {
     /// Create a new empty paragraph.
     pub fn new() -> Paragraph {
@@ -1053,6 +1352,88 @@ impl Paragraph {
         Self(SyntaxNode::new_root_mut(builder.finish()))
     }
 
+    /// Normalize the spacing around field separators (colons) for all entries in place.
+    ///
+    /// This ensures that there is exactly one space after the colon and before the value
+    /// for each field in the paragraph. This is a lossless operation that preserves the
+    /// field names, values, and comments, but normalizes the whitespace formatting.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// use std::str::FromStr;
+    ///
+    /// let input = "Field1:    value1\nField2:value2\n";
+    /// let mut deb822 = Deb822::from_str(input).unwrap();
+    /// let mut para = deb822.paragraphs().next().unwrap();
+    ///
+    /// para.normalize_field_spacing();
+    /// assert_eq!(para.to_string(), "Field1: value1\nField2: value2\n");
+    /// ```
+    pub fn normalize_field_spacing(&mut self) {
+        use rowan::GreenNodeBuilder;
+
+        // Collect entry information first to avoid borrowing issues
+        let entries_to_normalize: Vec<_> = self
+            .entries()
+            .map(|entry| {
+                let index = entry.0.index();
+
+                // Build normalized entry inline
+                let mut builder = GreenNodeBuilder::new();
+                builder.start_node(ENTRY.into());
+
+                let mut seen_colon = false;
+                let mut skip_whitespace = false;
+
+                for child in entry.0.children_with_tokens() {
+                    match child.kind() {
+                        KEY => {
+                            builder.token(KEY.into(), child.as_token().unwrap().text());
+                        }
+                        COLON => {
+                            builder.token(COLON.into(), ":");
+                            seen_colon = true;
+                            skip_whitespace = true;
+                        }
+                        WHITESPACE if skip_whitespace => {
+                            // Skip existing whitespace after colon
+                            continue;
+                        }
+                        VALUE if skip_whitespace => {
+                            // Add exactly one space before the first value token
+                            builder.token(WHITESPACE.into(), " ");
+                            builder.token(VALUE.into(), child.as_token().unwrap().text());
+                            skip_whitespace = false;
+                        }
+                        NEWLINE if skip_whitespace && seen_colon => {
+                            // Empty value case (e.g., "Field:\n" or "Field:  \n")
+                            // Normalize to no trailing space - just output newline
+                            builder.token(NEWLINE.into(), "\n");
+                            skip_whitespace = false;
+                        }
+                        _ => {
+                            // Copy all other tokens as-is
+                            if let Some(token) = child.as_token() {
+                                builder.token(token.kind().into(), token.text());
+                            }
+                        }
+                    }
+                }
+
+                builder.finish_node();
+                (index, SyntaxNode::new_root_mut(builder.finish()))
+            })
+            .collect();
+
+        // Now replace each entry with its normalized version
+        for (index, normalized_entry) in entries_to_normalize {
+            self.0
+                .splice_children(index..index + 1, vec![normalized_entry.into()]);
+        }
+    }
+
     /// Returns the value of the given key in the paragraph.
     pub fn get(&self, key: &str) -> Option<String> {
         self.entries()
@@ -1103,10 +1484,103 @@ impl Paragraph {
         self.0.splice_children(count..count, vec![entry.0.into()]);
     }
 
-    /// Set a field in the paragraph
-    pub fn set(&mut self, key: &str, value: &str) {
-        let new_entry = Entry::new(key, value);
+    /// Insert a comment line before this paragraph.
+    ///
+    /// The comment should not include the leading '#' character or newline,
+    /// these will be added automatically.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// let mut d: Deb822 = vec![
+    ///     vec![("Foo", "Bar")].into_iter().collect(),
+    /// ]
+    /// .into_iter()
+    /// .collect();
+    /// let mut para = d.paragraphs().next().unwrap();
+    /// para.insert_comment_before("This is a comment");
+    /// assert_eq!(d.to_string(), "# This is a comment\nFoo: Bar\n");
+    /// ```
+    pub fn insert_comment_before(&mut self, comment: &str) {
+        use rowan::GreenNodeBuilder;
 
+        // Create an EMPTY_LINE node containing the comment tokens
+        // This matches the structure used elsewhere in the parser
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(EMPTY_LINE.into());
+        builder.token(COMMENT.into(), &format!("# {}", comment));
+        builder.token(NEWLINE.into(), "\n");
+        builder.finish_node();
+        let green = builder.finish();
+
+        // Convert to syntax node and insert before this paragraph
+        let comment_node = SyntaxNode::new_root_mut(green);
+
+        let index = self.0.index();
+        let parent = self.0.parent().expect("Paragraph must have a parent");
+        parent.splice_children(index..index, vec![comment_node.into()]);
+    }
+
+    /// Detect the indentation pattern used in this paragraph.
+    ///
+    /// This method analyzes existing multi-line fields to determine if they use:
+    /// 1. A fixed indentation (all fields use the same number of spaces)
+    /// 2. Field-name-length-based indentation (indent matches field name + ": ")
+    ///
+    /// If no pattern can be detected, defaults to field name length + 2.
+    fn detect_indent_pattern(&self) -> IndentPattern {
+        // Collect indentation data from existing multi-line fields
+        let indent_data: Vec<(String, usize)> = self
+            .entries()
+            .filter_map(|entry| {
+                let field_key = entry.key()?;
+                let indent = entry.get_indent()?;
+                Some((field_key, indent.len()))
+            })
+            .collect();
+
+        if indent_data.is_empty() {
+            // No existing multi-line fields, default to field name length
+            return IndentPattern::FieldNameLength;
+        }
+
+        // Check if all fields use the same fixed indentation
+        let first_indent_len = indent_data[0].1;
+        let all_same = indent_data.iter().all(|(_, len)| *len == first_indent_len);
+
+        if all_same {
+            // All fields use the same indentation - use that
+            return IndentPattern::Fixed(first_indent_len);
+        }
+
+        // Check if fields use field-name-length-based indentation
+        let all_match_field_length = indent_data
+            .iter()
+            .all(|(field_key, indent_len)| *indent_len == field_key.len() + 2);
+
+        if all_match_field_length {
+            // Fields use field-name-length-based indentation
+            return IndentPattern::FieldNameLength;
+        }
+
+        // Can't detect a clear pattern, default to field name length + 2
+        IndentPattern::FieldNameLength
+    }
+
+    /// Set a field in the paragraph, inserting at the appropriate location if new
+    pub fn set(&mut self, key: &str, value: &str) {
+        // Check if the field already exists and extract its indentation
+        // Otherwise, detect the indentation pattern from existing fields
+        let indent = self
+            .entries()
+            .find(|entry| entry.key().as_deref() == Some(key))
+            .and_then(|entry| entry.get_indent())
+            .unwrap_or_else(|| self.detect_indent_pattern().to_string(key));
+
+        let new_entry = Entry::with_indentation(key, value, &indent);
+
+        // Check if the field already exists and replace it
         for entry in self.entries() {
             if entry.key().as_deref() == Some(key) {
                 self.0.splice_children(
@@ -1116,9 +1590,144 @@ impl Paragraph {
                 return;
             }
         }
-        let count = self.0.children_with_tokens().count();
+
+        // Field doesn't exist, insert at appropriate location
+        // Try to detect if this is a source or binary package paragraph
+        let field_order = if self.contains_key("Source") {
+            SOURCE_FIELD_ORDER
+        } else if self.contains_key("Package") {
+            BINARY_FIELD_ORDER
+        } else {
+            // Default to trying both, preferring source if the new field is "Source"
+            if key == "Source" {
+                SOURCE_FIELD_ORDER
+            } else if key == "Package" {
+                BINARY_FIELD_ORDER
+            } else {
+                // Try to determine based on existing fields
+                let has_source_fields = self.keys().any(|k| {
+                    SOURCE_FIELD_ORDER.contains(&k.as_str())
+                        && !BINARY_FIELD_ORDER.contains(&k.as_str())
+                });
+                if has_source_fields {
+                    SOURCE_FIELD_ORDER
+                } else {
+                    BINARY_FIELD_ORDER
+                }
+            }
+        };
+
+        let insertion_index = self.find_insertion_index(key, field_order);
         self.0
-            .splice_children(count..count, vec![new_entry.0.into()]);
+            .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
+    }
+
+    /// Set a field using a specific field ordering
+    pub fn set_with_field_order(&mut self, key: &str, value: &str, field_order: &[&str]) {
+        // Check if the field already exists and extract its formatting
+        // Otherwise, detect the indentation pattern from existing fields
+        let existing_entry = self
+            .entries()
+            .find(|entry| entry.key().as_deref() == Some(key));
+
+        let indent = existing_entry
+            .as_ref()
+            .and_then(|entry| entry.get_indent())
+            .unwrap_or_else(|| self.detect_indent_pattern().to_string(key));
+
+        let post_colon_ws = existing_entry
+            .as_ref()
+            .and_then(|entry| entry.get_post_colon_whitespace())
+            .unwrap_or_else(|| " ".to_string());
+
+        let new_entry = Entry::with_formatting(key, value, &post_colon_ws, &indent);
+
+        // Check if the field already exists and replace it
+        for entry in self.entries() {
+            if entry.key().as_deref() == Some(key) {
+                self.0.splice_children(
+                    entry.0.index()..entry.0.index() + 1,
+                    vec![new_entry.0.into()],
+                );
+                return;
+            }
+        }
+
+        let insertion_index = self.find_insertion_index(key, field_order);
+        self.0
+            .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
+    }
+
+    /// Find the appropriate insertion index for a new field based on field ordering
+    fn find_insertion_index(&self, key: &str, field_order: &[&str]) -> usize {
+        // Find position of the new field in the canonical order
+        let new_field_position = field_order.iter().position(|&field| field == key);
+
+        let mut insertion_index = self.0.children_with_tokens().count();
+
+        // Find the right position based on canonical field order
+        for (i, child) in self.0.children_with_tokens().enumerate() {
+            if let Some(node) = child.as_node() {
+                if let Some(entry) = Entry::cast(node.clone()) {
+                    if let Some(existing_key) = entry.key() {
+                        let existing_position =
+                            field_order.iter().position(|&field| field == existing_key);
+
+                        match (new_field_position, existing_position) {
+                            // Both fields are in the canonical order
+                            (Some(new_pos), Some(existing_pos)) => {
+                                if new_pos < existing_pos {
+                                    insertion_index = i;
+                                    break;
+                                }
+                            }
+                            // New field is in canonical order, existing is not
+                            (Some(_), None) => {
+                                // Continue looking - unknown fields go after known ones
+                            }
+                            // New field is not in canonical order, existing is
+                            (None, Some(_)) => {
+                                // Continue until we find all known fields
+                            }
+                            // Neither field is in canonical order, maintain alphabetical
+                            (None, None) => {
+                                if key < existing_key.as_str() {
+                                    insertion_index = i;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we have a position in canonical order but haven't found where to insert yet,
+        // we need to insert after all known fields that come before it
+        if new_field_position.is_some() && insertion_index == self.0.children_with_tokens().count()
+        {
+            // Look for the position after the last known field that comes before our field
+            let children: Vec<_> = self.0.children_with_tokens().enumerate().collect();
+            for (i, child) in children.into_iter().rev() {
+                if let Some(node) = child.as_node() {
+                    if let Some(entry) = Entry::cast(node.clone()) {
+                        if let Some(existing_key) = entry.key() {
+                            if field_order
+                                .iter()
+                                .position(|&f| f == existing_key)
+                                .is_some()
+                            {
+                                // Found a known field, insert after it
+                                insertion_index = i + 1;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        insertion_index
     }
 
     /// Rename the given field in the paragraph.
@@ -1193,12 +1802,14 @@ impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Paragraph {
 }
 
 #[cfg(feature = "python-debian")]
-impl pyo3::FromPyObject<'_> for Paragraph {
-    fn extract_bound(obj: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        use pyo3::prelude::*;
+impl<'py> pyo3::FromPyObject<'_, 'py> for Paragraph {
+    type Error = pyo3::PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'_, 'py, pyo3::PyAny>) -> Result<Self, Self::Error> {
+        use pyo3::types::PyAnyMethods;
         let d = obj.call_method0("__str__")?.extract::<String>()?;
-        Ok(Paragraph::from_str(&d)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err((e.to_string(),)))?)
+        Paragraph::from_str(&d)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err((e.to_string(),)))
     }
 }
 
@@ -1261,15 +1872,52 @@ impl Entry {
 
     /// Create a new entry with the given key and value.
     pub fn new(key: &str, value: &str) -> Entry {
+        Self::with_indentation(key, value, " ")
+    }
+
+    /// Create a new entry with the given key, value, and custom indentation for continuation lines.
+    ///
+    /// # Arguments
+    /// * `key` - The field name
+    /// * `value` - The field value (may contain '\n' for multi-line values)
+    /// * `indent` - The indentation string to use for continuation lines
+    pub fn with_indentation(key: &str, value: &str, indent: &str) -> Entry {
+        Entry::with_formatting(key, value, " ", indent)
+    }
+
+    /// Create a new entry with specific formatting for post-colon whitespace and indentation.
+    ///
+    /// # Arguments
+    /// * `key` - The field name
+    /// * `value` - The field value (may contain '\n' for multi-line values)
+    /// * `post_colon_ws` - The whitespace after the colon (e.g., " " or "\n ")
+    /// * `indent` - The indentation string to use for continuation lines
+    pub fn with_formatting(key: &str, value: &str, post_colon_ws: &str, indent: &str) -> Entry {
         let mut builder = GreenNodeBuilder::new();
 
         builder.start_node(ENTRY.into());
         builder.token(KEY.into(), key);
         builder.token(COLON.into(), ":");
-        builder.token(WHITESPACE.into(), " ");
-        for (i, line) in value.split('\n').enumerate() {
-            if i > 0 {
-                builder.token(INDENT.into(), " ");
+
+        // Add the post-colon whitespace token by token
+        let mut i = 0;
+        while i < post_colon_ws.len() {
+            if post_colon_ws[i..].starts_with('\n') {
+                builder.token(NEWLINE.into(), "\n");
+                i += 1;
+            } else {
+                // Collect consecutive non-newline chars as WHITESPACE
+                let start = i;
+                while i < post_colon_ws.len() && !post_colon_ws[i..].starts_with('\n') {
+                    i += post_colon_ws[i..].chars().next().unwrap().len_utf8();
+                }
+                builder.token(WHITESPACE.into(), &post_colon_ws[start..i]);
+            }
+        }
+
+        for (line_idx, line) in value.split('\n').enumerate() {
+            if line_idx > 0 {
+                builder.token(INDENT.into(), indent);
             }
             builder.token(VALUE.into(), line);
             builder.token(NEWLINE.into(), "\n");
@@ -1412,6 +2060,125 @@ impl Entry {
                 }
                 result
             }
+        }
+    }
+
+    /// Returns the indentation string used for continuation lines in this entry.
+    /// Returns None if the entry has no continuation lines.
+    fn get_indent(&self) -> Option<String> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|it| it.kind() == INDENT)
+            .map(|it| it.text().to_string())
+    }
+
+    /// Returns the whitespace immediately after the colon in this entry.
+    /// This includes WHITESPACE, NEWLINE, and INDENT tokens up to the first VALUE token.
+    /// Returns None if there is no whitespace (which would be malformed).
+    fn get_post_colon_whitespace(&self) -> Option<String> {
+        let mut found_colon = false;
+        let mut whitespace = String::new();
+
+        for token in self
+            .0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+        {
+            if token.kind() == COLON {
+                found_colon = true;
+                continue;
+            }
+
+            if found_colon {
+                if token.kind() == WHITESPACE || token.kind() == NEWLINE || token.kind() == INDENT {
+                    whitespace.push_str(token.text());
+                } else {
+                    // We've reached a non-whitespace token, stop collecting
+                    break;
+                }
+            }
+        }
+
+        if whitespace.is_empty() {
+            None
+        } else {
+            Some(whitespace)
+        }
+    }
+
+    /// Normalize the spacing around the field separator (colon) in place.
+    ///
+    /// This ensures that there is exactly one space after the colon and before the value.
+    /// This is a lossless operation that preserves the field name and value content,
+    /// but normalizes the whitespace formatting.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// use std::str::FromStr;
+    ///
+    /// // Parse an entry with extra spacing after the colon
+    /// let input = "Field:    value\n";
+    /// let mut deb822 = Deb822::from_str(input).unwrap();
+    /// let mut para = deb822.paragraphs().next().unwrap();
+    ///
+    /// para.normalize_field_spacing();
+    /// assert_eq!(para.get("Field").as_deref(), Some("value"));
+    /// ```
+    pub fn normalize_field_spacing(&mut self) {
+        use rowan::GreenNodeBuilder;
+
+        // Build normalized entry
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(ENTRY.into());
+
+        let mut seen_colon = false;
+        let mut skip_whitespace = false;
+
+        for child in self.0.children_with_tokens() {
+            match child.kind() {
+                KEY => {
+                    builder.token(KEY.into(), child.as_token().unwrap().text());
+                }
+                COLON => {
+                    builder.token(COLON.into(), ":");
+                    seen_colon = true;
+                    skip_whitespace = true;
+                }
+                WHITESPACE if skip_whitespace => {
+                    // Skip existing whitespace after colon
+                    continue;
+                }
+                VALUE if skip_whitespace => {
+                    // Add exactly one space before the first value token
+                    builder.token(WHITESPACE.into(), " ");
+                    builder.token(VALUE.into(), child.as_token().unwrap().text());
+                    skip_whitespace = false;
+                }
+                NEWLINE if skip_whitespace && seen_colon => {
+                    // Empty value case (e.g., "Field:\n" or "Field:  \n")
+                    // Normalize to no trailing space - just output newline
+                    builder.token(NEWLINE.into(), "\n");
+                    skip_whitespace = false;
+                }
+                _ => {
+                    // Copy all other tokens as-is
+                    if let Some(token) = child.as_token() {
+                        builder.token(token.kind().into(), token.text());
+                    }
+                }
+            }
+        }
+
+        builder.finish_node();
+        let normalized = SyntaxNode::new_root_mut(builder.finish());
+
+        // Replace this entry in place
+        if let Some(parent) = self.0.parent() {
+            let index = self.0.index();
+            parent.splice_children(index..index + 1, vec![normalized.into()]);
         }
     }
 
@@ -1900,6 +2667,73 @@ Foo: Bar
     }
 
     #[test]
+    fn test_swap_paragraphs() {
+        // Test basic swap
+        let mut d: super::Deb822 = vec![
+            vec![("Foo", "Bar")].into_iter().collect(),
+            vec![("A", "B")].into_iter().collect(),
+            vec![("X", "Y")].into_iter().collect(),
+        ]
+        .into_iter()
+        .collect();
+
+        d.swap_paragraphs(0, 2);
+        assert_eq!(d.to_string(), "X: Y\n\nA: B\n\nFoo: Bar\n");
+
+        // Swap back
+        d.swap_paragraphs(0, 2);
+        assert_eq!(d.to_string(), "Foo: Bar\n\nA: B\n\nX: Y\n");
+
+        // Swap adjacent paragraphs
+        d.swap_paragraphs(0, 1);
+        assert_eq!(d.to_string(), "A: B\n\nFoo: Bar\n\nX: Y\n");
+
+        // Swap with same index should be no-op
+        let before = d.to_string();
+        d.swap_paragraphs(1, 1);
+        assert_eq!(d.to_string(), before);
+    }
+
+    #[test]
+    fn test_swap_paragraphs_preserves_content() {
+        // Test that field content is preserved
+        let mut d: super::Deb822 = vec![
+            vec![("Field1", "Value1"), ("Field2", "Value2")]
+                .into_iter()
+                .collect(),
+            vec![("FieldA", "ValueA"), ("FieldB", "ValueB")]
+                .into_iter()
+                .collect(),
+        ]
+        .into_iter()
+        .collect();
+
+        d.swap_paragraphs(0, 1);
+
+        let mut paras = d.paragraphs();
+        let p1 = paras.next().unwrap();
+        assert_eq!(p1.get("FieldA").as_deref(), Some("ValueA"));
+        assert_eq!(p1.get("FieldB").as_deref(), Some("ValueB"));
+
+        let p2 = paras.next().unwrap();
+        assert_eq!(p2.get("Field1").as_deref(), Some("Value1"));
+        assert_eq!(p2.get("Field2").as_deref(), Some("Value2"));
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn test_swap_paragraphs_out_of_bounds() {
+        let mut d: super::Deb822 = vec![
+            vec![("Foo", "Bar")].into_iter().collect(),
+            vec![("A", "B")].into_iter().collect(),
+        ]
+        .into_iter()
+        .collect();
+
+        d.swap_paragraphs(0, 5);
+    }
+
+    #[test]
     fn test_multiline_entry() {
         use super::SyntaxKind::*;
         use rowan::ast::AstNode;
@@ -2119,6 +2953,83 @@ C: D
     #[test]
     fn test_format_parse_error() {
         assert_eq!(ParseError(vec!["foo".to_string()]).to_string(), "foo\n");
+    }
+
+    #[test]
+    fn test_set_field_ordering_source() {
+        let mut p = super::Paragraph::new();
+
+        // Add fields in random order
+        p.set("Homepage", "https://example.com");
+        p.set("Source", "mypackage");
+        p.set("Build-Depends", "debhelper");
+        p.set("Maintainer", "Test <test@example.com>");
+        p.set("Standards-Version", "4.5.0");
+
+        // Check that fields are in the expected order
+        let keys: Vec<_> = p.keys().collect();
+        assert_eq!(keys[0], "Source");
+        assert_eq!(keys[1], "Maintainer");
+        assert_eq!(keys[2], "Build-Depends");
+        assert_eq!(keys[3], "Standards-Version");
+        assert_eq!(keys[4], "Homepage");
+    }
+
+    #[test]
+    fn test_set_field_ordering_binary() {
+        let mut p = super::Paragraph::new();
+
+        // Add fields in random order
+        p.set("Description", "A test package");
+        p.set("Package", "mypackage");
+        p.set("Depends", "libc6");
+        p.set("Architecture", "amd64");
+        p.set("Section", "utils");
+
+        // Check that fields are in the expected order
+        let keys: Vec<_> = p.keys().collect();
+        assert_eq!(keys[0], "Package");
+        assert_eq!(keys[1], "Architecture");
+        assert_eq!(keys[2], "Section");
+        assert_eq!(keys[3], "Depends");
+        assert_eq!(keys[4], "Description");
+    }
+
+    #[test]
+    fn test_set_field_ordering_mixed() {
+        let mut p = super::Paragraph::new();
+
+        // Add some known fields and some unknown fields
+        p.set("Package", "mypackage");
+        p.set("X-Custom-Field", "custom");
+        p.set("Architecture", "all");
+        p.set("Another-Custom", "value");
+        p.set("Description", "Test");
+
+        // Check that known fields are ordered correctly and unknown fields are alphabetical
+        let keys: Vec<_> = p.keys().collect();
+        assert_eq!(keys[0], "Package");
+        assert_eq!(keys[1], "Architecture");
+        assert_eq!(keys[2], "Description");
+        assert_eq!(keys[3], "Another-Custom"); // Unknown fields alphabetically sorted
+        assert_eq!(keys[4], "X-Custom-Field");
+    }
+
+    #[test]
+    fn test_set_with_field_order() {
+        let mut p = super::Paragraph::new();
+        let custom_order = &["Foo", "Bar", "Baz"];
+
+        p.set_with_field_order("Baz", "3", custom_order);
+        p.set_with_field_order("Foo", "1", custom_order);
+        p.set_with_field_order("Bar", "2", custom_order);
+        p.set_with_field_order("Unknown", "4", custom_order);
+
+        let keys: Vec<_> = p.keys().collect();
+        assert_eq!(keys[0], "Foo");
+        assert_eq!(keys[1], "Bar");
+        assert_eq!(keys[2], "Baz");
+        assert_eq!(keys[3], "Unknown");
     }
 
     #[test]
@@ -2523,7 +3434,7 @@ Section:    utils
         let input = r#"Package: test
 Description:
 Maintainer: Valid User
-EmptyField: 
+EmptyField:
 Version: 1.0
 "#;
         let (deb822, _errors) = super::Deb822::from_str_relaxed(input);
@@ -2545,4 +3456,447 @@ Version: 1.0
         assert_eq!(all_fields.get("EmptyField"), Some(&"".to_string()));
         assert_eq!(all_fields.get("Version"), Some(&"1.0".to_string()));
     }
+
+    #[test]
+    fn test_insert_comment_before() {
+        let d: super::Deb822 = vec![
+            vec![("Source", "foo"), ("Maintainer", "Bar <bar@example.com>")]
+                .into_iter()
+                .collect(),
+            vec![("Package", "foo"), ("Architecture", "all")]
+                .into_iter()
+                .collect(),
+        ]
+        .into_iter()
+        .collect();
+
+        // Insert comment before first paragraph
+        let mut p1 = d.paragraphs().next().unwrap();
+        p1.insert_comment_before("This is the source paragraph");
+
+        // Insert comment before second paragraph
+        let mut p2 = d.paragraphs().nth(1).unwrap();
+        p2.insert_comment_before("This is the binary paragraph");
+
+        let output = d.to_string();
+        assert_eq!(
+            output,
+            r#"# This is the source paragraph
+Source: foo
+Maintainer: Bar <bar@example.com>
+
+# This is the binary paragraph
+Package: foo
+Architecture: all
+"#
+        );
+    }
+
+    #[test]
+    fn test_parse_continuation_with_colon() {
+        // Test that continuation lines with colons are properly parsed
+        let input = "Package: test\nDescription: short\n line: with colon\n";
+        let result = input.parse::<Deb822>();
+        assert!(result.is_ok());
+
+        let deb822 = result.unwrap();
+        let para = deb822.paragraphs().next().unwrap();
+        assert_eq!(para.get("Package").as_deref(), Some("test"));
+        assert_eq!(
+            para.get("Description").as_deref(),
+            Some("short\nline: with colon")
+        );
+    }
+
+    #[test]
+    fn test_parse_continuation_starting_with_colon() {
+        // Test continuation line STARTING with a colon (issue #315)
+        let input = "Package: test\nDescription: short\n :value\n";
+        let result = input.parse::<Deb822>();
+        assert!(result.is_ok());
+
+        let deb822 = result.unwrap();
+        let para = deb822.paragraphs().next().unwrap();
+        assert_eq!(para.get("Package").as_deref(), Some("test"));
+        assert_eq!(para.get("Description").as_deref(), Some("short\n:value"));
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_single_space() {
+        // Field already has correct spacing
+        let input = "Field: value\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(para.to_string(), "Field: value\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_extra_spaces() {
+        // Field has extra spaces after colon
+        let input = "Field:    value\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(para.to_string(), "Field: value\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_no_space() {
+        // Field has no space after colon
+        let input = "Field:value\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(para.to_string(), "Field: value\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_multiple_fields() {
+        // Multiple fields with various spacing
+        let input = "Field1:    value1\nField2:value2\nField3:  value3\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(
+            para.to_string(),
+            "Field1: value1\nField2: value2\nField3: value3\n"
+        );
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_multiline_value() {
+        // Field with multiline value
+        let input = "Description:    short\n continuation line\n .  \n final line\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(
+            para.to_string(),
+            "Description: short\n continuation line\n .  \n final line\n"
+        );
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_empty_value_with_whitespace() {
+        // Field with empty value (only whitespace) should normalize to no space
+        let input = "Field:  \n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        // When value is empty/whitespace-only, normalize to no space
+        assert_eq!(para.to_string(), "Field:\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_no_value() {
+        // Field with no value (just newline) should stay unchanged
+        let input = "Depends:\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        // Should remain with no space
+        assert_eq!(para.to_string(), "Depends:\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_multiple_paragraphs() {
+        // Multiple paragraphs
+        let input = "Field1:    value1\n\nField2:  value2\n";
+        let mut deb822 = input.parse::<Deb822>().unwrap();
+
+        deb822.normalize_field_spacing();
+        assert_eq!(deb822.to_string(), "Field1: value1\n\nField2: value2\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_preserves_comments() {
+        // Normalize spacing while preserving comments (comments are at document level)
+        let input = "# Comment\nField:    value\n";
+        let mut deb822 = input.parse::<Deb822>().unwrap();
+
+        deb822.normalize_field_spacing();
+        assert_eq!(deb822.to_string(), "# Comment\nField: value\n");
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_preserves_values() {
+        // Ensure values are preserved exactly
+        let input = "Source:   foo-bar\nMaintainer:Foo Bar <test@example.com>\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+
+        assert_eq!(para.get("Source").as_deref(), Some("foo-bar"));
+        assert_eq!(
+            para.get("Maintainer").as_deref(),
+            Some("Foo Bar <test@example.com>")
+        );
+    }
+
+    #[test]
+    fn test_normalize_field_spacing_tab_after_colon() {
+        // Field with tab after colon (should be normalized to single space)
+        let input = "Field:\tvalue\n";
+        let deb822 = input.parse::<Deb822>().unwrap();
+        let mut para = deb822.paragraphs().next().unwrap();
+
+        para.normalize_field_spacing();
+        assert_eq!(para.to_string(), "Field: value\n");
+    }
+
+    #[test]
+    fn test_set_preserves_indentation() {
+        // Test that Paragraph.set() preserves the original indentation
+        let original = r#"Source: example
+Build-Depends: foo,
+               bar,
+               baz
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Modify the Build-Depends field
+        para.set("Build-Depends", "foo,\nbar,\nbaz");
+
+        // The indentation should be preserved (15 spaces for "Build-Depends: ")
+        let expected = r#"Source: example
+Build-Depends: foo,
+               bar,
+               baz
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_set_new_field_detects_field_name_length_indent() {
+        // Test that new fields detect field-name-length-based indentation
+        let original = r#"Source: example
+Build-Depends: foo,
+               bar,
+               baz
+Depends: lib1,
+         lib2
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a new multi-line field - should detect that indentation is field-name-length + 2
+        para.set("Recommends", "pkg1,\npkg2,\npkg3");
+
+        // "Recommends: " is 12 characters, so indentation should be 12 spaces
+        assert!(para
+            .to_string()
+            .contains("Recommends: pkg1,\n            pkg2,"));
+    }
+
+    #[test]
+    fn test_set_new_field_detects_fixed_indent() {
+        // Test that new fields detect fixed indentation pattern
+        let original = r#"Source: example
+Build-Depends: foo,
+     bar,
+     baz
+Depends: lib1,
+     lib2
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a new multi-line field - should detect fixed 5-space indentation
+        para.set("Recommends", "pkg1,\npkg2,\npkg3");
+
+        // Should use the same 5-space indentation
+        assert!(para
+            .to_string()
+            .contains("Recommends: pkg1,\n     pkg2,\n     pkg3\n"));
+    }
+
+    #[test]
+    fn test_set_new_field_no_multiline_fields() {
+        // Test that new fields use field-name-length when no existing multi-line fields
+        let original = r#"Source: example
+Maintainer: Test <test@example.com>
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a new multi-line field - should default to field name length + 2
+        para.set("Depends", "foo,\nbar,\nbaz");
+
+        // "Depends: " is 9 characters, so indentation should be 9 spaces
+        let expected = r#"Source: example
+Maintainer: Test <test@example.com>
+Depends: foo,
+         bar,
+         baz
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_set_new_field_mixed_indentation() {
+        // Test that new fields fall back to field-name-length when pattern is inconsistent
+        let original = r#"Source: example
+Build-Depends: foo,
+               bar
+Depends: lib1,
+     lib2
+"#;
+
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Add a new multi-line field - mixed pattern, should fall back to field name length + 2
+        para.set("Recommends", "pkg1,\npkg2");
+
+        // "Recommends: " is 12 characters
+        assert!(para
+            .to_string()
+            .contains("Recommends: pkg1,\n            pkg2\n"));
+    }
+
+    #[test]
+    fn test_entry_with_indentation() {
+        // Test Entry::with_indentation directly
+        let entry = super::Entry::with_indentation("Test-Field", "value1\nvalue2\nvalue3", "    ");
+
+        assert_eq!(
+            entry.to_string(),
+            "Test-Field: value1\n    value2\n    value3\n"
+        );
+    }
+
+    #[test]
+    fn test_entry_get_indent() {
+        // Test that we can extract indentation from an entry
+        let original = r#"Build-Depends: foo,
+               bar,
+               baz
+"#;
+        let para: super::Paragraph = original.parse().unwrap();
+        let entry = para.entries().next().unwrap();
+
+        assert_eq!(entry.get_indent(), Some("               ".to_string()));
+    }
+
+    #[test]
+    fn test_entry_get_indent_single_line() {
+        // Single-line entries should return None for indentation
+        let original = r#"Source: example
+"#;
+        let para: super::Paragraph = original.parse().unwrap();
+        let entry = para.entries().next().unwrap();
+
+        assert_eq!(entry.get_indent(), None);
+    }
+}
+
+#[test]
+fn test_move_paragraph_forward() {
+    let mut d: Deb822 = vec![
+        vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
+        vec![("A", "B"), ("C", "D")].into_iter().collect(),
+        vec![("X", "Y"), ("Z", "W")].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect();
+    d.move_paragraph(0, 2);
+    assert_eq!(
+        d.to_string(),
+        "A: B\nC: D\n\nX: Y\nZ: W\n\nFoo: Bar\nBaz: Qux\n"
+    );
+}
+
+#[test]
+fn test_move_paragraph_backward() {
+    let mut d: Deb822 = vec![
+        vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
+        vec![("A", "B"), ("C", "D")].into_iter().collect(),
+        vec![("X", "Y"), ("Z", "W")].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect();
+    d.move_paragraph(2, 0);
+    assert_eq!(
+        d.to_string(),
+        "X: Y\nZ: W\n\nFoo: Bar\nBaz: Qux\n\nA: B\nC: D\n"
+    );
+}
+
+#[test]
+fn test_move_paragraph_middle() {
+    let mut d: Deb822 = vec![
+        vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
+        vec![("A", "B"), ("C", "D")].into_iter().collect(),
+        vec![("X", "Y"), ("Z", "W")].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect();
+    d.move_paragraph(2, 1);
+    assert_eq!(
+        d.to_string(),
+        "Foo: Bar\nBaz: Qux\n\nX: Y\nZ: W\n\nA: B\nC: D\n"
+    );
+}
+
+#[test]
+fn test_move_paragraph_same_index() {
+    let mut d: Deb822 = vec![
+        vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
+        vec![("A", "B"), ("C", "D")].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect();
+    let original = d.to_string();
+    d.move_paragraph(1, 1);
+    assert_eq!(d.to_string(), original);
+}
+
+#[test]
+fn test_move_paragraph_single() {
+    let mut d: Deb822 = vec![vec![("Foo", "Bar")].into_iter().collect()]
+        .into_iter()
+        .collect();
+    let original = d.to_string();
+    d.move_paragraph(0, 0);
+    assert_eq!(d.to_string(), original);
+}
+
+#[test]
+fn test_move_paragraph_invalid_index() {
+    let mut d: Deb822 = vec![
+        vec![("Foo", "Bar")].into_iter().collect(),
+        vec![("A", "B")].into_iter().collect(),
+    ]
+    .into_iter()
+    .collect();
+    let original = d.to_string();
+    d.move_paragraph(0, 5);
+    assert_eq!(d.to_string(), original);
+}
+
+#[test]
+fn test_move_paragraph_with_comments() {
+    let text = r#"Foo: Bar
+
+# This is a comment
+
+A: B
+
+X: Y
+"#;
+    let mut d: Deb822 = text.parse().unwrap();
+    d.move_paragraph(0, 2);
+    assert_eq!(
+        d.to_string(),
+        "# This is a comment\n\nA: B\n\nX: Y\n\nFoo: Bar\n"
+    );
 }

@@ -6,15 +6,15 @@ license = "Apache-2.0"
 description = "A parser for Debian copyright files"
 repository = { workspace = true }
 homepage = { workspace = true }
-version = "0.1.28"
+version = "0.1.30"
 keywords = ["debian", "copyright", "edit", "dep5"]
 categories = ["parser-implementations"]
 
 [dependencies]
-debversion = "0.4"
-regex = ">=1.10"
-deb822-lossless = { version = ">=0.2", path = "../deb822-lossless", optional = true }
-deb822-fast = { version = ">=0.1", path = "../deb822-fast", features = ["derive"] }
+debversion = ">=0.4.7, <0.6"
+regex = ">=1.10, <2"
+deb822-lossless = { version = ">=0.2, <0.5", path = "../deb822-lossless", optional = true }
+deb822-fast = { version = ">=0.1, <0.3", path = "../deb822-fast", features = ["derive"] }
 
 [features]
 default = ["lossless"]
