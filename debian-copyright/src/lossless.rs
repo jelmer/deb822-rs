@@ -166,6 +166,59 @@ impl Copyright {
         para.set("License", &license_text);
         LicenseParagraph(para)
     }
+
+    /// Remove a license paragraph by its short name
+    ///
+    /// This removes the first standalone license paragraph that matches the given name.
+    /// Returns true if a paragraph was removed, false otherwise.
+    pub fn remove_license_by_name(&mut self, name: &str) -> bool {
+        // Find the index of the license paragraph
+        let mut index = None;
+        for (i, para) in self.0.paragraphs().enumerate() {
+            if !para.contains_key("Files")
+                && !para.contains_key("Format")
+                && para.contains_key("License")
+            {
+                let license_para = LicenseParagraph(para);
+                if license_para.name().as_deref() == Some(name) {
+                    index = Some(i);
+                    break;
+                }
+            }
+        }
+
+        if let Some(i) = index {
+            self.0.remove_paragraph(i);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a files paragraph by matching file pattern
+    ///
+    /// This removes the first files paragraph where the Files field contains the given pattern.
+    /// Returns true if a paragraph was removed, false otherwise.
+    pub fn remove_files_by_pattern(&mut self, pattern: &str) -> bool {
+        // Find the index of the files paragraph
+        let mut index = None;
+        for (i, para) in self.0.paragraphs().enumerate() {
+            if para.contains_key("Files") {
+                let files_para = FilesParagraph(para);
+                if files_para.files().iter().any(|f| f == pattern) {
+                    index = Some(i);
+                    break;
+                }
+            }
+        }
+
+        if let Some(i) = index {
+            self.0.remove_paragraph(i);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Error parsing copyright files
@@ -789,5 +842,96 @@ License: GPL-3+
              License: GPL-3+\n\n\
              License: GPL-3+\n         Full GPL-3+ text here.\n"
         );
+    }
+
+    #[test]
+    fn test_remove_license_by_name() {
+        let mut copyright = super::Copyright::new();
+
+        // Add multiple license paragraphs
+        let license1 = crate::License::Named("MIT".to_string(), "MIT license text.".to_string());
+        copyright.add_license(&license1);
+
+        let license2 =
+            crate::License::Named("GPL-3+".to_string(), "GPL-3+ license text.".to_string());
+        copyright.add_license(&license2);
+
+        let license3 =
+            crate::License::Named("Apache-2.0".to_string(), "Apache license text.".to_string());
+        copyright.add_license(&license3);
+
+        // Verify we have 3 license paragraphs
+        assert_eq!(3, copyright.iter_licenses().count());
+
+        // Remove the GPL-3+ license
+        let removed = copyright.remove_license_by_name("GPL-3+");
+        assert!(removed);
+
+        // Verify we now have 2 license paragraphs
+        assert_eq!(2, copyright.iter_licenses().count());
+
+        // Verify the remaining licenses
+        let licenses: Vec<_> = copyright.iter_licenses().collect();
+        assert_eq!("MIT", licenses[0].name().unwrap());
+        assert_eq!("Apache-2.0", licenses[1].name().unwrap());
+
+        // Try to remove a non-existent license
+        let removed = copyright.remove_license_by_name("BSD-3-Clause");
+        assert!(!removed);
+        assert_eq!(2, copyright.iter_licenses().count());
+    }
+
+    #[test]
+    fn test_remove_files_by_pattern() {
+        let mut copyright = super::Copyright::new();
+
+        // Add multiple files paragraphs
+        let license1 = crate::License::Name("MIT".to_string());
+        copyright.add_files(&["src/*"], &["2024 Author One"], &license1);
+
+        let license2 = crate::License::Name("GPL-3+".to_string());
+        copyright.add_files(&["debian/*"], &["2024 Author Two"], &license2);
+
+        let license3 = crate::License::Name("Apache-2.0".to_string());
+        copyright.add_files(&["docs/*"], &["2024 Author Three"], &license3);
+
+        // Verify we have 3 files paragraphs
+        assert_eq!(3, copyright.iter_files().count());
+
+        // Remove the debian/* files paragraph
+        let removed = copyright.remove_files_by_pattern("debian/*");
+        assert!(removed);
+
+        // Verify we now have 2 files paragraphs
+        assert_eq!(2, copyright.iter_files().count());
+
+        // Verify the remaining files paragraphs
+        let files: Vec<_> = copyright.iter_files().collect();
+        assert_eq!(vec!["src/*"], files[0].files());
+        assert_eq!(vec!["docs/*"], files[1].files());
+
+        // Try to remove a non-existent pattern
+        let removed = copyright.remove_files_by_pattern("tests/*");
+        assert!(!removed);
+        assert_eq!(2, copyright.iter_files().count());
+    }
+
+    #[test]
+    fn test_remove_files_by_pattern_with_multiple_patterns() {
+        let mut copyright = super::Copyright::new();
+
+        // Add a files paragraph with multiple patterns
+        let license = crate::License::Name("MIT".to_string());
+        copyright.add_files(&["src/*", "*.rs"], &["2024 Author"], &license);
+
+        // Verify we have 1 files paragraph
+        assert_eq!(1, copyright.iter_files().count());
+
+        // Remove by matching one of the patterns
+        let removed = copyright.remove_files_by_pattern("*.rs");
+        assert!(removed);
+
+        // Verify the paragraph was removed
+        assert_eq!(0, copyright.iter_files().count());
     }
 }
