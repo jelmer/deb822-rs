@@ -122,10 +122,11 @@ pub struct Paragraph {
 impl Paragraph {
     /// Get the value of a field by name.
     ///
+    /// Field names are compared case-insensitively.
     /// Returns `None` if the field does not exist.
     pub fn get(&self, name: &str) -> Option<&str> {
         for field in &self.fields {
-            if field.name == name {
+            if field.name.eq_ignore_ascii_case(name) {
                 return Some(&field.value);
             }
         }
@@ -169,13 +170,14 @@ impl Paragraph {
 
     /// Set the value of a field, inserting at the appropriate location if new.
     ///
+    /// Field names are compared case-insensitively.
     /// If a field with the same name already exists, its value will be updated.
     /// If the field doesn't exist, it will be inserted at the appropriate position
     /// based on canonical field ordering.
     pub fn set(&mut self, name: &str, value: &str) {
         // Check if field already exists and update it
         for field in &mut self.fields {
-            if field.name == name {
+            if field.name.eq_ignore_ascii_case(name) {
                 field.value = value.to_string();
                 return;
             }
@@ -183,21 +185,33 @@ impl Paragraph {
 
         // Field doesn't exist, insert at appropriate location
         // Try to detect if this is a source or binary package paragraph
-        let field_order = if self.fields.iter().any(|f| f.name == "Source") {
+        let field_order = if self
+            .fields
+            .iter()
+            .any(|f| f.name.eq_ignore_ascii_case("Source"))
+        {
             SOURCE_FIELD_ORDER
-        } else if self.fields.iter().any(|f| f.name == "Package") {
+        } else if self
+            .fields
+            .iter()
+            .any(|f| f.name.eq_ignore_ascii_case("Package"))
+        {
             BINARY_FIELD_ORDER
         } else {
             // Default based on what we're inserting
-            if name == "Source" {
+            if name.eq_ignore_ascii_case("Source") {
                 SOURCE_FIELD_ORDER
-            } else if name == "Package" {
+            } else if name.eq_ignore_ascii_case("Package") {
                 BINARY_FIELD_ORDER
             } else {
                 // Try to determine based on existing fields
                 let has_source_fields = self.fields.iter().any(|f| {
-                    SOURCE_FIELD_ORDER.contains(&f.name.as_str())
-                        && !BINARY_FIELD_ORDER.contains(&f.name.as_str())
+                    SOURCE_FIELD_ORDER
+                        .iter()
+                        .any(|ord| ord.eq_ignore_ascii_case(&f.name))
+                        && !BINARY_FIELD_ORDER
+                            .iter()
+                            .any(|ord| ord.eq_ignore_ascii_case(&f.name))
                 });
                 if has_source_fields {
                     SOURCE_FIELD_ORDER
@@ -218,10 +232,12 @@ impl Paragraph {
     }
 
     /// Set a field using a specific field ordering.
+    ///
+    /// Field names are compared case-insensitively.
     pub fn set_with_field_order(&mut self, name: &str, value: &str, field_order: &[&str]) {
         // Check if field already exists and update it
         for field in &mut self.fields {
-            if field.name == name {
+            if field.name.eq_ignore_ascii_case(name) {
                 field.value = value.to_string();
                 return;
             }
@@ -239,14 +255,18 @@ impl Paragraph {
 
     /// Find the appropriate insertion index for a new field based on field ordering.
     fn find_insertion_index(&self, name: &str, field_order: &[&str]) -> usize {
-        // Find position of the new field in the canonical order
-        let new_field_position = field_order.iter().position(|&field| field == name);
+        // Find position of the new field in the canonical order (case-insensitive)
+        let new_field_position = field_order
+            .iter()
+            .position(|&field| field.eq_ignore_ascii_case(name));
 
         let mut insertion_index = self.fields.len();
 
         // Find the right position based on canonical field order
         for (i, field) in self.fields.iter().enumerate() {
-            let existing_position = field_order.iter().position(|&f| f == field.name);
+            let existing_position = field_order
+                .iter()
+                .position(|&f| f.eq_ignore_ascii_case(&field.name));
 
             match (new_field_position, existing_position) {
                 // Both fields are in the canonical order
@@ -279,7 +299,10 @@ impl Paragraph {
         if new_field_position.is_some() && insertion_index == self.fields.len() {
             // Look for the position after the last known field that comes before our field
             for (i, field) in self.fields.iter().enumerate().rev() {
-                if field_order.iter().any(|&f| f == field.name) {
+                if field_order
+                    .iter()
+                    .any(|&f| f.eq_ignore_ascii_case(&field.name))
+                {
                     // Found a known field, insert after it
                     insertion_index = i + 1;
                     break;
@@ -291,8 +314,11 @@ impl Paragraph {
     }
 
     /// Remove a field from the paragraph.
+    ///
+    /// Field names are compared case-insensitively.
     pub fn remove(&mut self, name: &str) {
-        self.fields.retain(|field| field.name != name);
+        self.fields
+            .retain(|field| !field.name.eq_ignore_ascii_case(name));
     }
 }
 
@@ -1231,5 +1257,93 @@ Version: 1.0
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].get("Package"), Some("test"));
+    }
+
+    #[test]
+    fn test_case_insensitive_get() {
+        let para = Paragraph {
+            fields: vec![
+                Field {
+                    name: "Package".to_string(),
+                    value: "test".to_string(),
+                },
+                Field {
+                    name: "Version".to_string(),
+                    value: "1.0".to_string(),
+                },
+            ],
+        };
+
+        // Test different case variations
+        assert_eq!(para.get("Package"), Some("test"));
+        assert_eq!(para.get("package"), Some("test"));
+        assert_eq!(para.get("PACKAGE"), Some("test"));
+        assert_eq!(para.get("PaCkAgE"), Some("test"));
+
+        assert_eq!(para.get("Version"), Some("1.0"));
+        assert_eq!(para.get("version"), Some("1.0"));
+        assert_eq!(para.get("VERSION"), Some("1.0"));
+    }
+
+    #[test]
+    fn test_case_insensitive_set() {
+        let mut para = Paragraph {
+            fields: vec![Field {
+                name: "Package".to_string(),
+                value: "test".to_string(),
+            }],
+        };
+
+        // Set with different case should update the existing field
+        para.set("package", "updated");
+        assert_eq!(para.fields.len(), 1);
+        assert_eq!(para.get("Package"), Some("updated"));
+        assert_eq!(para.get("package"), Some("updated"));
+
+        // Set with UPPERCASE
+        para.set("PACKAGE", "updated2");
+        assert_eq!(para.fields.len(), 1);
+        assert_eq!(para.get("Package"), Some("updated2"));
+    }
+
+    #[test]
+    fn test_case_insensitive_remove() {
+        let mut para = Paragraph {
+            fields: vec![
+                Field {
+                    name: "Package".to_string(),
+                    value: "test".to_string(),
+                },
+                Field {
+                    name: "Version".to_string(),
+                    value: "1.0".to_string(),
+                },
+            ],
+        };
+
+        // Remove with different case
+        para.remove("package");
+        assert_eq!(para.fields.len(), 1);
+        assert_eq!(para.get("Package"), None);
+        assert_eq!(para.get("Version"), Some("1.0"));
+
+        // Remove with uppercase
+        para.remove("VERSION");
+        assert_eq!(para.fields.len(), 0);
+        assert_eq!(para.get("Version"), None);
+    }
+
+    #[test]
+    fn test_case_preservation() {
+        let mut para = Paragraph { fields: vec![] };
+
+        // Insert with specific case
+        para.insert("Package", "test");
+        assert_eq!(para.fields[0].name, "Package");
+
+        // Set with different case should preserve original case
+        para.set("package", "updated");
+        assert_eq!(para.fields[0].name, "Package");
+        assert_eq!(para.fields[0].value, "updated");
     }
 }
