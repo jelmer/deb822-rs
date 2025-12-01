@@ -262,5 +262,207 @@ mod tests {
             assert_eq!(para.get("baz"), Some("blah"));
             assert_eq!(para.to_string(), "baz: blah\n");
         }
+
+        #[test]
+        fn test_hashmap_prefix() {
+            use std::collections::HashMap;
+
+            #[derive(FromDeb822, ToDeb822)]
+            struct VcsInfo {
+                #[deb822(field = "Package")]
+                package: String,
+                #[deb822(prefix = "Vcs-")]
+                vcs: HashMap<String, String>,
+            }
+
+            let para: crate::Paragraph =
+                "Package: foo\nVcs-Git: https://example.com/git\nVcs-Browser: https://example.com\n"
+                    .parse()
+                    .unwrap();
+
+            let info: VcsInfo = VcsInfo::from_paragraph(&para).unwrap();
+            assert_eq!(info.package, "foo");
+            assert_eq!(info.vcs.len(), 2);
+            assert_eq!(
+                info.vcs.get("Git"),
+                Some(&"https://example.com/git".to_string())
+            );
+            assert_eq!(
+                info.vcs.get("Browser"),
+                Some(&"https://example.com".to_string())
+            );
+
+            // Test serialization
+            let para2: crate::Paragraph = info.to_paragraph();
+            assert_eq!(para2.get("Package"), Some("foo"));
+            assert_eq!(para2.get("Vcs-Git"), Some("https://example.com/git"));
+            assert_eq!(para2.get("Vcs-Browser"), Some("https://example.com"));
+        }
+
+        #[test]
+        fn test_hashmap_prefix_optional() {
+            use std::collections::HashMap;
+
+            #[derive(FromDeb822, ToDeb822)]
+            struct VcsInfo {
+                #[deb822(field = "Package")]
+                package: String,
+                #[deb822(prefix = "Vcs-")]
+                vcs: Option<HashMap<String, String>>,
+            }
+
+            // Test with VCS fields present
+            let para: crate::Paragraph = "Package: foo\nVcs-Git: https://example.com/git\n"
+                .parse()
+                .unwrap();
+
+            let info: VcsInfo = VcsInfo::from_paragraph(&para).unwrap();
+            assert_eq!(info.package, "foo");
+            assert!(info.vcs.is_some());
+            assert_eq!(
+                info.vcs.as_ref().unwrap().get("Git"),
+                Some(&"https://example.com/git".to_string())
+            );
+
+            // Test without VCS fields
+            let para2: crate::Paragraph = "Package: bar\n".parse().unwrap();
+            let info2: VcsInfo = VcsInfo::from_paragraph(&para2).unwrap();
+            assert_eq!(info2.package, "bar");
+            assert!(info2.vcs.is_none());
+
+            // Test serialization with None
+            let para3: crate::Paragraph = info2.to_paragraph();
+            assert_eq!(para3.get("Package"), Some("bar"));
+            assert_eq!(para3.get("Vcs-Git"), None);
+        }
+
+        #[test]
+        fn test_hashmap_prefix_empty() {
+            use std::collections::HashMap;
+
+            #[derive(FromDeb822, ToDeb822)]
+            struct VcsInfo {
+                #[deb822(field = "Package")]
+                package: String,
+                #[deb822(prefix = "Vcs-")]
+                vcs: HashMap<String, String>,
+            }
+
+            let para: crate::Paragraph = "Package: foo\n".parse().unwrap();
+
+            let info: VcsInfo = VcsInfo::from_paragraph(&para).unwrap();
+            assert_eq!(info.package, "foo");
+            assert_eq!(info.vcs.len(), 0);
+        }
+
+        #[test]
+        fn test_hashmap_precedence() {
+            use std::collections::HashMap;
+
+            #[derive(FromDeb822, ToDeb822)]
+            struct Config {
+                #[deb822(field = "Package")]
+                package: String,
+                #[deb822(field = "Vcs-Git")]
+                vcs_git: String,
+                #[deb822(prefix = "Vcs-")]
+                vcs_others: HashMap<String, String>,
+            }
+
+            let para: crate::Paragraph =
+                "Package: foo\nVcs-Git: https://example.com/git\nVcs-Browser: https://example.com\n"
+                    .parse()
+                    .unwrap();
+
+            let config: Config = Config::from_paragraph(&para).unwrap();
+            assert_eq!(config.package, "foo");
+            // Exact match takes precedence
+            assert_eq!(config.vcs_git, "https://example.com/git");
+            // Vcs-Git should NOT be in the prefix HashMap
+            assert_eq!(config.vcs_others.get("Git"), None);
+            // But Vcs-Browser should be
+            assert_eq!(
+                config.vcs_others.get("Browser"),
+                Some(&"https://example.com".to_string())
+            );
+        }
+
+        #[test]
+        fn test_hashmap_longest_prefix() {
+            use std::collections::HashMap;
+
+            #[derive(FromDeb822, ToDeb822)]
+            struct Config {
+                #[deb822(field = "Package")]
+                package: String,
+                #[deb822(prefix = "Vcs-Git-")]
+                vcs_git_fields: HashMap<String, String>,
+                #[deb822(prefix = "Vcs-")]
+                vcs_others: HashMap<String, String>,
+            }
+
+            let para: crate::Paragraph =
+                "Package: foo\nVcs-Git-Url: https://example.com/git\nVcs-Git-Branch: main\nVcs-Browser: https://example.com\n"
+                    .parse()
+                    .unwrap();
+
+            let config: Config = Config::from_paragraph(&para).unwrap();
+            assert_eq!(config.package, "foo");
+            // Longer prefix wins
+            assert_eq!(
+                config.vcs_git_fields.get("Url"),
+                Some(&"https://example.com/git".to_string())
+            );
+            assert_eq!(
+                config.vcs_git_fields.get("Branch"),
+                Some(&"main".to_string())
+            );
+            // These should NOT be in the shorter prefix HashMap
+            assert_eq!(config.vcs_others.get("Git-Url"), None);
+            assert_eq!(config.vcs_others.get("Git-Branch"), None);
+            // But Vcs-Browser should be in the shorter prefix HashMap
+            assert_eq!(
+                config.vcs_others.get("Browser"),
+                Some(&"https://example.com".to_string())
+            );
+        }
+
+        #[test]
+        fn test_hashmap_catchall() {
+            use std::collections::HashMap;
+
+            #[derive(FromDeb822, ToDeb822)]
+            struct Config {
+                #[deb822(field = "Package")]
+                package: String,
+                #[deb822(prefix = "Vcs-")]
+                vcs: HashMap<String, String>,
+                // Catch-all for everything else
+                other_fields: HashMap<String, String>,
+            }
+
+            let para: crate::Paragraph =
+                "Package: foo\nVcs-Git: https://example.com/git\nMaintainer: John Doe\nSection: utils\n"
+                    .parse()
+                    .unwrap();
+
+            let config: Config = Config::from_paragraph(&para).unwrap();
+            assert_eq!(config.package, "foo");
+            assert_eq!(
+                config.vcs.get("Git"),
+                Some(&"https://example.com/git".to_string())
+            );
+            // Catch-all gets fields not explicitly handled or prefix-matched
+            assert_eq!(config.other_fields.get("Package"), None);
+            assert_eq!(config.other_fields.get("Vcs-Git"), None);
+            assert_eq!(
+                config.other_fields.get("Maintainer"),
+                Some(&"John Doe".to_string())
+            );
+            assert_eq!(
+                config.other_fields.get("Section"),
+                Some(&"utils".to_string())
+            );
+        }
     }
 }

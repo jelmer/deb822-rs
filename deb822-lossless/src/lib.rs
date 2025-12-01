@@ -44,4 +44,8 @@ impl deb822_fast::convert::Deb822LikeParagraph for crate::lossless::Paragraph {
     fn remove(&mut self, key: &str) {
         crate::lossless::Paragraph::remove(self, key);
     }
+
+    fn iter(&self) -> impl Iterator<Item = (String, String)> {
+        crate::lossless::Paragraph::items(self)
+    }
 }
