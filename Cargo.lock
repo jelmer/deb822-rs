@@ -396,7 +396,7 @@ dependencies = [
 
 [[package]]
 name = "deb822-fast"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "deb822-derive",
 ]
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "debian-copyright"
-version = "0.1.30"
+version = "0.1.32"
 dependencies = [
  "deb822-fast",
  "deb822-lossless",

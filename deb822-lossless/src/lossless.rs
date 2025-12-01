@@ -1384,9 +1384,15 @@ impl Paragraph {
     }
 
     /// Returns the value of the given key in the paragraph.
+    ///
+    /// Field names are compared case-insensitively.
     pub fn get(&self, key: &str) -> Option<String> {
         self.entries()
-            .find(|e| e.key().as_deref() == Some(key))
+            .find(|e| {
+                e.key()
+                    .as_deref()
+                    .map_or(false, |k| k.eq_ignore_ascii_case(key))
+            })
             .map(|e| e.value())
     }
 
@@ -1407,9 +1413,16 @@ impl Paragraph {
     }
 
     /// Returns an iterator over all values for the given key in the paragraph.
+    ///
+    /// Field names are compared case-insensitively.
     pub fn get_all<'a>(&'a self, key: &'a str) -> impl Iterator<Item = String> + 'a {
-        self.items()
-            .filter_map(move |(k, v)| if k == key { Some(v) } else { None })
+        self.items().filter_map(move |(k, v)| {
+            if k.eq_ignore_ascii_case(key) {
+                Some(v)
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns an iterator over all keys in the paragraph.
@@ -1418,9 +1431,15 @@ impl Paragraph {
     }
 
     /// Remove the given field from the paragraph.
+    ///
+    /// Field names are compared case-insensitively.
     pub fn remove(&mut self, key: &str) {
         for mut entry in self.entries() {
-            if entry.key().as_deref() == Some(key) {
+            if entry
+                .key()
+                .as_deref()
+                .map_or(false, |k| k.eq_ignore_ascii_case(key))
+            {
                 entry.detach();
             }
         }
@@ -1547,10 +1566,13 @@ impl Paragraph {
         default_indent_pattern: Option<&IndentPattern>,
         field_order: Option<&[&str]>,
     ) {
-        // Check if the field already exists and extract its formatting
-        let existing_entry = self
-            .entries()
-            .find(|entry| entry.key().as_deref() == Some(key));
+        // Check if the field already exists and extract its formatting (case-insensitive)
+        let existing_entry = self.entries().find(|entry| {
+            entry
+                .key()
+                .as_deref()
+                .map_or(false, |k| k.eq_ignore_ascii_case(key))
+        });
 
         // Determine indentation to use
         let indent = existing_entry
@@ -1570,11 +1592,21 @@ impl Paragraph {
             .and_then(|entry| entry.get_post_colon_whitespace())
             .unwrap_or_else(|| " ".to_string());
 
-        let new_entry = Entry::with_formatting(key, value, &post_colon_ws, &indent);
+        // When replacing an existing field, preserve the original case of the field name
+        let actual_key = existing_entry
+            .as_ref()
+            .and_then(|e| e.key())
+            .unwrap_or_else(|| key.to_string());
 
-        // Check if the field already exists and replace it
+        let new_entry = Entry::with_formatting(&actual_key, value, &post_colon_ws, &indent);
+
+        // Check if the field already exists and replace it (case-insensitive)
         for entry in self.entries() {
-            if entry.key().as_deref() == Some(key) {
+            if entry
+                .key()
+                .as_deref()
+                .map_or(false, |k| k.eq_ignore_ascii_case(key))
+            {
                 self.0.splice_children(
                     entry.0.index()..entry.0.index() + 1,
                     vec![new_entry.0.into()],
@@ -1598,8 +1630,10 @@ impl Paragraph {
 
     /// Find the appropriate insertion index for a new field based on field ordering
     fn find_insertion_index(&self, key: &str, field_order: &[&str]) -> usize {
-        // Find position of the new field in the canonical order
-        let new_field_position = field_order.iter().position(|&field| field == key);
+        // Find position of the new field in the canonical order (case-insensitive)
+        let new_field_position = field_order
+            .iter()
+            .position(|&field| field.eq_ignore_ascii_case(key));
 
         let mut insertion_index = self.0.children_with_tokens().count();
 
@@ -1608,8 +1642,9 @@ impl Paragraph {
             if let Some(node) = child.as_node() {
                 if let Some(entry) = Entry::cast(node.clone()) {
                     if let Some(existing_key) = entry.key() {
-                        let existing_position =
-                            field_order.iter().position(|&field| field == existing_key);
+                        let existing_position = field_order
+                            .iter()
+                            .position(|&field| field.eq_ignore_ascii_case(&existing_key));
 
                         match (new_field_position, existing_position) {
                             // Both fields are in the canonical order
@@ -1652,7 +1687,7 @@ impl Paragraph {
                         if let Some(existing_key) = entry.key() {
                             if field_order
                                 .iter()
-                                .position(|&f| f == existing_key)
+                                .position(|&f| f.eq_ignore_ascii_case(&existing_key))
                                 .is_some()
                             {
                                 // Found a known field, insert after it
@@ -1669,9 +1704,15 @@ impl Paragraph {
     }
 
     /// Rename the given field in the paragraph.
+    ///
+    /// Field names are compared case-insensitively.
     pub fn rename(&mut self, old_key: &str, new_key: &str) -> bool {
         for entry in self.entries() {
-            if entry.key().as_deref() == Some(old_key) {
+            if entry
+                .key()
+                .as_deref()
+                .map_or(false, |k| k.eq_ignore_ascii_case(old_key))
+            {
                 self.0.splice_children(
                     entry.0.index()..entry.0.index() + 1,
                     vec![Entry::new(new_key, entry.value().as_str()).0.into()],
@@ -3939,4 +3980,130 @@ X: Y
         d.to_string(),
         "# This is a comment\n\nA: B\n\nX: Y\n\nFoo: Bar\n"
     );
+}
+
+#[test]
+fn test_case_insensitive_get() {
+    let text = "Package: test\nVersion: 1.0\n";
+    let d: Deb822 = text.parse().unwrap();
+    let p = d.paragraphs().next().unwrap();
+
+    // Test different case variations
+    assert_eq!(p.get("Package").as_deref(), Some("test"));
+    assert_eq!(p.get("package").as_deref(), Some("test"));
+    assert_eq!(p.get("PACKAGE").as_deref(), Some("test"));
+    assert_eq!(p.get("PaCkAgE").as_deref(), Some("test"));
+
+    assert_eq!(p.get("Version").as_deref(), Some("1.0"));
+    assert_eq!(p.get("version").as_deref(), Some("1.0"));
+    assert_eq!(p.get("VERSION").as_deref(), Some("1.0"));
+}
+
+#[test]
+fn test_case_insensitive_set() {
+    let text = "Package: test\n";
+    let d: Deb822 = text.parse().unwrap();
+    let mut p = d.paragraphs().next().unwrap();
+
+    // Set with different case should update the existing field
+    p.set("package", "updated");
+    assert_eq!(p.get("Package").as_deref(), Some("updated"));
+    assert_eq!(p.get("package").as_deref(), Some("updated"));
+
+    // Set with UPPERCASE
+    p.set("PACKAGE", "updated2");
+    assert_eq!(p.get("Package").as_deref(), Some("updated2"));
+
+    // Field count should remain 1
+    assert_eq!(p.keys().count(), 1);
+}
+
+#[test]
+fn test_case_insensitive_remove() {
+    let text = "Package: test\nVersion: 1.0\n";
+    let d: Deb822 = text.parse().unwrap();
+    let mut p = d.paragraphs().next().unwrap();
+
+    // Remove with different case
+    p.remove("package");
+    assert_eq!(p.get("Package"), None);
+    assert_eq!(p.get("Version").as_deref(), Some("1.0"));
+
+    // Remove with uppercase
+    p.remove("VERSION");
+    assert_eq!(p.get("Version"), None);
+
+    // No fields left
+    assert_eq!(p.keys().count(), 0);
+}
+
+#[test]
+fn test_case_preservation() {
+    let text = "Package: test\n";
+    let d: Deb822 = text.parse().unwrap();
+    let mut p = d.paragraphs().next().unwrap();
+
+    // Original case should be preserved
+    let original_text = d.to_string();
+    assert_eq!(original_text, "Package: test\n");
+
+    // Set with different case should preserve original case
+    p.set("package", "updated");
+
+    // The field name should still be "Package" (original case preserved)
+    let updated_text = d.to_string();
+    assert_eq!(updated_text, "Package: updated\n");
+}
+
+#[test]
+fn test_case_insensitive_contains_key() {
+    let text = "Package: test\n";
+    let d: Deb822 = text.parse().unwrap();
+    let p = d.paragraphs().next().unwrap();
+
+    assert!(p.contains_key("Package"));
+    assert!(p.contains_key("package"));
+    assert!(p.contains_key("PACKAGE"));
+    assert!(!p.contains_key("NonExistent"));
+}
+
+#[test]
+fn test_case_insensitive_get_all() {
+    let text = "Package: test1\npackage: test2\n";
+    let d: Deb822 = text.parse().unwrap();
+    let p = d.paragraphs().next().unwrap();
+
+    let values: Vec<String> = p.get_all("PACKAGE").collect();
+    assert_eq!(values, vec!["test1", "test2"]);
+}
+
+#[test]
+fn test_case_insensitive_rename() {
+    let text = "Package: test\n";
+    let d: Deb822 = text.parse().unwrap();
+    let mut p = d.paragraphs().next().unwrap();
+
+    // Rename with different case
+    assert!(p.rename("package", "NewName"));
+    assert_eq!(p.get("NewName").as_deref(), Some("test"));
+    assert_eq!(p.get("Package"), None);
+}
+
+#[test]
+fn test_rename_changes_case() {
+    let text = "Package: test\n";
+    let d: Deb822 = text.parse().unwrap();
+    let mut p = d.paragraphs().next().unwrap();
+
+    // Rename to different case of the same name
+    assert!(p.rename("package", "PACKAGE"));
+
+    // The field name should now be uppercase
+    let updated_text = d.to_string();
+    assert_eq!(updated_text, "PACKAGE: test\n");
+
+    // Can still get with any case
+    assert_eq!(p.get("package").as_deref(), Some("test"));
+    assert_eq!(p.get("Package").as_deref(), Some("test"));
+    assert_eq!(p.get("PACKAGE").as_deref(), Some("test"));
 }
