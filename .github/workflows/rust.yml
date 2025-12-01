@@ -20,7 +20,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Install OpenSSL on macOS
         if: matrix.os == 'macos-latest'
         run: brew install openssl@3
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Install cargo-minimal-versions and cargo-hack
         run: cargo install cargo-minimal-versions cargo-hack
       - name: Test with minimal versions
