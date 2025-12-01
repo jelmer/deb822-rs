@@ -10,6 +10,9 @@ pub trait Deb822LikeParagraph: FromIterator<(String, String)> {
 
     /// Remove a key-value pair.
     fn remove(&mut self, key: &str);
+
+    /// Iterate over all key-value pairs in the paragraph.
+    fn iter(&self) -> impl Iterator<Item = (String, String)>;
 }
 
 impl Deb822LikeParagraph for crate::Paragraph {
@@ -23,6 +26,10 @@ impl Deb822LikeParagraph for crate::Paragraph {
 
     fn remove(&mut self, key: &str) {
         crate::Paragraph::remove(self, key);
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (String, String)> {
+        crate::Paragraph::iter(self).map(|(k, v)| (k.to_string(), v.to_string()))
     }
 }
 
@@ -68,6 +75,39 @@ mod tests {
         // Test Deb822LikeParagraph::remove
         Deb822LikeParagraph::remove(&mut para, "Test");
         assert_eq!(para.get("Test"), None);
+    }
+
+    #[test]
+    fn test_iter() {
+        // Test the iter() method
+        let para = crate::Paragraph {
+            fields: vec![
+                crate::Field {
+                    name: "First".to_string(),
+                    value: "Value1".to_string(),
+                },
+                crate::Field {
+                    name: "Second".to_string(),
+                    value: "Value2".to_string(),
+                },
+                crate::Field {
+                    name: "Third".to_string(),
+                    value: "Value3".to_string(),
+                },
+            ],
+        };
+
+        let collected: Vec<(String, String)> = Deb822LikeParagraph::iter(&para).collect();
+        assert_eq!(collected.len(), 3);
+        assert_eq!(collected[0], ("First".to_string(), "Value1".to_string()));
+        assert_eq!(collected[1], ("Second".to_string(), "Value2".to_string()));
+        assert_eq!(collected[2], ("Third".to_string(), "Value3".to_string()));
+
+        // Test with empty paragraph
+        let empty_para = crate::Paragraph { fields: vec![] };
+        let empty_collected: Vec<(String, String)> =
+            Deb822LikeParagraph::iter(&empty_para).collect();
+        assert_eq!(empty_collected.len(), 0);
     }
 
     #[test]
