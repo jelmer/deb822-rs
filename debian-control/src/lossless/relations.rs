@@ -383,11 +383,11 @@ fn parse(text: &str, allow_substvar: bool) -> Parse {
     .parse()
 }
 
-/// To work with the parse results we need a view into the
-/// green tree - the Syntax tree.
-/// It is also immutable, like a GreenNode,
-/// but it contains parent pointers, offsets, and
-/// has identity semantics.
+// To work with the parse results we need a view into the
+// green tree - the Syntax tree.
+// It is also immutable, like a GreenNode,
+// but it contains parent pointers, offsets, and
+// has identity semantics.
 
 type SyntaxNode = rowan::SyntaxNode<Lang>;
 #[allow(unused)]
@@ -952,9 +952,9 @@ impl Relations {
                 // Replace last child with stripped version
                 let relation_node = entry.children().last().unwrap();
                 children.pop();
-                children.push(NodeOrToken::Node(
-                    Self::strip_relation_trailing_ws(&relation_node).into(),
-                ));
+                children.push(NodeOrToken::Node(Self::strip_relation_trailing_ws(
+                    &relation_node,
+                )));
             }
         }
 
@@ -975,9 +975,9 @@ impl Relations {
             if last.kind() == rowan::SyntaxKind(ENTRY as u16) {
                 let last_entry = self.0.children().last().unwrap();
                 children.pop();
-                children.push(NodeOrToken::Node(
-                    Self::strip_entry_trailing_ws(&last_entry).into(),
-                ));
+                children.push(NodeOrToken::Node(Self::strip_entry_trailing_ws(
+                    &last_entry,
+                )));
             }
         }
 

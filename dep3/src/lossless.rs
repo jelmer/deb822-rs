@@ -251,11 +251,11 @@ mod tests {
     fn test_upstream() {
         let text = r#"From: Ulrich Drepper <drepper@redhat.com>
 Subject: Fix regex problems with some multi-bytes characters
- 
+ .
  * posix/bug-regex17.c: Add testcases.
  * posix/regcomp.c (re_compile_fastmap_iter): Rewrite COMPLEX_BRACKET
    handling.
- 
+ .
 Origin: upstream, http://sourceware.org/git/?p=glibc.git;a=commitdiff;h=bdb56bac
 Bug: http://sourceware.org/bugzilla/show_bug.cgi?id=9697
 Bug-Debian: http://bugs.debian.org/510219

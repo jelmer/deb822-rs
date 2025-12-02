@@ -84,6 +84,9 @@ pub enum Error {
 
     /// An I/O error was encountered while reading the file.
     IoError(std::io::Error),
+
+    /// An invalid value was provided (e.g., empty continuation lines).
+    InvalidValue(String),
 }
 
 impl std::fmt::Display for Error {
@@ -91,6 +94,7 @@ impl std::fmt::Display for Error {
         match &self {
             Error::ParseError(err) => write!(f, "{}", err),
             Error::IoError(err) => write!(f, "{}", err),
+            Error::InvalidValue(msg) => write!(f, "Invalid value: {}", msg),
         }
     }
 }
@@ -360,6 +364,19 @@ pub(crate) fn parse(text: &str) -> Parse {
                 if self.current() == Some(INDENT) {
                     self.bump();
                     self.skip_ws();
+
+                    // After indent and whitespace, we must have actual content (VALUE token)
+                    // An empty continuation line (indent followed immediately by newline or EOF)
+                    // is not valid according to Debian Policy
+                    if self.current() == Some(NEWLINE) || self.current().is_none() {
+                        self.builder.start_node(ERROR.into());
+                        self.add_positioned_error(
+                            "empty continuation line (line with only whitespace)".to_string(),
+                            Some("empty_continuation_line".to_string()),
+                        );
+                        self.builder.finish_node();
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -1391,7 +1408,7 @@ impl Paragraph {
             .find(|e| {
                 e.key()
                     .as_deref()
-                    .map_or(false, |k| k.eq_ignore_ascii_case(key))
+                    .is_some_and(|k| k.eq_ignore_ascii_case(key))
             })
             .map(|e| e.value())
     }
@@ -1438,7 +1455,7 @@ impl Paragraph {
             if entry
                 .key()
                 .as_deref()
-                .map_or(false, |k| k.eq_ignore_ascii_case(key))
+                .is_some_and(|k| k.eq_ignore_ascii_case(key))
             {
                 entry.detach();
             }
@@ -1536,17 +1553,30 @@ impl Paragraph {
         IndentPattern::FieldNameLength
     }
 
+    /// Try to set a field in the paragraph, inserting at the appropriate location if new.
+    ///
+    /// # Errors
+    /// Returns an error if the value contains empty continuation lines (lines with only whitespace)
+    pub fn try_set(&mut self, key: &str, value: &str) -> Result<(), Error> {
+        self.try_set_with_indent_pattern(key, value, None, None)
+    }
+
     /// Set a field in the paragraph, inserting at the appropriate location if new
+    ///
+    /// # Panics
+    /// Panics if the value contains empty continuation lines (lines with only whitespace)
     pub fn set(&mut self, key: &str, value: &str) {
-        self.set_with_indent_pattern(key, value, None, None);
+        self.try_set(key, value)
+            .expect("Invalid value: empty continuation line")
     }
 
     /// Set a field using a specific field ordering
     pub fn set_with_field_order(&mut self, key: &str, value: &str, field_order: &[&str]) {
-        self.set_with_indent_pattern(key, value, None, Some(field_order));
+        self.try_set_with_indent_pattern(key, value, None, Some(field_order))
+            .expect("Invalid value: empty continuation line")
     }
 
-    /// Set a field with optional default indentation pattern and field ordering.
+    /// Try to set a field with optional default indentation pattern and field ordering.
     ///
     /// This method allows setting a field while optionally specifying a default indentation pattern
     /// to use when the field doesn't already have multi-line indentation to preserve.
@@ -1559,19 +1589,22 @@ impl Paragraph {
     ///   fields without existing multi-line indentation. If None, will preserve existing field's
     ///   indentation or auto-detect from other fields
     /// * `field_order` - Optional field ordering for positioning the field. If None, inserts at end
-    pub fn set_with_indent_pattern(
+    ///
+    /// # Errors
+    /// Returns an error if the value contains empty continuation lines (lines with only whitespace)
+    pub fn try_set_with_indent_pattern(
         &mut self,
         key: &str,
         value: &str,
         default_indent_pattern: Option<&IndentPattern>,
         field_order: Option<&[&str]>,
-    ) {
+    ) -> Result<(), Error> {
         // Check if the field already exists and extract its formatting (case-insensitive)
         let existing_entry = self.entries().find(|entry| {
             entry
                 .key()
                 .as_deref()
-                .map_or(false, |k| k.eq_ignore_ascii_case(key))
+                .is_some_and(|k| k.eq_ignore_ascii_case(key))
         });
 
         // Determine indentation to use
@@ -1598,20 +1631,20 @@ impl Paragraph {
             .and_then(|e| e.key())
             .unwrap_or_else(|| key.to_string());
 
-        let new_entry = Entry::with_formatting(&actual_key, value, &post_colon_ws, &indent);
+        let new_entry = Entry::try_with_formatting(&actual_key, value, &post_colon_ws, &indent)?;
 
         // Check if the field already exists and replace it (case-insensitive)
         for entry in self.entries() {
             if entry
                 .key()
                 .as_deref()
-                .map_or(false, |k| k.eq_ignore_ascii_case(key))
+                .is_some_and(|k| k.eq_ignore_ascii_case(key))
             {
                 self.0.splice_children(
                     entry.0.index()..entry.0.index() + 1,
                     vec![new_entry.0.into()],
                 );
-                return;
+                return Ok(());
             }
         }
 
@@ -1626,6 +1659,34 @@ impl Paragraph {
             self.0
                 .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
         }
+        Ok(())
+    }
+
+    /// Set a field with optional default indentation pattern and field ordering.
+    ///
+    /// This method allows setting a field while optionally specifying a default indentation pattern
+    /// to use when the field doesn't already have multi-line indentation to preserve.
+    /// If the field already exists and is multi-line, its existing indentation is preserved.
+    ///
+    /// # Arguments
+    /// * `key` - The field name
+    /// * `value` - The field value
+    /// * `default_indent_pattern` - Optional default indentation pattern to use for new fields or
+    ///   fields without existing multi-line indentation. If None, will preserve existing field's
+    ///   indentation or auto-detect from other fields
+    /// * `field_order` - Optional field ordering for positioning the field. If None, inserts at end
+    ///
+    /// # Panics
+    /// Panics if the value contains empty continuation lines (lines with only whitespace)
+    pub fn set_with_indent_pattern(
+        &mut self,
+        key: &str,
+        value: &str,
+        default_indent_pattern: Option<&IndentPattern>,
+        field_order: Option<&[&str]>,
+    ) {
+        self.try_set_with_indent_pattern(key, value, default_indent_pattern, field_order)
+            .expect("Invalid value: empty continuation line")
     }
 
     /// Find the appropriate insertion index for a new field based on field ordering
@@ -1687,8 +1748,7 @@ impl Paragraph {
                         if let Some(existing_key) = entry.key() {
                             if field_order
                                 .iter()
-                                .position(|&f| f.eq_ignore_ascii_case(&existing_key))
-                                .is_some()
+                                .any(|&f| f.eq_ignore_ascii_case(&existing_key))
                             {
                                 // Found a known field, insert after it
                                 insertion_index = i + 1;
@@ -1711,7 +1771,7 @@ impl Paragraph {
             if entry
                 .key()
                 .as_deref()
-                .map_or(false, |k| k.eq_ignore_ascii_case(old_key))
+                .is_some_and(|k| k.eq_ignore_ascii_case(old_key))
             {
                 self.0.splice_children(
                     entry.0.index()..entry.0.index() + 1,
@@ -1864,14 +1924,22 @@ impl Entry {
         Entry::with_formatting(key, value, " ", indent)
     }
 
-    /// Create a new entry with specific formatting for post-colon whitespace and indentation.
+    /// Try to create a new entry with specific formatting, validating the value.
     ///
     /// # Arguments
     /// * `key` - The field name
     /// * `value` - The field value (may contain '\n' for multi-line values)
     /// * `post_colon_ws` - The whitespace after the colon (e.g., " " or "\n ")
     /// * `indent` - The indentation string to use for continuation lines
-    pub fn with_formatting(key: &str, value: &str, post_colon_ws: &str, indent: &str) -> Entry {
+    ///
+    /// # Errors
+    /// Returns an error if the value contains empty continuation lines (lines with only whitespace)
+    pub fn try_with_formatting(
+        key: &str,
+        value: &str,
+        post_colon_ws: &str,
+        indent: &str,
+    ) -> Result<Entry, Error> {
         let mut builder = GreenNodeBuilder::new();
 
         builder.start_node(ENTRY.into());
@@ -1896,13 +1964,36 @@ impl Entry {
 
         for (line_idx, line) in value.split('\n').enumerate() {
             if line_idx > 0 {
+                // Validate that continuation lines are not empty or whitespace-only
+                // According to Debian Policy, continuation lines must have content
+                if line.trim().is_empty() {
+                    return Err(Error::InvalidValue(format!(
+                        "empty continuation line (line with only whitespace) at line {}",
+                        line_idx + 1
+                    )));
+                }
                 builder.token(INDENT.into(), indent);
             }
             builder.token(VALUE.into(), line);
             builder.token(NEWLINE.into(), "\n");
         }
         builder.finish_node();
-        Entry(SyntaxNode::new_root_mut(builder.finish()))
+        Ok(Entry(SyntaxNode::new_root_mut(builder.finish())))
+    }
+
+    /// Create a new entry with specific formatting for post-colon whitespace and indentation.
+    ///
+    /// # Arguments
+    /// * `key` - The field name
+    /// * `value` - The field value (may contain '\n' for multi-line values)
+    /// * `post_colon_ws` - The whitespace after the colon (e.g., " " or "\n ")
+    /// * `indent` - The indentation string to use for continuation lines
+    ///
+    /// # Panics
+    /// Panics if the value contains empty continuation lines (lines with only whitespace)
+    pub fn with_formatting(key: &str, value: &str, post_colon_ws: &str, indent: &str) -> Entry {
+        Self::try_with_formatting(key, value, post_colon_ws, indent)
+            .expect("Invalid value: empty continuation line")
     }
 
     #[must_use]
@@ -2427,7 +2518,7 @@ Architecture: all
 Depends: libc6
 Description: This is a description
  With details
- "#
+"#
         .parse()
         .unwrap();
         let mut ps = d.paragraphs();
@@ -2490,7 +2581,7 @@ Architecture: all
 Depends: libc6
 Description: This is a description
  With details
- "#
+"#
         .parse()
         .unwrap();
         let mut ps = d.paragraphs();
@@ -4106,4 +4197,184 @@ fn test_rename_changes_case() {
     assert_eq!(p.get("package").as_deref(), Some("test"));
     assert_eq!(p.get("Package").as_deref(), Some("test"));
     assert_eq!(p.get("PACKAGE").as_deref(), Some("test"));
+}
+
+#[test]
+fn test_reject_whitespace_only_continuation_line() {
+    // Issue #350: A continuation line with only whitespace should not be accepted
+    // According to Debian Policy, continuation lines must have content after the leading space
+    // A line with only whitespace (like " \n") should terminate the field
+
+    // This should be rejected/treated as an error
+    let text = "Build-Depends:\n \ndebhelper\n";
+    let parsed = Deb822::parse(text);
+
+    // The empty line with just whitespace should cause an error
+    // or at minimum, should not be included as part of the field value
+    assert!(
+        !parsed.errors().is_empty(),
+        "Expected parse errors for whitespace-only continuation line"
+    );
+}
+
+#[test]
+fn test_reject_empty_continuation_line_in_multiline_field() {
+    // Test that an empty line terminates a multi-line field (and generates an error)
+    let text = "Depends: foo,\n bar,\n \n baz\n";
+    let parsed = Deb822::parse(text);
+
+    // The empty line should cause parse errors
+    assert!(
+        !parsed.errors().is_empty(),
+        "Empty continuation line should generate parse errors"
+    );
+
+    // Verify we got the specific error about empty continuation line
+    let has_empty_line_error = parsed
+        .errors()
+        .iter()
+        .any(|e| e.contains("empty continuation line"));
+    assert!(
+        has_empty_line_error,
+        "Should have an error about empty continuation line"
+    );
+}
+
+#[test]
+#[should_panic(expected = "empty continuation line")]
+fn test_set_rejects_empty_continuation_lines() {
+    // Test that Paragraph.set() panics for values with empty continuation lines
+    let text = "Package: test\n";
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let mut para = deb822.paragraphs().next().unwrap();
+
+    // Try to set a field with an empty continuation line
+    // This should panic with an appropriate error message
+    let value_with_empty_line = "foo\n \nbar";
+    para.set("Depends", value_with_empty_line);
+}
+
+#[test]
+fn test_try_set_returns_error_for_empty_continuation_lines() {
+    // Test that Paragraph.try_set() returns an error for values with empty continuation lines
+    let text = "Package: test\n";
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let mut para = deb822.paragraphs().next().unwrap();
+
+    // Try to set a field with an empty continuation line
+    let value_with_empty_line = "foo\n \nbar";
+    let result = para.try_set("Depends", value_with_empty_line);
+
+    // Should return an error
+    assert!(
+        result.is_err(),
+        "try_set() should return an error for empty continuation lines"
+    );
+
+    // Verify it's the right kind of error
+    match result {
+        Err(Error::InvalidValue(msg)) => {
+            assert!(
+                msg.contains("empty continuation line"),
+                "Error message should mention empty continuation line"
+            );
+        }
+        _ => panic!("Expected InvalidValue error"),
+    }
+}
+
+#[test]
+fn test_try_set_with_indent_pattern_returns_error() {
+    // Test that try_set_with_indent_pattern() returns an error for empty continuation lines
+    let text = "Package: test\n";
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let mut para = deb822.paragraphs().next().unwrap();
+
+    let value_with_empty_line = "foo\n \nbar";
+    let result = para.try_set_with_indent_pattern(
+        "Depends",
+        value_with_empty_line,
+        Some(&IndentPattern::Fixed(2)),
+        None,
+    );
+
+    assert!(
+        result.is_err(),
+        "try_set_with_indent_pattern() should return an error"
+    );
+}
+
+#[test]
+fn test_try_set_succeeds_for_valid_value() {
+    // Test that try_set() succeeds for valid values
+    let text = "Package: test\n";
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let mut para = deb822.paragraphs().next().unwrap();
+
+    // Valid multiline value
+    let valid_value = "foo\nbar";
+    let result = para.try_set("Depends", valid_value);
+
+    assert!(result.is_ok(), "try_set() should succeed for valid values");
+    assert_eq!(para.get("Depends").as_deref(), Some("foo\nbar"));
+}
+
+#[test]
+fn test_field_with_empty_first_line() {
+    // Test parsing a field where the value starts on a continuation line (empty first line)
+    // This is valid according to Debian Policy - the first line can be empty
+    let text = "Foo:\n blah\n blah\n";
+    let parsed = Deb822::parse(text);
+
+    // This should be valid - no errors
+    assert!(
+        parsed.errors().is_empty(),
+        "Empty first line should be valid. Got errors: {:?}",
+        parsed.errors()
+    );
+
+    let deb822 = parsed.tree();
+    let para = deb822.paragraphs().next().unwrap();
+    assert_eq!(para.get("Foo").as_deref(), Some("blah\nblah"));
+}
+
+#[test]
+fn test_try_set_with_empty_first_line() {
+    // Test that try_set() works with values that have empty first line
+    let text = "Package: test\n";
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let mut para = deb822.paragraphs().next().unwrap();
+
+    // Value with empty first line - this should be valid
+    let value = "\nblah\nmore";
+    let result = para.try_set("Depends", value);
+
+    assert!(
+        result.is_ok(),
+        "try_set() should succeed for values with empty first line. Got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_field_with_value_then_empty_continuation() {
+    // Test that a field with a value on the first line followed by empty continuation is rejected
+    let text = "Foo: bar\n \n";
+    let parsed = Deb822::parse(text);
+
+    // This should have errors - empty continuation line after initial value
+    assert!(
+        !parsed.errors().is_empty(),
+        "Field with value then empty continuation line should be rejected"
+    );
+
+    // Verify we got the specific error about empty continuation line
+    let has_empty_line_error = parsed
+        .errors()
+        .iter()
+        .any(|e| e.contains("empty continuation line"));
+    assert!(
+        has_empty_line_error,
+        "Should have error about empty continuation line"
+    );
 }
