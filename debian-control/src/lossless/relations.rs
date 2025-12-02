@@ -2014,6 +2014,48 @@ impl Entry {
             self.0 = new_root;
         }
     }
+
+    /// Check if this entry (OR-group) is implied by another entry.
+    ///
+    /// An entry is implied by another if any of the relations in this entry
+    /// is implied by any relation in the outer entry. This follows the semantics
+    /// of OR-groups in Debian dependencies.
+    ///
+    /// For example:
+    /// - `pkg >= 1.0` is implied by `pkg >= 1.5 | libc6` (first relation matches)
+    /// - `pkg1 | pkg2` is implied by `pkg1` (pkg1 satisfies the requirement)
+    ///
+    /// # Arguments
+    /// * `outer` - The outer entry that may imply this entry
+    ///
+    /// # Returns
+    /// `true` if this entry is implied by `outer`, `false` otherwise
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Entry;
+    ///
+    /// let inner: Entry = "pkg (>= 1.0)".parse().unwrap();
+    /// let outer: Entry = "pkg (>= 1.5) | libc6".parse().unwrap();
+    /// assert!(inner.is_implied_by(&outer));
+    /// ```
+    pub fn is_implied_by(&self, outer: &Entry) -> bool {
+        // If entries are identical, they imply each other
+        if self == outer {
+            return true;
+        }
+
+        // Check if any relation in inner is implied by any relation in outer
+        for inner_rel in self.relations() {
+            for outer_rel in outer.relations() {
+                if inner_rel.is_implied_by(&outer_rel) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
 }
 
 fn inject(builder: &mut GreenNodeBuilder, node: SyntaxNode) {
@@ -2654,6 +2696,86 @@ impl Relation {
     /// Build a new relation
     pub fn build(name: &str) -> RelationBuilder {
         RelationBuilder::new(name)
+    }
+
+    /// Check if this relation is implied by another relation.
+    ///
+    /// A relation is implied by another if the outer relation is more restrictive
+    /// or equal to this relation. For example:
+    /// - `pkg >= 1.0` is implied by `pkg >= 1.5` (outer is more restrictive)
+    /// - `pkg >= 1.0` is implied by `pkg = 1.5` (outer is more restrictive)
+    /// - `pkg` (no version) is implied by any versioned constraint on `pkg`
+    ///
+    /// # Arguments
+    /// * `outer` - The outer relation that may imply this relation
+    ///
+    /// # Returns
+    /// `true` if this relation is implied by `outer`, `false` otherwise
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::relations::VersionConstraint;
+    ///
+    /// let inner = Relation::new("pkg", Some((VersionConstraint::GreaterThanEqual, "1.0".parse().unwrap())));
+    /// let outer = Relation::new("pkg", Some((VersionConstraint::GreaterThanEqual, "1.5".parse().unwrap())));
+    /// assert!(inner.is_implied_by(&outer));
+    ///
+    /// let inner2 = Relation::new("pkg", None);
+    /// assert!(inner2.is_implied_by(&outer));
+    /// ```
+    pub fn is_implied_by(&self, outer: &Relation) -> bool {
+        if self.name() != outer.name() {
+            return false;
+        }
+
+        let inner_version = self.version();
+        let outer_version = outer.version();
+
+        // No version constraint on inner means it's always implied
+        if inner_version.is_none() {
+            return true;
+        }
+
+        // If versions are identical, they imply each other
+        if inner_version == outer_version {
+            return true;
+        }
+
+        // Inner has version but outer doesn't - not implied
+        if outer_version.is_none() {
+            return false;
+        }
+
+        let (inner_constraint, inner_ver) = inner_version.unwrap();
+        let (outer_constraint, outer_ver) = outer_version.unwrap();
+
+        use VersionConstraint::*;
+        match inner_constraint {
+            GreaterThanEqual => match outer_constraint {
+                GreaterThan => outer_ver > inner_ver,
+                GreaterThanEqual | Equal => outer_ver >= inner_ver,
+                LessThan | LessThanEqual => false,
+            },
+            Equal => match outer_constraint {
+                Equal => outer_ver == inner_ver,
+                _ => false,
+            },
+            LessThan => match outer_constraint {
+                LessThan => outer_ver <= inner_ver,
+                LessThanEqual | Equal => outer_ver < inner_ver,
+                GreaterThan | GreaterThanEqual => false,
+            },
+            LessThanEqual => match outer_constraint {
+                LessThanEqual | Equal | LessThan => outer_ver <= inner_ver,
+                GreaterThan | GreaterThanEqual => false,
+            },
+            GreaterThan => match outer_constraint {
+                GreaterThan => outer_ver >= inner_ver,
+                Equal | GreaterThanEqual => outer_ver > inner_ver,
+                LessThan | LessThanEqual => false,
+            },
+        }
     }
 }
 
@@ -4231,5 +4353,282 @@ Description: test
             "Expected 4-space indentation to be preserved, but got:\n'{}'",
             output
         );
+    }
+
+    #[test]
+    fn test_relation_is_implied_by_same_package() {
+        // Same package name with compatible version constraints
+        let inner = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThanEqual, "1.0".parse().unwrap())),
+        );
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThanEqual, "1.5".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_relation_is_implied_by_different_package() {
+        // Different package names should not imply
+        let inner = Relation::new("pkg1", None);
+        let outer = Relation::new("pkg2", None);
+        assert!(!inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_relation_is_implied_by_no_version() {
+        // No version constraint is implied by any version
+        let inner = Relation::new("pkg", None);
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThanEqual, "1.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_relation_is_implied_by_identical() {
+        // Identical relations imply each other
+        let inner = Relation::new(
+            "pkg",
+            Some((VersionConstraint::Equal, "1.0".parse().unwrap())),
+        );
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::Equal, "1.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+        assert!(outer.is_implied_by(&inner));
+    }
+
+    #[test]
+    fn test_relation_is_implied_by_greater_than_equal() {
+        // pkg >= 1.0 is implied by pkg >= 2.0
+        let inner = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThanEqual, "1.0".parse().unwrap())),
+        );
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThanEqual, "2.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+        assert!(!outer.is_implied_by(&inner));
+
+        // pkg >= 1.0 is implied by pkg = 2.0
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::Equal, "2.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+
+        // pkg >= 1.0 is implied by pkg >> 1.5
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThan, "1.5".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+
+        // pkg >= 3.0 is NOT implied by pkg >> 3.0 (>> 3.0 doesn't include 3.0 itself)
+        let inner = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThanEqual, "3.0".parse().unwrap())),
+        );
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThan, "3.0".parse().unwrap())),
+        );
+        assert!(!inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_relation_is_implied_by_less_than_equal() {
+        // pkg <= 2.0 is implied by pkg <= 1.0
+        let inner = Relation::new(
+            "pkg",
+            Some((VersionConstraint::LessThanEqual, "2.0".parse().unwrap())),
+        );
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::LessThanEqual, "1.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+        assert!(!outer.is_implied_by(&inner));
+
+        // pkg <= 2.0 is implied by pkg = 1.0
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::Equal, "1.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+
+        // pkg <= 2.0 is implied by pkg << 1.5
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::LessThan, "1.5".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_relation_is_implied_by_equal() {
+        // pkg = 1.0 is only implied by pkg = 1.0
+        let inner = Relation::new(
+            "pkg",
+            Some((VersionConstraint::Equal, "1.0".parse().unwrap())),
+        );
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::Equal, "1.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+
+        // Not implied by different version
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::Equal, "2.0".parse().unwrap())),
+        );
+        assert!(!inner.is_implied_by(&outer));
+
+        // Not implied by >= constraint
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThanEqual, "1.0".parse().unwrap())),
+        );
+        assert!(!inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_relation_is_implied_by_greater_than() {
+        // pkg >> 1.0 is implied by pkg >> 2.0
+        let inner = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThan, "1.0".parse().unwrap())),
+        );
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThan, "2.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+
+        // pkg >> 1.0 is implied by pkg = 2.0
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::Equal, "2.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+
+        // pkg >> 1.0 is implied by pkg >= 1.5 (strictly greater)
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThanEqual, "1.5".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+
+        // pkg >> 1.0 is NOT implied by pkg >= 1.0 (could be equal)
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThanEqual, "1.0".parse().unwrap())),
+        );
+        assert!(!inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_relation_is_implied_by_less_than() {
+        // pkg << 2.0 is implied by pkg << 1.0
+        let inner = Relation::new(
+            "pkg",
+            Some((VersionConstraint::LessThan, "2.0".parse().unwrap())),
+        );
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::LessThan, "1.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+
+        // pkg << 2.0 is implied by pkg = 1.0
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::Equal, "1.0".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+
+        // pkg << 2.0 is implied by pkg <= 1.5 (strictly less)
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::LessThanEqual, "1.5".parse().unwrap())),
+        );
+        assert!(inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_relation_is_implied_by_incompatible_constraints() {
+        // >= and <= are incompatible
+        let inner = Relation::new(
+            "pkg",
+            Some((VersionConstraint::GreaterThanEqual, "1.0".parse().unwrap())),
+        );
+        let outer = Relation::new(
+            "pkg",
+            Some((VersionConstraint::LessThanEqual, "2.0".parse().unwrap())),
+        );
+        assert!(!inner.is_implied_by(&outer));
+        assert!(!outer.is_implied_by(&inner));
+    }
+
+    #[test]
+    fn test_entry_is_implied_by_identical() {
+        let inner: Entry = "pkg (>= 1.0)".parse().unwrap();
+        let outer: Entry = "pkg (>= 1.0)".parse().unwrap();
+        assert!(inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_entry_is_implied_by_or_group() {
+        // "pkg >= 1.0" is implied by "pkg >= 1.5 | libc6"
+        let inner: Entry = "pkg (>= 1.0)".parse().unwrap();
+        let outer: Entry = "pkg (>= 1.5) | libc6".parse().unwrap();
+        assert!(inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_entry_is_implied_by_simple_or() {
+        // "pkg1 | pkg2" is implied by "pkg1" (first alternative satisfies)
+        let inner: Entry = "pkg1 | pkg2".parse().unwrap();
+        let outer: Entry = "pkg1".parse().unwrap();
+        assert!(inner.is_implied_by(&outer));
+
+        // Also implied by "pkg2"
+        let outer: Entry = "pkg2".parse().unwrap();
+        assert!(inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_entry_is_implied_by_not_implied() {
+        // "pkg >= 2.0" is NOT implied by "pkg >= 1.0"
+        let inner: Entry = "pkg (>= 2.0)".parse().unwrap();
+        let outer: Entry = "pkg (>= 1.0)".parse().unwrap();
+        assert!(!inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_entry_is_implied_by_different_packages() {
+        let inner: Entry = "pkg1".parse().unwrap();
+        let outer: Entry = "pkg2".parse().unwrap();
+        assert!(!inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_entry_is_implied_by_complex_or() {
+        // "pkg1 | pkg2" is implied by "pkg1 | pkg2" (identical)
+        let inner: Entry = "pkg1 | pkg2".parse().unwrap();
+        let outer: Entry = "pkg1 | pkg2".parse().unwrap();
+        assert!(inner.is_implied_by(&outer));
+
+        // "pkg1 | pkg2" is implied by "pkg1 | pkg2 | pkg3" (one matches)
+        let outer: Entry = "pkg1 | pkg2 | pkg3".parse().unwrap();
+        assert!(inner.is_implied_by(&outer));
     }
 }
