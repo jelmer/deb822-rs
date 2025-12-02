@@ -312,10 +312,11 @@ impl From<LegacyRepositories> for super::Repositories {
 }
 
 fn option_output<O: AsRef<str> + Display>(name: &str, option: &[O]) -> Cow<'static, str> {
-    option
-        .is_empty()
-        .then_some(Cow::Borrowed(""))
-        .unwrap_or_else(|| Cow::Owned(format!("{name}={}", option.iter().join(","))))
+    if option.is_empty() {
+        Cow::Borrowed("")
+    } else {
+        Cow::Owned(format!("{name}={}", option.iter().join(",")))
+    }
 }
 
 impl Display for LegacyRepository {
@@ -328,22 +329,28 @@ impl Display for LegacyRepository {
             option_output("lang", &self.languages),
             option_output("target", &self.targets),
             self.pdiffs
-                .map(|p| Cow::Owned(format!("pdiff={}", p.then_some("yes").unwrap_or("no"))))
+                .map(|p| Cow::Owned(format!("pdiff={}", if p { "yes" } else { "no" })))
                 .unwrap_or(Cow::Borrowed("")),
             self.by_hash
                 .map(|p| Cow::Owned(format!("by-hash={p}")))
                 .unwrap_or(Cow::Borrowed("")),
-            self.allow_insecure
-                .then(|| Cow::Owned("allow-insecure=yes".to_string()))
-                .unwrap_or(Cow::Borrowed("")),
-            self.allow_weak
-                .then(|| Cow::Owned("allow-weak=yes".to_string()))
-                .unwrap_or(Cow::Borrowed("")),
-            self.allow_downgrade_to_insecure
-                .then(|| Cow::Owned(format!("allow_downgrade_to_insecure=yes")))
-                .unwrap_or(Cow::Borrowed("")),
+            if self.allow_insecure {
+                Cow::Owned("allow-insecure=yes".to_string())
+            } else {
+                Cow::Borrowed("")
+            },
+            if self.allow_weak {
+                Cow::Owned("allow-weak=yes".to_string())
+            } else {
+                Cow::Borrowed("")
+            },
+            if self.allow_downgrade_to_insecure {
+                Cow::Owned("allow_downgrade_to_insecure=yes".to_string())
+            } else {
+                Cow::Borrowed("")
+            },
             self.trusted
-                .map(|t| Cow::Owned(format!("trusted={}", t.then_some("yes").unwrap_or("no"))))
+                .map(|t| Cow::Owned(format!("trusted={}", if t { "yes" } else { "no" })))
                 .unwrap_or(Cow::Borrowed("")),
             self.signature
                 .as_ref()

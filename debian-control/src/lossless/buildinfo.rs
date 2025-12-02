@@ -247,7 +247,10 @@ impl Buildinfo {
     pub fn set_environment(&mut self, env: std::collections::HashMap<String, String>) {
         let mut s = String::new();
         for (key, value) in env {
-            s.push_str(&format!("{}={}\n", key, value));
+            if !s.is_empty() {
+                s.push('\n');
+            }
+            s.push_str(&format!("{}={}", key, value));
         }
         self.0.set("Environment", &s);
     }

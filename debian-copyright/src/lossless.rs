@@ -251,6 +251,9 @@ pub enum Error {
     /// IO error
     IoError(std::io::Error),
 
+    /// Invalid value (e.g., empty continuation lines)
+    InvalidValue(String),
+
     /// The file is not machine readable
     NotMachineReadable,
 }
@@ -260,6 +263,7 @@ impl From<deb822_lossless::Error> for Error {
         match e {
             deb822_lossless::Error::ParseError(e) => Error::ParseError(e),
             deb822_lossless::Error::IoError(e) => Error::IoError(e),
+            deb822_lossless::Error::InvalidValue(msg) => Error::InvalidValue(msg),
         }
     }
 }
@@ -282,6 +286,7 @@ impl std::fmt::Display for Error {
             Error::ParseError(e) => write!(f, "parse error: {}", e),
             Error::NotMachineReadable => write!(f, "not machine readable"),
             Error::IoError(e) => write!(f, "io error: {}", e),
+            Error::InvalidValue(msg) => write!(f, "invalid value: {}", msg),
         }
     }
 }
