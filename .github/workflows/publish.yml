@@ -1,0 +1,73 @@
+---
+name: Publish to crates.io
+
+"on":
+  push:
+    tags:
+      - "deb822-lossless-*"
+      - "deb822-derive-*"
+      - "deb822-fast-*"
+      - "debian-control-*"
+      - "debian-copyright-*"
+      - "dep3-*"
+      - "apt-sources-*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract crate info from tag
+        id: tag_info
+        shell: bash
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+
+          # Extract crate name and version from tag
+          # Tags are in format: crate-name-version (e.g., debian-control-0.1.2)
+          if [[ $tag =~ ^(.+)-([0-9]+\.[0-9]+\.[0-9]+.*)$ ]]; then
+            crate_name="${BASH_REMATCH[1]}"
+            version="${BASH_REMATCH[2]}"
+          else
+            echo "Tag $tag does not match expected format crate-name-version"
+            exit 1
+          fi
+
+          echo "crate_name=$crate_name" >> $GITHUB_OUTPUT
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "Detected crate: $crate_name, version: $version"
+
+      - name: Verify version matches tag
+        shell: bash
+        run: |
+          crate_name="${{ steps.tag_info.outputs.crate_name }}"
+          expected_version="${{ steps.tag_info.outputs.version }}"
+
+          # Extract version from Cargo.toml
+          actual_version=$(grep -m1 '^version = ' "$crate_name/Cargo.toml" | sed 's/version = "\(.*\)"/\1/')
+
+          if [ "$actual_version" != "$expected_version" ]; then
+            echo "Error: Version mismatch!"
+            echo "Tag version: $expected_version"
+            echo "Cargo.toml version: $actual_version"
+            exit 1
+          fi
+
+          echo "✓ Version $actual_version matches tag"
+
+      - name: Publish to crates.io
+        shell: bash
+        run: |
+          crate_name="${{ steps.tag_info.outputs.crate_name }}"
+          version="${{ steps.tag_info.outputs.version }}"
+
+          echo "Publishing $crate_name $version"
+          cd "$crate_name"
+          cargo publish --token ${{ secrets.CARGO_TOKEN }}
+
+          echo "✓ Successfully published $crate_name $version to crates.io"
+        env:
+          CARGO_TERM_COLOR: always
