@@ -262,6 +262,13 @@ impl Buildinfo {
             .map(|s| s.parse().unwrap())
     }
 
+    /// Parse the Installed-Build-Depends field, allowing syntax errors
+    pub fn installed_build_depends_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Installed-Build-Depends")
+            .map(|s| Relations::parse_relaxed(&s, true))
+    }
+
     /// Set the list of installed build depends
     pub fn set_installed_build_depends(&mut self, depends: Relations) {
         self.0.set("Installed-Build-Depends", &depends.to_string());

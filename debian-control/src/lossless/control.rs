@@ -545,6 +545,13 @@ impl Source {
         self.0.get("Build-Depends").map(|s| s.parse().unwrap())
     }
 
+    /// Parse the Build-Depends field, allowing syntax errors
+    pub fn build_depends_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Build-Depends")
+            .map(|s| Relations::parse_relaxed(&s, true))
+    }
+
     /// Set the Build-Depends field
     pub fn set_build_depends(&mut self, relations: &Relations) {
         self.set("Build-Depends", relations.to_string().as_str());
@@ -557,14 +564,35 @@ impl Source {
             .map(|s| s.parse().unwrap())
     }
 
+    /// Parse the Build-Depends-Indep field, allowing syntax errors
+    pub fn build_depends_indep_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Build-Depends-Indep")
+            .map(|s| Relations::parse_relaxed(&s, true))
+    }
+
     /// Return the Build-Depends-Arch field
     pub fn build_depends_arch(&self) -> Option<Relations> {
         self.0.get("Build-Depends-Arch").map(|s| s.parse().unwrap())
     }
 
+    /// Parse the Build-Depends-Arch field, allowing syntax errors
+    pub fn build_depends_arch_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Build-Depends-Arch")
+            .map(|s| Relations::parse_relaxed(&s, true))
+    }
+
     /// The build conflicts of the package.
     pub fn build_conflicts(&self) -> Option<Relations> {
         self.0.get("Build-Conflicts").map(|s| s.parse().unwrap())
+    }
+
+    /// Parse the Build-Conflicts field, allowing syntax errors
+    pub fn build_conflicts_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Build-Conflicts")
+            .map(|s| Relations::parse_relaxed(&s, true))
     }
 
     /// Return the Build-Conflicts-Indep field
@@ -574,11 +602,25 @@ impl Source {
             .map(|s| s.parse().unwrap())
     }
 
+    /// Parse the Build-Conflicts-Indep field, allowing syntax errors
+    pub fn build_conflicts_indep_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Build-Conflicts-Indep")
+            .map(|s| Relations::parse_relaxed(&s, true))
+    }
+
     /// Return the Build-Conflicts-Arch field
     pub fn build_conflicts_arch(&self) -> Option<Relations> {
         self.0
             .get("Build-Conflicts-Arch")
             .map(|s| s.parse().unwrap())
+    }
+
+    /// Parse the Build-Conflicts-Arch field, allowing syntax errors
+    pub fn build_conflicts_arch_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Build-Conflicts-Arch")
+            .map(|s| Relations::parse_relaxed(&s, true))
     }
 
     /// Return the standards version
@@ -1019,6 +1061,13 @@ impl Binary {
         self.0.get("Depends").map(|s| s.parse().unwrap())
     }
 
+    /// Parse the Depends field, allowing syntax errors
+    pub fn depends_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Depends")
+            .map(|s| Relations::parse_relaxed(&s, true))
+    }
+
     /// Set the Depends field
     pub fn set_depends(&mut self, depends: Option<&Relations>) {
         if let Some(depends) = depends {
@@ -1031,6 +1080,13 @@ impl Binary {
     /// The package that this package recommends
     pub fn recommends(&self) -> Option<Relations> {
         self.0.get("Recommends").map(|s| s.parse().unwrap())
+    }
+
+    /// Parse the Recommends field, allowing syntax errors
+    pub fn recommends_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Recommends")
+            .map(|s| Relations::parse_relaxed(&s, true))
     }
 
     /// Set the Recommends field
@@ -1047,6 +1103,13 @@ impl Binary {
         self.0.get("Suggests").map(|s| s.parse().unwrap())
     }
 
+    /// Parse the Suggests field, allowing syntax errors
+    pub fn suggests_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Suggests")
+            .map(|s| Relations::parse_relaxed(&s, true))
+    }
+
     /// Set the Suggests field
     pub fn set_suggests(&mut self, suggests: Option<&Relations>) {
         if let Some(suggests) = suggests {
@@ -1059,6 +1122,13 @@ impl Binary {
     /// The package that this package enhances
     pub fn enhances(&self) -> Option<Relations> {
         self.0.get("Enhances").map(|s| s.parse().unwrap())
+    }
+
+    /// Parse the Enhances field, allowing syntax errors
+    pub fn enhances_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Enhances")
+            .map(|s| Relations::parse_relaxed(&s, true))
     }
 
     /// Set the Enhances field
@@ -1075,6 +1145,13 @@ impl Binary {
         self.0.get("Pre-Depends").map(|s| s.parse().unwrap())
     }
 
+    /// Parse the Pre-Depends field, allowing syntax errors
+    pub fn pre_depends_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Pre-Depends")
+            .map(|s| Relations::parse_relaxed(&s, true))
+    }
+
     /// Set the Pre-Depends field
     pub fn set_pre_depends(&mut self, pre_depends: Option<&Relations>) {
         if let Some(pre_depends) = pre_depends {
@@ -1087,6 +1164,13 @@ impl Binary {
     /// The package that this package breaks
     pub fn breaks(&self) -> Option<Relations> {
         self.0.get("Breaks").map(|s| s.parse().unwrap())
+    }
+
+    /// Parse the Breaks field, allowing syntax errors
+    pub fn breaks_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Breaks")
+            .map(|s| Relations::parse_relaxed(&s, true))
     }
 
     /// Set the Breaks field
@@ -1103,6 +1187,13 @@ impl Binary {
         self.0.get("Conflicts").map(|s| s.parse().unwrap())
     }
 
+    /// Parse the Conflicts field, allowing syntax errors
+    pub fn conflicts_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Conflicts")
+            .map(|s| Relations::parse_relaxed(&s, true))
+    }
+
     /// Set the Conflicts field
     pub fn set_conflicts(&mut self, conflicts: Option<&Relations>) {
         if let Some(conflicts) = conflicts {
@@ -1115,6 +1206,13 @@ impl Binary {
     /// The package that this package replaces
     pub fn replaces(&self) -> Option<Relations> {
         self.0.get("Replaces").map(|s| s.parse().unwrap())
+    }
+
+    /// Parse the Replaces field, allowing syntax errors
+    pub fn replaces_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Replaces")
+            .map(|s| Relations::parse_relaxed(&s, true))
     }
 
     /// Set the Replaces field
@@ -1131,6 +1229,13 @@ impl Binary {
         self.0.get("Provides").map(|s| s.parse().unwrap())
     }
 
+    /// Parse the Provides field, allowing syntax errors
+    pub fn provides_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Provides")
+            .map(|s| Relations::parse_relaxed(&s, true))
+    }
+
     /// Set the Provides field
     pub fn set_provides(&mut self, provides: Option<&Relations>) {
         if let Some(provides) = provides {
@@ -1143,6 +1248,13 @@ impl Binary {
     /// Return the Built-Using field
     pub fn built_using(&self) -> Option<Relations> {
         self.0.get("Built-Using").map(|s| s.parse().unwrap())
+    }
+
+    /// Parse the Built-Using field, allowing syntax errors
+    pub fn built_using_relaxed(&self) -> Option<(Relations, Vec<String>)> {
+        self.0
+            .get("Built-Using")
+            .map(|s| Relations::parse_relaxed(&s, true))
     }
 
     /// Set the Built-Using field
