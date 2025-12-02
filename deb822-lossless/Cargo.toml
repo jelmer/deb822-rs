@@ -25,7 +25,7 @@ python-debian = ["dep:pyo3"]
 deb822-fast = ["dep:deb822-fast"]
 
 [dev-dependencies]
-criterion = { version = ">=0.5, <0.8", features = ["html_reports"] }
+criterion = { version = ">=0.5, <0.9", features = ["html_reports"] }
 
 [[bench]]
 name = "parse_lossy"

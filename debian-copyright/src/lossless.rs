@@ -57,6 +57,9 @@ const FILES_FIELD_ORDER: &[&str] = &["Files", "Copyright", "License", "Comment"]
 /// Field order for standalone License paragraphs according to DEP-5 specification
 const LICENSE_FIELD_ORDER: &[&str] = &["License", "Comment"];
 
+/// Default separator for files in Files field
+const FILES_SEPARATOR: &str = " ";
+
 /// A copyright file
 #[derive(Debug)]
 pub struct Copyright(Deb822);
@@ -160,7 +163,7 @@ impl Copyright {
         license: &License,
     ) -> FilesParagraph {
         let mut para = self.0.add_paragraph();
-        para.set_with_field_order("Files", &files.join(" "), FILES_FIELD_ORDER);
+        para.set_with_field_order("Files", &files.join(FILES_SEPARATOR), FILES_FIELD_ORDER);
         para.set_with_field_order("Copyright", &copyright.join("\n"), FILES_FIELD_ORDER);
         let license_text = match license {
             License::Name(name) => name.to_string(),
@@ -414,6 +417,39 @@ impl FilesParagraph {
             .split_whitespace()
             .map(|v| v.to_string())
             .collect::<Vec<_>>()
+    }
+
+    /// Set the file patterns in the paragraph
+    pub fn set_files(&mut self, files: &[&str]) {
+        self.0
+            .set_with_field_order("Files", &files.join(FILES_SEPARATOR), FILES_FIELD_ORDER);
+    }
+
+    /// Add a file pattern to the paragraph
+    ///
+    /// If the pattern already exists, it will not be added again.
+    pub fn add_file(&mut self, pattern: &str) {
+        let mut files = self.files();
+        if !files.contains(&pattern.to_string()) {
+            files.push(pattern.to_string());
+            self.0
+                .set_with_field_order("Files", &files.join(FILES_SEPARATOR), FILES_FIELD_ORDER);
+        }
+    }
+
+    /// Remove a file pattern from the paragraph
+    ///
+    /// Returns true if the pattern was found and removed, false otherwise.
+    pub fn remove_file(&mut self, pattern: &str) -> bool {
+        let mut files = self.files();
+        if let Some(pos) = files.iter().position(|f| f == pattern) {
+            files.remove(pos);
+            self.0
+                .set_with_field_order("Files", &files.join(FILES_SEPARATOR), FILES_FIELD_ORDER);
+            true
+        } else {
+            false
+        }
     }
 
     /// Check whether the paragraph matches the given filename
@@ -960,6 +996,75 @@ License: GPL-3+
 
         // Verify the paragraph was removed
         assert_eq!(0, copyright.iter_files().count());
+    }
+
+    #[test]
+    fn test_files_paragraph_set_files() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: *
+Copyright: 2024 Test Author
+License: MIT
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let mut files = copyright.iter_files().next().unwrap();
+
+        // Set new file patterns
+        files.set_files(&["src/*", "*.rs", "tests/*"]);
+
+        // Verify the files were updated
+        assert_eq!(vec!["src/*", "*.rs", "tests/*"], files.files());
+    }
+
+    #[test]
+    fn test_files_paragraph_add_file() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: src/*
+Copyright: 2024 Test Author
+License: MIT
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let mut files = copyright.iter_files().next().unwrap();
+
+        // Add a new file pattern
+        files.add_file("*.rs");
+        assert_eq!(vec!["src/*", "*.rs"], files.files());
+
+        // Add another pattern
+        files.add_file("tests/*");
+        assert_eq!(vec!["src/*", "*.rs", "tests/*"], files.files());
+
+        // Try to add a duplicate - should not be added
+        files.add_file("*.rs");
+        assert_eq!(vec!["src/*", "*.rs", "tests/*"], files.files());
+    }
+
+    #[test]
+    fn test_files_paragraph_remove_file() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: src/* *.rs tests/*
+Copyright: 2024 Test Author
+License: MIT
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let mut files = copyright.iter_files().next().unwrap();
+
+        // Remove a file pattern
+        let removed = files.remove_file("*.rs");
+        assert!(removed);
+        assert_eq!(vec!["src/*", "tests/*"], files.files());
+
+        // Remove another pattern
+        let removed = files.remove_file("tests/*");
+        assert!(removed);
+        assert_eq!(vec!["src/*"], files.files());
+
+        // Try to remove a non-existent pattern
+        let removed = files.remove_file("debian/*");
+        assert!(!removed);
+        assert_eq!(vec!["src/*"], files.files());
     }
 
     #[test]

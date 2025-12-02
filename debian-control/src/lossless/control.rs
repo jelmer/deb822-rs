@@ -1498,6 +1498,37 @@ Description: this is the short description
     }
 
     #[test]
+    fn test_set_description_on_package_without_description() {
+        let control: Control = r#"Source: foo
+
+Package: foo
+Architecture: amd64
+"#
+        .parse()
+        .unwrap();
+        let mut binary = control.binaries().next().unwrap();
+
+        // Set description on a binary that doesn't have one
+        binary.set_description(Some(
+            "Short description\nLonger description\n.\nAnother line",
+        ));
+
+        let output = binary.to_string();
+
+        // Check that the description was set
+        assert_eq!(
+            binary.description(),
+            Some("Short description\nLonger description\n.\nAnother line".to_owned())
+        );
+
+        // Verify the output format has exactly one space indent
+        assert_eq!(
+            output,
+            "Package: foo\nArchitecture: amd64\nDescription: Short description\n Longer description\n .\n Another line\n"
+        );
+    }
+
+    #[test]
     fn test_as_mut_deb822() {
         let mut control = Control::new();
         let deb822 = control.as_mut_deb822();
