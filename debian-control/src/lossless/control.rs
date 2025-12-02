@@ -1448,7 +1448,9 @@ Architecture: amd64
         let mut binary = control.binaries().next().unwrap();
 
         // Set description on a binary that doesn't have one
-        binary.set_description(Some("Short description\nLonger description\n.\nAnother line"));
+        binary.set_description(Some(
+            "Short description\nLonger description\n.\nAnother line",
+        ));
 
         let output = binary.to_string();
 
