@@ -9,57 +9,6 @@ pub use deb822_derive::{FromDeb822, ToDeb822};
 pub mod convert;
 pub use convert::{FromDeb822Paragraph, ToDeb822Paragraph};
 
-/// Canonical field order for source paragraphs in debian/control files
-pub const SOURCE_FIELD_ORDER: &[&str] = &[
-    "Source",
-    "Section",
-    "Priority",
-    "Maintainer",
-    "Uploaders",
-    "Build-Depends",
-    "Build-Depends-Indep",
-    "Build-Depends-Arch",
-    "Build-Conflicts",
-    "Build-Conflicts-Indep",
-    "Build-Conflicts-Arch",
-    "Standards-Version",
-    "Vcs-Browser",
-    "Vcs-Git",
-    "Vcs-Svn",
-    "Vcs-Bzr",
-    "Vcs-Hg",
-    "Vcs-Darcs",
-    "Vcs-Cvs",
-    "Vcs-Arch",
-    "Vcs-Mtn",
-    "Homepage",
-    "Rules-Requires-Root",
-    "Testsuite",
-    "Testsuite-Triggers",
-];
-
-/// Canonical field order for binary packages in debian/control files
-pub const BINARY_FIELD_ORDER: &[&str] = &[
-    "Package",
-    "Architecture",
-    "Section",
-    "Priority",
-    "Multi-Arch",
-    "Essential",
-    "Build-Profiles",
-    "Built-Using",
-    "Pre-Depends",
-    "Depends",
-    "Recommends",
-    "Suggests",
-    "Enhances",
-    "Conflicts",
-    "Breaks",
-    "Replaces",
-    "Provides",
-    "Description",
-];
-
 /// Error type for the parser.
 #[derive(Debug)]
 pub enum Error {
@@ -183,45 +132,8 @@ impl Paragraph {
             }
         }
 
-        // Field doesn't exist, insert at appropriate location
-        // Try to detect if this is a source or binary package paragraph
-        let field_order = if self
-            .fields
-            .iter()
-            .any(|f| f.name.eq_ignore_ascii_case("Source"))
-        {
-            SOURCE_FIELD_ORDER
-        } else if self
-            .fields
-            .iter()
-            .any(|f| f.name.eq_ignore_ascii_case("Package"))
-        {
-            BINARY_FIELD_ORDER
-        } else {
-            // Default based on what we're inserting
-            if name.eq_ignore_ascii_case("Source") {
-                SOURCE_FIELD_ORDER
-            } else if name.eq_ignore_ascii_case("Package") {
-                BINARY_FIELD_ORDER
-            } else {
-                // Try to determine based on existing fields
-                let has_source_fields = self.fields.iter().any(|f| {
-                    SOURCE_FIELD_ORDER
-                        .iter()
-                        .any(|ord| ord.eq_ignore_ascii_case(&f.name))
-                        && !BINARY_FIELD_ORDER
-                            .iter()
-                            .any(|ord| ord.eq_ignore_ascii_case(&f.name))
-                });
-                if has_source_fields {
-                    SOURCE_FIELD_ORDER
-                } else {
-                    BINARY_FIELD_ORDER
-                }
-            }
-        };
-
-        let insertion_index = self.find_insertion_index(name, field_order);
+        // By default, insert at the end
+        let insertion_index = self.fields.len();
         self.fields.insert(
             insertion_index,
             Field {
