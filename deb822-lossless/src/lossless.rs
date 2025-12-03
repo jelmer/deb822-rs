@@ -1689,6 +1689,156 @@ impl Paragraph {
             .expect("Invalid value: empty continuation line")
     }
 
+    /// Try to set a field, forcing a specific indentation pattern regardless of existing indentation.
+    ///
+    /// Unlike `try_set_with_indent_pattern`, this method does NOT preserve existing field indentation.
+    /// It always applies the specified indentation pattern to the field.
+    ///
+    /// # Arguments
+    /// * `key` - The field name
+    /// * `value` - The field value
+    /// * `indent_pattern` - The indentation pattern to use for this field
+    /// * `field_order` - Optional field ordering for positioning the field. If None, inserts at end
+    ///
+    /// # Errors
+    /// Returns an error if the value contains empty continuation lines (lines with only whitespace)
+    pub fn try_set_with_forced_indent(
+        &mut self,
+        key: &str,
+        value: &str,
+        indent_pattern: &IndentPattern,
+        field_order: Option<&[&str]>,
+    ) -> Result<(), Error> {
+        // Check if the field already exists (case-insensitive)
+        let existing_entry = self.entries().find(|entry| {
+            entry
+                .key()
+                .as_deref()
+                .is_some_and(|k| k.eq_ignore_ascii_case(key))
+        });
+
+        // Get post-colon whitespace from existing field, or default to single space
+        let post_colon_ws = existing_entry
+            .as_ref()
+            .and_then(|entry| entry.get_post_colon_whitespace())
+            .unwrap_or_else(|| " ".to_string());
+
+        // When replacing an existing field, preserve the original case of the field name
+        let actual_key = existing_entry
+            .as_ref()
+            .and_then(|e| e.key())
+            .unwrap_or_else(|| key.to_string());
+
+        // Force the indentation pattern
+        let indent = indent_pattern.to_string(&actual_key);
+        let new_entry = Entry::try_with_formatting(&actual_key, value, &post_colon_ws, &indent)?;
+
+        // Check if the field already exists and replace it (case-insensitive)
+        for entry in self.entries() {
+            if entry
+                .key()
+                .as_deref()
+                .is_some_and(|k| k.eq_ignore_ascii_case(key))
+            {
+                self.0.splice_children(
+                    entry.0.index()..entry.0.index() + 1,
+                    vec![new_entry.0.into()],
+                );
+                return Ok(());
+            }
+        }
+
+        // Insert new field
+        if let Some(order) = field_order {
+            let insertion_index = self.find_insertion_index(key, order);
+            self.0
+                .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
+        } else {
+            // Insert at the end if no field order specified
+            let insertion_index = self.0.children_with_tokens().count();
+            self.0
+                .splice_children(insertion_index..insertion_index, vec![new_entry.0.into()]);
+        }
+        Ok(())
+    }
+
+    /// Set a field, forcing a specific indentation pattern regardless of existing indentation.
+    ///
+    /// Unlike `set_with_indent_pattern`, this method does NOT preserve existing field indentation.
+    /// It always applies the specified indentation pattern to the field.
+    ///
+    /// # Arguments
+    /// * `key` - The field name
+    /// * `value` - The field value
+    /// * `indent_pattern` - The indentation pattern to use for this field
+    /// * `field_order` - Optional field ordering for positioning the field. If None, inserts at end
+    ///
+    /// # Panics
+    /// Panics if the value contains empty continuation lines (lines with only whitespace)
+    pub fn set_with_forced_indent(
+        &mut self,
+        key: &str,
+        value: &str,
+        indent_pattern: &IndentPattern,
+        field_order: Option<&[&str]>,
+    ) {
+        self.try_set_with_forced_indent(key, value, indent_pattern, field_order)
+            .expect("Invalid value: empty continuation line")
+    }
+
+    /// Change the indentation of an existing field without modifying its value.
+    ///
+    /// This method finds an existing field and reapplies it with a new indentation pattern,
+    /// preserving the field's current value.
+    ///
+    /// # Arguments
+    /// * `key` - The field name to update
+    /// * `indent_pattern` - The new indentation pattern to apply
+    ///
+    /// # Returns
+    /// Returns `Ok(true)` if the field was found and updated, `Ok(false)` if the field doesn't exist,
+    /// or `Err` if there was an error (e.g., invalid value with empty continuation lines)
+    ///
+    /// # Errors
+    /// Returns an error if the field value contains empty continuation lines (lines with only whitespace)
+    pub fn change_field_indent(
+        &mut self,
+        key: &str,
+        indent_pattern: &IndentPattern,
+    ) -> Result<bool, Error> {
+        // Check if the field exists (case-insensitive)
+        let existing_entry = self.entries().find(|entry| {
+            entry
+                .key()
+                .as_deref()
+                .is_some_and(|k| k.eq_ignore_ascii_case(key))
+        });
+
+        if let Some(entry) = existing_entry {
+            let value = entry.value();
+            let actual_key = entry.key().unwrap_or_else(|| key.to_string());
+
+            // Get post-colon whitespace from existing field
+            let post_colon_ws = entry
+                .get_post_colon_whitespace()
+                .unwrap_or_else(|| " ".to_string());
+
+            // Apply the new indentation pattern
+            let indent = indent_pattern.to_string(&actual_key);
+            let new_entry =
+                Entry::try_with_formatting(&actual_key, &value, &post_colon_ws, &indent)?;
+
+            // Replace the existing entry
+            self.0.splice_children(
+                entry.0.index()..entry.0.index() + 1,
+                vec![new_entry.0.into()],
+            );
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Find the appropriate insertion index for a new field based on field ordering
     fn find_insertion_index(&self, key: &str, field_order: &[&str]) -> usize {
         // Find position of the new field in the canonical order (case-insensitive)
@@ -3942,6 +4092,67 @@ Depends: foo,
 Depends: lib1,
          lib2,
          lib3
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_change_field_indent() {
+        // Test changing indentation of an existing field without changing its value
+        let original = r#"Source: example
+Depends: foo,
+         bar,
+         baz
+"#;
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Change Depends field to use 2-space indentation
+        let result = para
+            .change_field_indent("Depends", &super::IndentPattern::Fixed(2))
+            .unwrap();
+        assert!(result, "Field should have been found and updated");
+
+        let expected = r#"Source: example
+Depends: foo,
+  bar,
+  baz
+"#;
+        assert_eq!(para.to_string(), expected);
+    }
+
+    #[test]
+    fn test_change_field_indent_nonexistent() {
+        // Test changing indentation of a non-existent field
+        let original = r#"Source: example
+"#;
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Try to change indentation of non-existent field
+        let result = para
+            .change_field_indent("Depends", &super::IndentPattern::Fixed(2))
+            .unwrap();
+        assert!(!result, "Should return false for non-existent field");
+
+        // Paragraph should be unchanged
+        assert_eq!(para.to_string(), original);
+    }
+
+    #[test]
+    fn test_change_field_indent_case_insensitive() {
+        // Test that change_field_indent is case-insensitive
+        let original = r#"Build-Depends: foo,
+               bar
+"#;
+        let mut para: super::Paragraph = original.parse().unwrap();
+
+        // Change using different case
+        let result = para
+            .change_field_indent("build-depends", &super::IndentPattern::Fixed(1))
+            .unwrap();
+        assert!(result, "Should find field case-insensitively");
+
+        let expected = r#"Build-Depends: foo,
+ bar
 "#;
         assert_eq!(para.to_string(), expected);
     }
