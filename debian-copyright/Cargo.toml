@@ -13,7 +13,7 @@ categories = ["parser-implementations"]
 [dependencies]
 debversion = ">=0.4.7, <0.6"
 regex = ">=1.10, <2"
-deb822-lossless = { version = ">=0.2, <0.6", path = "../deb822-lossless", optional = true }
+deb822-lossless = { version = ">=0.5, <0.6", path = "../deb822-lossless", optional = true }
 deb822-fast = { version = ">=0.1, <0.3", path = "../deb822-fast", features = ["derive"] }
 
 [features]
