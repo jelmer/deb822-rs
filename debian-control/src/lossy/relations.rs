@@ -474,6 +474,106 @@ impl serde::Serialize for Relations {
     }
 }
 
+/// An Package to Source relation
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SourceRelation {
+    /// Source package name
+    pub name: String,
+    /// Source package version (if different from binary package one)
+    pub version: Option<debversion::Version>,
+}
+
+impl std::fmt::Display for SourceRelation {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{name}", name = self.name)?;
+        if let Some(ref version) = self.version {
+            write!(f, " (= {version})")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::str::FromStr for SourceRelation {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let tokens = lex(s);
+
+        let mut tokens = tokens.into_iter().peekable();
+
+        fn eat_whitespace(tokens: &mut Peekable<impl Iterator<Item = (SyntaxKind, String)>>) {
+            while let Some((WHITESPACE, _)) = tokens.peek() {
+                tokens.next();
+            }
+        }
+
+        let name = match tokens.next() {
+            Some((IDENT, name)) => name,
+
+            _ => return Err("Expected package name".to_string()),
+        };
+
+        eat_whitespace(&mut tokens);
+
+        match tokens.next() {
+            None => {
+                return Ok(Self {
+                    name,
+                    version: None,
+                });
+            }
+            Some((L_PARENS, _)) => {}
+            _ => return Err("Unexpected token after package name".to_string()),
+        };
+
+        let mut version_str = "".to_string();
+        while let Some((token, value)) = tokens.next() {
+            if token != R_PARENS {
+                version_str.push_str(&value);
+            } else {
+                break;
+            }
+        }
+
+        let version: debversion::Version = version_str
+            .parse()
+            .map_err(|err| format!("Failed to parse version: {err}"))?;
+
+        eat_whitespace(&mut tokens);
+
+        if tokens.next().is_some() {
+            return Err("Unexpected tokens after version".to_string());
+        }
+
+        Ok(Self {
+            name,
+            version: Some(version),
+        })
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for SourceRelation {
+    fn deserialize<D>(deserializer: D) -> Result<SourceRelation, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for SourceRelation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.to_string().serialize(serializer)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -708,5 +808,35 @@ mod tests {
             relations.to_string(),
             "python3-dulwich (>= 0.19.0), python3-requests"
         );
+    }
+
+    #[test]
+    fn test_source_relation_without_version() {
+        let input = "some-package";
+        let parsed: SourceRelation = input.parse().unwrap();
+        assert_eq!(parsed.name, input);
+        assert!(parsed.version.is_none());
+    }
+
+    #[test]
+    fn test_source_relation_with_valid_version() {
+        let input = "some-package (1.2.3+dfsg1-5~bpo13+1)";
+        let parsed: SourceRelation = input.parse().unwrap();
+        assert_eq!(parsed.name, "some-package");
+
+        let expected_version = debversion::Version {
+            epoch: None,
+            upstream_version: "1.2.3+dfsg1".to_string(),
+            debian_revision: Some("5~bpo13+1".to_string()),
+        };
+        assert_eq!(parsed.version, Some(expected_version));
+    }
+
+    #[test]
+    fn test_source_relation_with_invalid_version() {
+        let input = "some-package (1.2_@!.3+dfsg1-5~bpo13+1)";
+
+        let attempted_parse: Result<SourceRelation, String> = input.parse();
+        assert!(attempted_parse.is_err())
     }
 }

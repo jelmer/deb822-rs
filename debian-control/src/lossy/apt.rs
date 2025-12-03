@@ -1,5 +1,5 @@
 //! APT related structures
-use crate::lossy::Relations;
+use crate::lossy::{Relations, SourceRelation};
 use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822, ToDeb822Paragraph};
 
 fn deserialize_yesno(s: &str) -> Result<bool, String> {
@@ -244,6 +244,9 @@ pub struct Package {
     #[deb822(field = "Version")]
     pub version: debversion::Version,
 
+    /// The name and version of the source package, if different from `name`
+    pub source: Option<SourceRelation>,
+
     /// The architecture of the package
     #[deb822(field = "Architecture")]
     pub architecture: String,
@@ -446,5 +449,33 @@ Essential: no
 
         assert_eq!(package.name, "apt");
         assert_eq!(package.essential, Some(false));
+    }
+
+    #[test]
+    fn test_package_with_different_source() {
+        let package = r#"Package: apt
+Source: not-apt (1.1.5)
+Version: 2.1.10
+Architecture: amd64
+Maintainer: APT Development Team <apt@lists.debian.org>
+Installed-Size: 3524
+Depends: libc6 (>= 2.14), libgcc1
+Pre-Depends: dpkg (>= 1.15.6)
+Recommends: gnupg
+Suggests: apt-doc, aptitude | synaptic | wajig
+"#;
+
+        let package: Package = package.parse().unwrap();
+
+        assert_eq!(package.name, "apt");
+        assert_eq!(package.version, "2.1.10".parse().unwrap());
+        assert_eq!(package.architecture, "amd64");
+        assert_eq!(
+            package.source,
+            Some(SourceRelation {
+                name: "not-apt".to_string(),
+                version: Some("1.1.5".parse().unwrap())
+            })
+        );
     }
 }
