@@ -564,6 +564,21 @@ impl LicenseParagraph {
             .and_then(|x| x.split_once('\n').map(|(_, text)| text.to_string()))
     }
 
+    /// Get the license as a License enum
+    pub fn license(&self) -> License {
+        let x = self.0.get("License").unwrap();
+        x.split_once('\n').map_or_else(
+            || License::Name(x.to_string()),
+            |(name, text)| {
+                if name.is_empty() {
+                    License::Text(text.to_string())
+                } else {
+                    License::Named(name.to_string(), text.to_string())
+                }
+            },
+        )
+    }
+
     /// Set the license
     pub fn set_license(&mut self, license: &License) {
         let text = match license {
@@ -573,6 +588,40 @@ impl LicenseParagraph {
         };
         self.0
             .set_with_field_order("License", &text, LICENSE_FIELD_ORDER);
+    }
+
+    /// Set just the license name (short name on the first line)
+    ///
+    /// If the license currently has text, it will be preserved.
+    /// If the license has no text, this will set it to just a name.
+    pub fn set_name(&mut self, name: &str) {
+        let current = self.license();
+        let new_license = match current {
+            License::Named(_, text) | License::Text(text) => License::Named(name.to_string(), text),
+            License::Name(_) => License::Name(name.to_string()),
+        };
+        self.set_license(&new_license);
+    }
+
+    /// Set just the license text (the full license text after the first line)
+    ///
+    /// If text is None, removes the license text while keeping the name.
+    /// If the license currently has a name, it will be preserved.
+    /// If the license has no name and text is Some, this will create a license with just text.
+    pub fn set_text(&mut self, text: Option<&str>) {
+        let current = self.license();
+        let new_license = match (current, text) {
+            (License::Named(name, _), Some(new_text)) | (License::Name(name), Some(new_text)) => {
+                License::Named(name, new_text.to_string())
+            }
+            (License::Named(name, _), None) | (License::Name(name), None) => License::Name(name),
+            (License::Text(_), Some(new_text)) => License::Text(new_text.to_string()),
+            (License::Text(_), None) => {
+                // Edge case: removing text from a text-only license. Set empty name.
+                License::Name(String::new())
+            }
+        };
+        self.set_license(&new_license);
     }
 }
 
@@ -1001,6 +1050,95 @@ License: GPL-3+
 
         // Verify the paragraph was removed
         assert_eq!(0, copyright.iter_files().count());
+    }
+
+    #[test]
+    fn test_license_paragraph_set_name() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ This is the GPL-3+ license text.
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let mut license = copyright.iter_licenses().next().unwrap();
+
+        // Change just the name, preserving the text
+        license.set_name("Apache-2.0");
+
+        assert_eq!(license.name().unwrap(), "Apache-2.0");
+        assert_eq!(license.text().unwrap(), "This is the GPL-3+ license text.");
+    }
+
+    #[test]
+    fn test_license_paragraph_set_name_no_text() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let mut license = copyright.iter_licenses().next().unwrap();
+
+        // Change just the name when there's no text
+        license.set_name("MIT");
+
+        assert_eq!(license.license(), crate::License::Name("MIT".to_string()));
+        assert_eq!(license.text(), None);
+    }
+
+    #[test]
+    fn test_license_paragraph_set_text() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ Old license text.
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let mut license = copyright.iter_licenses().next().unwrap();
+
+        // Change just the text, preserving the name
+        license.set_text(Some("New license text."));
+
+        assert_eq!(license.name().unwrap(), "GPL-3+");
+        assert_eq!(license.text().unwrap(), "New license text.");
+    }
+
+    #[test]
+    fn test_license_paragraph_set_text_remove() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ Old license text.
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let mut license = copyright.iter_licenses().next().unwrap();
+
+        // Remove the text, keeping just the name
+        license.set_text(None);
+
+        assert_eq!(
+            license.license(),
+            crate::License::Name("GPL-3+".to_string())
+        );
+        assert_eq!(license.text(), None);
+    }
+
+    #[test]
+    fn test_license_paragraph_set_text_add() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let mut license = copyright.iter_licenses().next().unwrap();
+
+        // Add text to a name-only license
+        license.set_text(Some("This is the full GPL-3+ license text."));
+
+        assert_eq!(license.name().unwrap(), "GPL-3+");
+        assert_eq!(
+            license.text().unwrap(),
+            "This is the full GPL-3+ license text."
+        );
     }
 
     #[test]
