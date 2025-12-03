@@ -82,24 +82,32 @@ pub struct BorrowedParagraph<'a> {
 
 impl<'a> BorrowedParagraph<'a> {
     /// Get a field by name.
+    ///
+    /// Field names are compared case-insensitively.
     pub fn get_field(&self, name: &str) -> Option<&BorrowedField<'a>> {
-        self.fields.iter().find(|f| f.name == name)
+        self.fields
+            .iter()
+            .find(|f| f.name.eq_ignore_ascii_case(name))
     }
 
     /// Get a field value by name as lines.
+    ///
+    /// Field names are compared case-insensitively.
     pub fn get(&self, name: &str) -> Option<&[&'a str]> {
         self.fields
             .iter()
-            .find(|f| f.name == name)
+            .find(|f| f.name.eq_ignore_ascii_case(name))
             .map(|f| f.lines())
     }
 
     /// Get a single-line field value by name.
+    ///
     /// Returns None if the field doesn't exist or has multiple lines.
+    /// Field names are compared case-insensitively.
     pub fn get_single(&self, name: &str) -> Option<&'a str> {
         self.fields
             .iter()
-            .find(|f| f.name == name)
+            .find(|f| f.name.eq_ignore_ascii_case(name))
             .and_then(|f| f.as_single_line())
     }
 
@@ -595,5 +603,72 @@ Description: A test package
         let full_desc = paragraphs[1].get_field("Description").unwrap().join();
         assert!(full_desc.contains("test package"));
         assert!(full_desc.contains("paragraph break"));
+    }
+
+    #[test]
+    fn test_borrowed_case_insensitive_get() {
+        let input = "Package: test\nVersion: 1.0\n";
+        let paragraphs = parse_borrowed(input).unwrap();
+
+        assert_eq!(paragraphs.len(), 1);
+        let para = &paragraphs[0];
+
+        // Test different case variations for get_single
+        assert_eq!(para.get_single("Package"), Some("test"));
+        assert_eq!(para.get_single("package"), Some("test"));
+        assert_eq!(para.get_single("PACKAGE"), Some("test"));
+        assert_eq!(para.get_single("PaCkAgE"), Some("test"));
+
+        assert_eq!(para.get_single("Version"), Some("1.0"));
+        assert_eq!(para.get_single("version"), Some("1.0"));
+        assert_eq!(para.get_single("VERSION"), Some("1.0"));
+
+        // Test case variations for get_field
+        assert!(para.get_field("Package").is_some());
+        assert!(para.get_field("package").is_some());
+        assert!(para.get_field("PACKAGE").is_some());
+
+        // Test case variations for get (returns lines)
+        assert!(para.get("Package").is_some());
+        assert!(para.get("package").is_some());
+        assert!(para.get("PACKAGE").is_some());
+    }
+
+    #[test]
+    fn test_borrowed_case_insensitive_multiline() {
+        let input = "Package: test\nDescription: short desc\n continuation line\n";
+        let paragraphs = parse_borrowed(input).unwrap();
+
+        let para = &paragraphs[0];
+
+        // Test with different cases
+        let desc_lower = para.get("description");
+        let desc_upper = para.get("DESCRIPTION");
+        let desc_mixed = para.get("Description");
+
+        assert!(desc_lower.is_some());
+        assert!(desc_upper.is_some());
+        assert!(desc_mixed.is_some());
+
+        assert_eq!(desc_lower, desc_upper);
+        assert_eq!(desc_lower, desc_mixed);
+
+        assert_eq!(desc_lower.unwrap().len(), 2);
+        assert_eq!(desc_lower.unwrap()[0], "short desc");
+        assert_eq!(desc_lower.unwrap()[1], "continuation line");
+    }
+
+    #[test]
+    fn test_borrowed_case_preservation() {
+        let input = "Package: test\nVersion: 1.0\n";
+        let paragraphs = parse_borrowed(input).unwrap();
+
+        let para = &paragraphs[0];
+
+        // Get field with lowercase query
+        let field = para.get_field("package").unwrap();
+
+        // But the original case should be preserved in the field name
+        assert_eq!(field.name, "Package");
     }
 }
