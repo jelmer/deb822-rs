@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "debian-copyright"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "deb822-fast",
  "deb822-lossless",
