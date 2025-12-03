@@ -39,6 +39,61 @@ use crate::{License, CURRENT_FORMAT, KNOWN_FORMATS};
 use deb822_lossless::{Deb822, Paragraph};
 use std::path::Path;
 
+/// Decode deb822 paragraph markers in a multi-line field value.
+///
+/// According to Debian policy, blank lines in multi-line field values are
+/// represented as lines containing only "." (a single period). The deb822-lossless
+/// parser already strips the leading indentation whitespace from continuation lines,
+/// so we only need to decode the period markers back to blank lines.
+///
+/// # Arguments
+///
+/// * `text` - The raw field value text from deb822-lossless with indentation already stripped
+///
+/// # Returns
+///
+/// The decoded text with blank lines restored
+fn decode_field_text(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if line == "." {
+                // Paragraph marker representing a blank line
+                ""
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Encode blank lines in a field value to deb822 paragraph markers.
+///
+/// According to Debian policy, blank lines in multi-line field values must be
+/// represented as lines containing only "." (a single period). The deb822-lossless
+/// library will reject values with actual blank lines, so we must encode them first.
+///
+/// # Arguments
+///
+/// * `text` - The decoded text with normal blank lines
+///
+/// # Returns
+///
+/// The encoded text with blank lines replaced by "."
+fn encode_field_text(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if line.is_empty() {
+                // Blank line must be encoded as period marker
+                "."
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Field order for header paragraphs according to DEP-5 specification
 const HEADER_FIELD_ORDER: &[&str] = &[
     "Format",
@@ -561,7 +616,7 @@ impl LicenseParagraph {
     pub fn text(&self) -> Option<String> {
         self.0
             .get("License")
-            .and_then(|x| x.split_once('\n').map(|(_, text)| text.to_string()))
+            .and_then(|x| x.split_once('\n').map(|(_, text)| decode_field_text(text)))
     }
 
     /// Get the license as a License enum
@@ -570,10 +625,11 @@ impl LicenseParagraph {
         x.split_once('\n').map_or_else(
             || License::Name(x.to_string()),
             |(name, text)| {
+                let decoded_text = decode_field_text(text);
                 if name.is_empty() {
-                    License::Text(text.to_string())
+                    License::Text(decoded_text)
                 } else {
-                    License::Named(name.to_string(), text.to_string())
+                    License::Named(name.to_string(), decoded_text)
                 }
             },
         )
@@ -583,8 +639,8 @@ impl LicenseParagraph {
     pub fn set_license(&mut self, license: &License) {
         let text = match license {
             License::Name(name) => name.to_string(),
-            License::Named(name, text) => format!("{}\n{}", name, text),
-            License::Text(text) => text.to_string(),
+            License::Named(name, text) => format!("{}\n{}", name, encode_field_text(text)),
+            License::Text(text) => encode_field_text(text),
         };
         self.0
             .set_with_field_order("License", &text, LICENSE_FIELD_ORDER);
@@ -1237,5 +1293,148 @@ License: MIT
             "Fields should be in DEP-5 order (Files, Copyright, License, Comment), but got:\n{}",
             output
         );
+    }
+
+    #[test]
+    fn test_license_text_decoding_paragraph_markers() {
+        // Test that paragraph markers (.) are decoded to blank lines
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: MIT
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let license_para = copyright
+            .iter_licenses()
+            .next()
+            .expect("no license paragraph");
+        let text = license_para.text().expect("no license text");
+
+        // The period marker should be decoded to a blank line
+        assert!(
+            text.contains("\n\n"),
+            "Expected blank line in decoded text, got: {:?}",
+            text
+        );
+        assert!(
+            !text.contains("\n.\n"),
+            "Period marker should be decoded, not present in output"
+        );
+
+        // Verify exact content
+        let expected = "Permission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND.";
+        assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn test_license_enum_decoding() {
+        // Test that the license() method also decodes paragraph markers
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ This program is free software.
+ .
+ You can redistribute it.
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let license_para = copyright
+            .iter_licenses()
+            .next()
+            .expect("no license paragraph");
+        let license = license_para.license();
+
+        match license {
+            crate::License::Named(name, text) => {
+                assert_eq!(name, "GPL-3+");
+                assert!(text.contains("\n\n"), "Expected blank line in decoded text");
+                assert!(!text.contains("\n.\n"), "Period marker should be decoded");
+                assert_eq!(
+                    text,
+                    "This program is free software.\n\nYou can redistribute it."
+                );
+            }
+            _ => panic!("Expected Named license"),
+        }
+    }
+
+    #[test]
+    fn test_encode_field_text() {
+        // Test basic encoding of blank lines
+        let input = "line 1\n\nline 3";
+        let output = super::encode_field_text(input);
+        assert_eq!(output, "line 1\n.\nline 3");
+    }
+
+    #[test]
+    fn test_encode_decode_round_trip() {
+        // Test that encoding and decoding are inverse operations
+        let original = "First paragraph\n\nSecond paragraph\n\nThird paragraph";
+        let encoded = super::encode_field_text(original);
+        let decoded = super::decode_field_text(&encoded);
+        assert_eq!(
+            decoded, original,
+            "Round-trip encoding/decoding should preserve text"
+        );
+    }
+
+    #[test]
+    fn test_set_license_with_blank_lines() {
+        // Test that setting a license with blank lines encodes them properly
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ Original text
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut license_para = copyright
+            .iter_licenses()
+            .next()
+            .expect("no license paragraph");
+
+        // Set license text with blank lines
+        let new_license = crate::License::Named(
+            "GPL-3+".to_string(),
+            "First paragraph.\n\nSecond paragraph.".to_string(),
+        );
+        license_para.set_license(&new_license);
+
+        // Verify it was encoded properly in the raw deb822
+        let raw_text = copyright.to_string();
+        let expected_output = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\nLicense: GPL-3+\n First paragraph.\n .\n Second paragraph.\n";
+        assert_eq!(raw_text, expected_output);
+
+        // Verify it decodes back correctly
+        let retrieved = license_para.text().expect("no text");
+        assert_eq!(retrieved, "First paragraph.\n\nSecond paragraph.");
+    }
+
+    #[test]
+    fn test_set_text_with_blank_lines() {
+        // Test that set_text also encodes blank lines
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: MIT
+ Original text
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut license_para = copyright
+            .iter_licenses()
+            .next()
+            .expect("no license paragraph");
+
+        // Set text with blank lines
+        license_para.set_text(Some("Line 1\n\nLine 2"));
+
+        // Verify encoding
+        let raw_text = copyright.to_string();
+        let expected_output = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\nLicense: MIT\n Line 1\n .\n Line 2\n";
+        assert_eq!(raw_text, expected_output);
+
+        // Verify decoding
+        let retrieved = license_para.text().expect("no text");
+        assert_eq!(retrieved, "Line 1\n\nLine 2");
     }
 }
