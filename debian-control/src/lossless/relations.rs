@@ -216,10 +216,10 @@ fn parse(text: &str, allow_substvar: bool) -> Parse {
 
                 self.skip_ws();
 
-                if self.current() == Some(IDENT) {
+                // Read IDENT and COLON tokens until we see R_PARENS
+                // This handles version strings with epochs (e.g., "1:2.3.2-2~")
+                while matches!(self.current(), Some(IDENT) | Some(COLON)) {
                     self.bump();
-                } else {
-                    self.error("Expected version".to_string());
                 }
 
                 if self.current() == Some(R_PARENS) {
@@ -2096,6 +2096,24 @@ impl From<Relation> for Entry {
     }
 }
 
+/// Helper function to tokenize a version string, handling epochs
+/// Version strings like "1:2.3.2-2~" need to be split into: IDENT("1"), COLON, IDENT("2.3.2-2~")
+fn tokenize_version(builder: &mut GreenNodeBuilder, version: &Version) {
+    let version_str = version.to_string();
+
+    // Split on the first colon (if any) to handle epochs
+    if let Some(colon_pos) = version_str.find(':') {
+        // Epoch part (before colon)
+        builder.token(IDENT.into(), &version_str[..colon_pos]);
+        builder.token(COLON.into(), ":");
+        // Version part (after colon)
+        builder.token(IDENT.into(), &version_str[colon_pos + 1..]);
+    } else {
+        // No epoch, just a regular version
+        builder.token(IDENT.into(), version_str.as_str());
+    }
+}
+
 impl Relation {
     /// Create a new relation
     ///
@@ -2134,7 +2152,7 @@ impl Relation {
 
             builder.token(WHITESPACE.into(), " ");
 
-            builder.token(IDENT.into(), version.to_string().as_str());
+            tokenize_version(&mut builder, &version);
 
             builder.token(R_PARENS.into(), ")");
 
@@ -2179,7 +2197,7 @@ impl Relation {
             );
             builder.finish_node();
             builder.token(WHITESPACE.into(), " ");
-            builder.token(IDENT.into(), version.to_string().as_str());
+            tokenize_version(&mut builder, &version);
             builder.token(R_PARENS.into(), ")");
             builder.finish_node();
         }
@@ -2344,14 +2362,24 @@ impl Relation {
         let vc = vc.as_ref()?;
         let constraint = vc.children().find(|n| n.kind() == CONSTRAINT);
 
-        let version = vc.children_with_tokens().find_map(|it| match it {
-            SyntaxElement::Token(token) if token.kind() == IDENT => Some(token),
-            _ => None,
-        });
+        // Collect all IDENT and COLON tokens to handle versions with epochs (e.g., "1:2.3.2-2~")
+        let version_str: String = vc
+            .children_with_tokens()
+            .filter_map(|it| match it {
+                SyntaxElement::Token(token) if token.kind() == IDENT || token.kind() == COLON => {
+                    Some(token.text().to_string())
+                }
+                _ => None,
+            })
+            .collect();
 
-        if let (Some(constraint), Some(version)) = (constraint, version) {
-            let vc: VersionConstraint = constraint.to_string().parse().unwrap();
-            Some((vc, (version.text().to_string()).parse().unwrap()))
+        if let Some(constraint) = constraint {
+            if !version_str.is_empty() {
+                let vc: VersionConstraint = constraint.to_string().parse().unwrap();
+                Some((vc, version_str.parse().unwrap()))
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -2395,7 +2423,7 @@ impl Relation {
             }
             builder.finish_node(); // CONSTRAINT
             builder.token(WHITESPACE.into(), " ");
-            builder.token(IDENT.into(), version.to_string().as_str());
+            tokenize_version(&mut builder, &version);
             builder.token(R_PARENS.into(), ")");
             builder.finish_node(); // VERSION
 
@@ -4630,5 +4658,25 @@ Description: test
         // "pkg1 | pkg2" is implied by "pkg1 | pkg2 | pkg3" (one matches)
         let outer: Entry = "pkg1 | pkg2 | pkg3".parse().unwrap();
         assert!(inner.is_implied_by(&outer));
+    }
+
+    #[test]
+    fn test_parse_version_with_epoch() {
+        // Test parsing version strings with epoch (e.g., "1:2.3.2-2~")
+        // The colon should be treated as part of the version, not as a delimiter
+        let input = "amule-dbg (<< 1:2.3.2-2~)";
+        let parsed: Relations = input.parse().unwrap();
+        assert_eq!(parsed.to_string(), input);
+        assert_eq!(parsed.entries().count(), 1);
+        let entry = parsed.entries().next().unwrap();
+        assert_eq!(entry.to_string(), "amule-dbg (<< 1:2.3.2-2~)");
+        assert_eq!(entry.relations().count(), 1);
+        let relation = entry.relations().next().unwrap();
+        assert_eq!(relation.name(), "amule-dbg");
+        assert_eq!(relation.to_string(), "amule-dbg (<< 1:2.3.2-2~)");
+        assert_eq!(
+            relation.version(),
+            Some((VersionConstraint::LessThan, "1:2.3.2-2~".parse().unwrap()))
+        );
     }
 }
