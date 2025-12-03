@@ -52,6 +52,60 @@ pub const KNOWN_FORMATS: &[&str] = &[CURRENT_FORMAT];
 
 mod glob;
 
+/// Decode deb822 paragraph markers in a multi-line field value.
+///
+/// According to Debian policy, blank lines in multi-line field values are
+/// represented as lines containing only "." (a single period). The deb822
+/// parser already strips the leading indentation whitespace from continuation lines,
+/// so we only need to decode the period markers back to blank lines.
+///
+/// # Arguments
+///
+/// * `text` - The raw field value text from deb822 parser with indentation already stripped
+///
+/// # Returns
+///
+/// The decoded text with blank lines restored
+fn decode_field_text(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if line == "." {
+                // Paragraph marker representing a blank line
+                ""
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Encode blank lines in a field value to deb822 paragraph markers.
+///
+/// According to Debian policy, blank lines in multi-line field values must be
+/// represented as lines containing only "." (a single period).
+///
+/// # Arguments
+///
+/// * `text` - The decoded text with normal blank lines
+///
+/// # Returns
+///
+/// The encoded text with blank lines replaced by "."
+fn encode_field_text(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if line.is_empty() {
+                // Blank line must be encoded as period marker
+                "."
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// A license, which can be just a name, a text or a named license.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum License {
@@ -90,10 +144,11 @@ impl std::str::FromStr for License {
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         if let Some((name, rest)) = text.split_once('\n') {
+            let decoded_text = decode_field_text(rest);
             if name.is_empty() {
-                Ok(License::Text(rest.to_string()))
+                Ok(License::Text(decoded_text))
             } else {
-                Ok(License::Named(name.to_string(), rest.to_string()))
+                Ok(License::Named(name.to_string(), decoded_text))
             }
         } else {
             Ok(License::Name(text.to_string()))
@@ -105,8 +160,79 @@ impl std::fmt::Display for License {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             License::Name(name) => f.write_str(name),
-            License::Text(text) => write!(f, "\n{}", text),
-            License::Named(name, text) => write!(f, "{}\n{}", name, text),
+            License::Text(text) => write!(f, "\n{}", encode_field_text(text)),
+            License::Named(name, text) => write!(f, "{}\n{}", name, encode_field_text(text)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decode_field_text() {
+        // Test basic decoding of period markers
+        let input = "line 1\n.\nline 3";
+        let output = decode_field_text(input);
+        assert_eq!(output, "line 1\n\nline 3");
+    }
+
+    #[test]
+    fn test_decode_field_text_no_markers() {
+        // Test text without markers remains unchanged
+        let input = "line 1\nline 2\nline 3";
+        let output = decode_field_text(input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_license_from_str_with_paragraph_markers() {
+        // Test that License::from_str decodes paragraph markers
+        let input = "GPL-3+\nThis is line 1\n.\nThis is line 3";
+        let license: License = input.parse().unwrap();
+
+        match license {
+            License::Named(name, text) => {
+                assert_eq!(name, "GPL-3+");
+                assert_eq!(text, "This is line 1\n\nThis is line 3");
+                assert!(!text.contains("\n.\n"));
+            }
+            _ => panic!("Expected Named license"),
+        }
+    }
+
+    #[test]
+    fn test_encode_field_text() {
+        // Test basic encoding of blank lines
+        let input = "line 1\n\nline 3";
+        let output = encode_field_text(input);
+        assert_eq!(output, "line 1\n.\nline 3");
+    }
+
+    #[test]
+    fn test_encode_decode_round_trip() {
+        // Test that encoding and decoding are inverse operations
+        let original = "First paragraph\n\nSecond paragraph\n\nThird paragraph";
+        let encoded = encode_field_text(original);
+        let decoded = decode_field_text(&encoded);
+        assert_eq!(
+            decoded, original,
+            "Round-trip encoding/decoding should preserve text"
+        );
+    }
+
+    #[test]
+    fn test_license_display_encodes_blank_lines() {
+        // Test that License::Display encodes blank lines
+        let license = License::Named("MIT".to_string(), "Line 1\n\nLine 2".to_string());
+        let displayed = license.to_string();
+        assert_eq!(displayed, "MIT\nLine 1\n.\nLine 2");
+        assert!(displayed.contains("\n.\n"), "Should contain period marker");
+        assert_eq!(
+            displayed.matches("\n\n").count(),
+            0,
+            "Should not contain literal blank lines"
+        );
     }
 }
