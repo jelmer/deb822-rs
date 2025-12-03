@@ -566,11 +566,17 @@ impl FilesParagraph {
     pub fn set_license(&mut self, license: &License) {
         let text = match license {
             License::Name(name) => name.to_string(),
-            License::Named(name, text) => format!("{}\n{}", name, text),
-            License::Text(text) => text.to_string(),
+            License::Named(name, text) => format!("{}\n{}", name, encode_field_text(text)),
+            License::Text(text) => encode_field_text(text),
         };
-        self.0
-            .set_with_field_order("License", &text, FILES_FIELD_ORDER);
+        // Force 1-space indentation for License field according to DEP-5 spec
+        let indent_pattern = deb822_lossless::IndentPattern::Fixed(1);
+        self.0.set_with_indent_pattern(
+            "License",
+            &text,
+            Some(&indent_pattern),
+            Some(FILES_FIELD_ORDER),
+        );
     }
 }
 
@@ -642,8 +648,14 @@ impl LicenseParagraph {
             License::Named(name, text) => format!("{}\n{}", name, encode_field_text(text)),
             License::Text(text) => encode_field_text(text),
         };
-        self.0
-            .set_with_field_order("License", &text, LICENSE_FIELD_ORDER);
+        // Force 1-space indentation for License field according to DEP-5 spec
+        let indent_pattern = deb822_lossless::IndentPattern::Fixed(1);
+        self.0.set_with_indent_pattern(
+            "License",
+            &text,
+            Some(&indent_pattern),
+            Some(LICENSE_FIELD_ORDER),
+        );
     }
 
     /// Set just the license name (short name on the first line)
@@ -1436,5 +1448,32 @@ License: MIT
         // Verify decoding
         let retrieved = license_para.text().expect("no text");
         assert_eq!(retrieved, "Line 1\n\nLine 2");
+    }
+
+    #[test]
+    fn test_set_license_uses_single_space_indent_for_new_multiline() {
+        // Test that set_license() uses 1-space indentation when converting
+        // a single-line license (no existing indentation) to multi-line
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: Apache-2.0
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut license_para = copyright
+            .iter_licenses()
+            .next()
+            .expect("no license paragraph");
+
+        // Set new multi-line license text
+        let new_license = crate::License::Named(
+            "Apache-2.0".to_string(),
+            "Licensed under the Apache License, Version 2.0".to_string(),
+        );
+        license_para.set_license(&new_license);
+
+        // Verify the new license uses 1-space indentation
+        let result = copyright.to_string();
+        let expected = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\nLicense: Apache-2.0\n Licensed under the Apache License, Version 2.0\n";
+        assert_eq!(result, expected);
     }
 }
