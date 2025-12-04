@@ -245,6 +245,7 @@ pub struct Package {
     pub version: debversion::Version,
 
     /// The name and version of the source package, if different from `name`
+    #[deb822(field = "Source")]
     pub source: Option<SourceRelation>,
 
     /// The architecture of the package
