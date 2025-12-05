@@ -62,9 +62,11 @@ pub mod error;
 pub mod key_management;
 #[cfg(feature = "key-management")]
 pub mod keyserver;
+/// Launchpad PPA (Personal Package Archive) integration
+#[cfg(feature = "launchpad")]
+pub mod launchpad;
 #[cfg(feature = "legacy")]
 pub mod legacy;
-pub mod ppa;
 pub mod signature;
 /// Module for managing APT source lists
 pub mod sources_manager;
