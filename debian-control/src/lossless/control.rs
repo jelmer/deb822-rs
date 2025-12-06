@@ -2497,4 +2497,37 @@ Depends: libfoo, %%%bad%%%, libbar
             assert!(binary.depends().is_some());
         }
     }
+
+    #[test]
+    fn test_preserves_final_newline() {
+        // Test that the final newline is preserved when writing control files
+        let input_with_newline = "Source: test-package\nMaintainer: Test <test@example.com>\n\nPackage: test-pkg\nArchitecture: any\n";
+        let control: Control = input_with_newline.parse().unwrap();
+        let output = control.to_string();
+        assert_eq!(output, input_with_newline);
+    }
+
+    #[test]
+    fn test_preserves_no_final_newline() {
+        // Test that absence of final newline is also preserved (even though it's not POSIX-compliant)
+        let input_without_newline = "Source: test-package\nMaintainer: Test <test@example.com>\n\nPackage: test-pkg\nArchitecture: any";
+        let control: Control = input_without_newline.parse().unwrap();
+        let output = control.to_string();
+        assert_eq!(output, input_without_newline);
+    }
+
+    #[test]
+    fn test_final_newline_after_modifications() {
+        // Test that final newline is preserved even after modifications
+        let input = "Source: test-package\nMaintainer: Test <test@example.com>\n\nPackage: test-pkg\nArchitecture: any\n";
+        let control: Control = input.parse().unwrap();
+
+        // Make a modification
+        let mut source = control.source().unwrap();
+        source.set_section(Some("utils"));
+
+        let output = control.to_string();
+        let expected = "Source: test-package\nSection: utils\nMaintainer: Test <test@example.com>\n\nPackage: test-pkg\nArchitecture: any\n";
+        assert_eq!(output, expected);
+    }
 }
