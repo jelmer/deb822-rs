@@ -18,7 +18,7 @@ use crate::Error;
 
 /// Field value representation that avoids allocation for single-line fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FieldValue<'a> {
+enum FieldValue<'a> {
     /// Single-line field (no allocation)
     Single(&'a str),
     /// Multi-line field with continuation lines
@@ -32,12 +32,17 @@ pub enum FieldValue<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BorrowedField<'a> {
     /// The field name (borrowed from source)
-    pub name: &'a str,
+    name: &'a str,
     /// The field value (single or multiple lines)
-    pub value: FieldValue<'a>,
+    value: FieldValue<'a>,
 }
 
 impl<'a> BorrowedField<'a> {
+    /// Get the field name.
+    pub fn name(&self) -> &'a str {
+        self.name
+    }
+
     /// Get the value as a single line (for single-line fields).
     /// Returns None if the field has multiple lines.
     pub fn as_single_line(&self) -> Option<&'a str> {
@@ -422,7 +427,7 @@ mod tests {
 
         let fields: Vec<_> = paragraphs[0].iter().collect();
         assert_eq!(fields.len(), 3);
-        assert_eq!(fields[0].name, "A");
+        assert_eq!(fields[0].name(), "A");
         assert_eq!(fields[0].value, FieldValue::Single("1"));
         assert_eq!(fields[0].as_single_line(), Some("1"));
     }
@@ -669,6 +674,6 @@ Description: A test package
         let field = para.get_field("package").unwrap();
 
         // But the original case should be preserved in the field name
-        assert_eq!(field.name, "Package");
+        assert_eq!(field.name(), "Package");
     }
 }
