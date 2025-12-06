@@ -43,6 +43,63 @@ pub trait ToDeb822Paragraph<P: Deb822LikeParagraph> {
     fn update_paragraph(&self, paragraph: &mut P);
 }
 
+/// Format a field value as a single line.
+///
+/// # Panics
+///
+/// Panics if the value contains newline characters.
+pub fn format_single_line(value: &str, field_name: &str) -> String {
+    assert!(
+        !value.contains('\n'),
+        "Field '{}' is marked as single_line but contains newlines",
+        field_name
+    );
+    value.to_string()
+}
+
+/// Format a field value as multi-line, ensuring continuation lines start with a space.
+///
+/// If the value is already single-line, it is returned as-is.
+/// For multi-line values:
+/// - The first line is kept as-is
+/// - Empty continuation lines are replaced with " ." (space followed by dot)
+/// - Non-empty continuation lines are prefixed with a space
+pub fn format_multi_line(value: &str) -> String {
+    if !value.contains('\n') {
+        value.to_string()
+    } else {
+        value
+            .lines()
+            .enumerate()
+            .map(|(i, line)| {
+                if i == 0 {
+                    line.to_string()
+                } else if line.is_empty() {
+                    " .".to_string()
+                } else {
+                    format!(" {}", line)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// Format a field value as folded, stripping whitespace and joining lines with spaces.
+///
+/// This implements RFC 822 folding behavior by:
+/// - Trimming leading and trailing whitespace from each line
+/// - Filtering out empty lines
+/// - Joining the remaining lines with single spaces
+pub fn format_folded(value: &str) -> String {
+    value
+        .lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

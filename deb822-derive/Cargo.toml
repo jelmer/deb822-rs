@@ -18,5 +18,8 @@ proc-macro2 = "1.0.101"
 quote = "1.0.41"
 syn = { version = "2", features = ["parsing"] }
 
+[dev-dependencies]
+deb822-fast = { path = "../deb822-fast", features = ["derive"] }
+
 [badges]
 maintenance = { status = "actively-maintained" }

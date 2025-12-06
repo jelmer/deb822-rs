@@ -13,6 +13,25 @@ fn is_option(ty: &syn::Type) -> bool {
     false
 }
 
+/// Generate code to format a field value based on its FieldType
+fn apply_field_formatting(
+    field_type: Option<FieldType>,
+    field_name: &str,
+) -> proc_macro2::TokenStream {
+    match field_type {
+        Some(FieldType::SingleLine) => quote! {
+            deb822_fast::convert::format_single_line(&value, #field_name)
+        },
+        Some(FieldType::MultiLine) => quote! {
+            deb822_fast::convert::format_multi_line(&value)
+        },
+        Some(FieldType::Folded) => quote! {
+            deb822_fast::convert::format_folded(&value)
+        },
+        None => quote! { value },
+    }
+}
+
 // Generate `from_paragraph`, ``to_paragraph`` methods for the annotated struct, i.e.:
 //
 // ```rust
@@ -246,32 +265,43 @@ pub fn derive_to_deb822(input: TokenStream) -> TokenStream {
             quote! { ToString::to_string }
         };
 
+        let field_type = attrs.field_type;
+        let format_value = apply_field_formatting(field_type, &key);
+
         let ty = &f.ty;
         let is_option = is_option(ty);
 
         to_fields.push(if is_option {
             quote! {
                 if let Some(v) = &self.#ident {
-                    fields.push((#key.to_string(), #serialize_with(&v)));
+                    let value = #serialize_with(&v);
+                    let formatted = #format_value;
+                    fields.push((#key.to_string(), formatted));
                 }
             }
         } else {
             quote! {
-                fields.push((#key.to_string(), #serialize_with(&self.#ident)));
+                let value = #serialize_with(&self.#ident);
+                let formatted = #format_value;
+                fields.push((#key.to_string(), formatted));
             }
         });
 
         update_fields.push(if is_option {
             quote! {
                 if let Some(v) = &self.#ident {
-                    para.set(#key, #serialize_with(&v).as_str());
+                    let value = #serialize_with(&v);
+                    let formatted = #format_value;
+                    para.set(#key, formatted.as_str());
                 } else {
                     para.remove(#key);
                 }
             }
         } else {
             quote! {
-                para.set(#key, #serialize_with(&self.#ident).as_str());
+                let value = #serialize_with(&self.#ident);
+                let formatted = #format_value;
+                para.set(#key, formatted.as_str());
             }
         });
     }
