@@ -29,6 +29,23 @@ enum FieldValue<'a> {
 ///
 /// The name is always borrowed. The value is either a single line or multiple lines.
 /// Single-line fields (the common case) avoid Vec allocation entirely.
+///
+/// # Examples
+///
+/// ```
+/// use deb822_fast::borrowed::parse_borrowed;
+///
+/// let input = "Package: test\nDescription: short\n long description\n";
+/// let paragraphs = parse_borrowed(input).unwrap();
+///
+/// let pkg_field = paragraphs[0].get_field("Package").unwrap();
+/// assert_eq!(pkg_field.name(), "Package");
+/// assert_eq!(pkg_field.as_single_line(), Some("test"));
+///
+/// let desc_field = paragraphs[0].get_field("Description").unwrap();
+/// assert_eq!(desc_field.lines(), &["short", "long description"]);
+/// assert_eq!(desc_field.join(), "short\nlong description");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BorrowedField<'a> {
     /// The field name (borrowed from source)
@@ -53,6 +70,18 @@ impl<'a> BorrowedField<'a> {
     }
 
     /// Get the value lines as a slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_fast::borrowed::parse_borrowed;
+    ///
+    /// let input = "Description: line1\n line2\n line3\n";
+    /// let paragraphs = parse_borrowed(input).unwrap();
+    /// let field = paragraphs[0].get_field("Description").unwrap();
+    ///
+    /// assert_eq!(field.lines(), &["line1", "line2", "line3"]);
+    /// ```
     pub fn lines(&self) -> &[&'a str] {
         match &self.value {
             FieldValue::Single(s) => std::slice::from_ref(s),
@@ -61,6 +90,18 @@ impl<'a> BorrowedField<'a> {
     }
 
     /// Join the value lines into an owned String with newlines.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_fast::borrowed::parse_borrowed;
+    ///
+    /// let input = "Description: line1\n line2\n";
+    /// let paragraphs = parse_borrowed(input).unwrap();
+    /// let field = paragraphs[0].get_field("Description").unwrap();
+    ///
+    /// assert_eq!(field.join(), "line1\nline2");
+    /// ```
     pub fn join(&self) -> String {
         match &self.value {
             FieldValue::Single(s) => s.to_string(),
@@ -80,6 +121,29 @@ impl<'a> BorrowedField<'a> {
 }
 
 /// A borrowed paragraph that references data in the source string.
+///
+/// # Examples
+///
+/// ```
+/// use deb822_fast::borrowed::parse_borrowed;
+///
+/// let input = "Package: hello\nVersion: 1.0\nDescription: short\n long description\n";
+/// let paragraphs = parse_borrowed(input).unwrap();
+/// let para = &paragraphs[0];
+///
+/// // Get single-line fields
+/// assert_eq!(para.get_single("Package"), Some("hello"));
+/// assert_eq!(para.get_single("Version"), Some("1.0"));
+///
+/// // Get multi-line field as lines
+/// let desc = para.get("Description").unwrap();
+/// assert_eq!(desc, &["short", "long description"]);
+///
+/// // Iterate over all fields
+/// for field in para.iter() {
+///     println!("{}: {:?}", field.name(), field.lines());
+/// }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BorrowedParagraph<'a> {
     fields: Vec<BorrowedField<'a>>,
@@ -98,6 +162,23 @@ impl<'a> BorrowedParagraph<'a> {
     /// Get a field value by name as lines.
     ///
     /// Field names are compared case-insensitively.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_fast::borrowed::parse_borrowed;
+    ///
+    /// let input = "Package: test\nDescription: short\n long description\n";
+    /// let paragraphs = parse_borrowed(input).unwrap();
+    /// let para = &paragraphs[0];
+    ///
+    /// // Single-line field returns slice with one element
+    /// assert_eq!(para.get("Package"), Some(&["test"][..]));
+    ///
+    /// // Multi-line field returns all lines
+    /// let desc = para.get("Description").unwrap();
+    /// assert_eq!(desc, &["short", "long description"]);
+    /// ```
     pub fn get(&self, name: &str) -> Option<&[&'a str]> {
         self.fields
             .iter()
@@ -109,6 +190,25 @@ impl<'a> BorrowedParagraph<'a> {
     ///
     /// Returns None if the field doesn't exist or has multiple lines.
     /// Field names are compared case-insensitively.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_fast::borrowed::parse_borrowed;
+    ///
+    /// let input = "Package: test\nDescription: short\n long\n";
+    /// let paragraphs = parse_borrowed(input).unwrap();
+    /// let para = &paragraphs[0];
+    ///
+    /// // Works for single-line fields
+    /// assert_eq!(para.get_single("Package"), Some("test"));
+    ///
+    /// // Returns None for multi-line fields
+    /// assert_eq!(para.get_single("Description"), None);
+    ///
+    /// // Case-insensitive
+    /// assert_eq!(para.get_single("package"), Some("test"));
+    /// ```
     pub fn get_single(&self, name: &str) -> Option<&'a str> {
         self.fields
             .iter()
@@ -136,6 +236,20 @@ impl<'a> BorrowedParagraph<'a> {
 ///
 /// This parser borrows all string data from the input, avoiding String allocations.
 /// It does allocate Vec structures to hold the paragraph and field lists.
+///
+/// # Examples
+///
+/// ```
+/// use deb822_fast::borrowed::BorrowedParser;
+///
+/// let input = "Package: hello\nVersion: 1.0\n\nPackage: world\nVersion: 2.0\n";
+/// let parser = BorrowedParser::new(input);
+/// let paragraphs = parser.parse_all().unwrap();
+///
+/// assert_eq!(paragraphs.len(), 2);
+/// assert_eq!(paragraphs[0].get_single("Package"), Some("hello"));
+/// assert_eq!(paragraphs[1].get_single("Package"), Some("world"));
+/// ```
 pub struct BorrowedParser<'a> {
     input: &'a str,
     bytes: &'a [u8],
@@ -385,11 +499,57 @@ impl<'a> Iterator for BorrowedParagraphIter<'a> {
 }
 
 /// Parse borrowed paragraphs from input.
+///
+/// This is the main entry point for parsing deb822 data with the borrowed API.
+/// All string data is borrowed from the input without allocation.
+///
+/// # Examples
+///
+/// ```
+/// use deb822_fast::borrowed::parse_borrowed;
+///
+/// let input = r#"Package: hello
+/// Version: 2.10
+/// Description: classic greeting program
+///  The GNU hello program produces a familiar, friendly greeting.
+///
+/// Package: world
+/// Version: 1.0
+/// "#;
+///
+/// let paragraphs = parse_borrowed(input).unwrap();
+/// assert_eq!(paragraphs.len(), 2);
+/// assert_eq!(paragraphs[0].get_single("Package"), Some("hello"));
+/// assert_eq!(paragraphs[0].get_single("Version"), Some("2.10"));
+///
+/// // Multi-line field
+/// let desc = paragraphs[0].get("Description").unwrap();
+/// assert_eq!(desc[0], "classic greeting program");
+/// assert_eq!(desc[1], "The GNU hello program produces a familiar, friendly greeting.");
+/// ```
 pub fn parse_borrowed(input: &str) -> Result<Vec<BorrowedParagraph<'_>>, Error> {
     BorrowedParser::new(input).parse_all()
 }
 
 /// Iterate over borrowed paragraphs.
+///
+/// Returns an iterator that yields paragraphs one at a time without
+/// allocating a Vec to hold all paragraphs upfront.
+///
+/// # Examples
+///
+/// ```
+/// use deb822_fast::borrowed::iter_paragraphs_borrowed;
+///
+/// let input = "Package: test1\nVersion: 1.0\n\nPackage: test2\nVersion: 2.0\n";
+///
+/// for result in iter_paragraphs_borrowed(input) {
+///     let para = result.unwrap();
+///     let pkg = para.get_single("Package").unwrap();
+///     let ver = para.get_single("Version").unwrap();
+///     println!("{}: {}", pkg, ver);
+/// }
+/// ```
 pub fn iter_paragraphs_borrowed(input: &str) -> BorrowedParagraphIter<'_> {
     BorrowedParagraphIter::new(input)
 }
