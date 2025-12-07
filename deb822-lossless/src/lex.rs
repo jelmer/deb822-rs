@@ -4,6 +4,7 @@ use crate::common;
 /// composite nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(non_camel_case_types)]
+#[allow(clippy::upper_case_acronyms)]
 #[repr(u16)]
 pub enum SyntaxKind {
     KEY = 0,

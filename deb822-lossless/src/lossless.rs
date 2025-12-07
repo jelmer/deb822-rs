@@ -579,7 +579,6 @@ pub(crate) fn parse(text: &str) -> Parse {
 /// It is also immutable, like a GreenNode,
 /// but it contains parent pointers, offsets, and
 /// has identity semantics.
-
 type SyntaxNode = rowan::SyntaxNode<Lang>;
 #[allow(unused)]
 type SyntaxToken = rowan::SyntaxToken<Lang>;
@@ -713,15 +712,15 @@ impl Deb822 {
     /// * `control` - The control file to format
     /// * `indentation` - The indentation to use
     /// * `immediate_empty_line` - Whether the value should always start with an empty line. If true,
-    ///                  then the result becomes something like "Field:\n value". This parameter
-    ///                  only applies to the values that will be formatted over more than one line.
+    ///   then the result becomes something like "Field:\n value". This parameter
+    ///   only applies to the values that will be formatted over more than one line.
     /// * `max_line_length_one_liner` - If set, then this is the max length of the value
-    ///                        if it is crammed into a "one-liner" value. If the value(s) fit into
-    ///                        one line, this parameter will overrule immediate_empty_line.
+    ///   if it is crammed into a "one-liner" value. If the value(s) fit into
+    ///   one line, this parameter will overrule immediate_empty_line.
     /// * `sort_paragraphs` - If set, then this function will sort the paragraphs according to the
-    ///                given function.
+    ///   given function.
     /// * `sort_entries` - If set, then this function will sort the entries according to the
-    ///               given function.
+    ///   given function.
     #[must_use]
     pub fn wrap_and_sort(
         &self,
@@ -806,26 +805,20 @@ impl Deb822 {
     /// deb822.normalize_field_spacing();
     /// assert_eq!(deb822.to_string(), "Field1: value1\nField2: value2\n\nField3: value3\n");
     /// ```
-    pub fn normalize_field_spacing(&mut self) {
-        // Collect paragraph indices and iterate through them
-        let para_indices: Vec<_> = self
-            .0
-            .children()
-            .filter_map(|c| {
-                if c.kind() == PARAGRAPH {
-                    Some(c.index())
-                } else {
-                    None
-                }
-            })
-            .collect();
+    pub fn normalize_field_spacing(&mut self) -> bool {
+        let mut any_changed = false;
 
-        for para_index in para_indices {
-            if let Some(para_node) = self.0.children().nth(para_index) {
-                let mut para = Paragraph::cast(para_node).unwrap();
-                para.normalize_field_spacing();
+        // Collect paragraphs to avoid borrowing issues
+        let mut paragraphs: Vec<_> = self.paragraphs().collect();
+
+        // Normalize each paragraph
+        for para in &mut paragraphs {
+            if para.normalize_field_spacing() {
+                any_changed = true;
             }
         }
+
+        any_changed
     }
 
     /// Returns an iterator over all paragraphs in the file.
@@ -1293,9 +1286,9 @@ impl Paragraph {
     /// * `indentation` - The indentation to use
     /// * `immediate_empty_line` - Whether multi-line values should always start with an empty line
     /// * `max_line_length_one_liner` - If set, then this is the max length of the value if it is
-    ///     crammed into a "one-liner" value
+    ///   crammed into a "one-liner" value
     /// * `sort_entries` - If set, then this function will sort the entries according to the given
-    /// function
+    ///   function
     /// * `format_value` - If set, then this function will format the value according to the given
     ///   function
     #[must_use]
@@ -1379,67 +1372,20 @@ impl Paragraph {
     /// para.normalize_field_spacing();
     /// assert_eq!(para.to_string(), "Field1: value1\nField2: value2\n");
     /// ```
-    pub fn normalize_field_spacing(&mut self) {
-        use rowan::GreenNodeBuilder;
+    pub fn normalize_field_spacing(&mut self) -> bool {
+        let mut any_changed = false;
 
-        // Collect entry information first to avoid borrowing issues
-        let entries_to_normalize: Vec<_> = self
-            .entries()
-            .map(|entry| {
-                let index = entry.0.index();
+        // Collect entries to avoid borrowing issues
+        let mut entries: Vec<_> = self.entries().collect();
 
-                // Build normalized entry inline
-                let mut builder = GreenNodeBuilder::new();
-                builder.start_node(ENTRY.into());
-
-                let mut seen_colon = false;
-                let mut skip_whitespace = false;
-
-                for child in entry.0.children_with_tokens() {
-                    match child.kind() {
-                        KEY => {
-                            builder.token(KEY.into(), child.as_token().unwrap().text());
-                        }
-                        COLON => {
-                            builder.token(COLON.into(), ":");
-                            seen_colon = true;
-                            skip_whitespace = true;
-                        }
-                        WHITESPACE if skip_whitespace => {
-                            // Skip existing whitespace after colon
-                            continue;
-                        }
-                        VALUE if skip_whitespace => {
-                            // Add exactly one space before the first value token
-                            builder.token(WHITESPACE.into(), " ");
-                            builder.token(VALUE.into(), child.as_token().unwrap().text());
-                            skip_whitespace = false;
-                        }
-                        NEWLINE if skip_whitespace && seen_colon => {
-                            // Empty value case (e.g., "Field:\n" or "Field:  \n")
-                            // Normalize to no trailing space - just output newline
-                            builder.token(NEWLINE.into(), "\n");
-                            skip_whitespace = false;
-                        }
-                        _ => {
-                            // Copy all other tokens as-is
-                            if let Some(token) = child.as_token() {
-                                builder.token(token.kind().into(), token.text());
-                            }
-                        }
-                    }
-                }
-
-                builder.finish_node();
-                (index, SyntaxNode::new_root_mut(builder.finish()))
-            })
-            .collect();
-
-        // Now replace each entry with its normalized version
-        for (index, normalized_entry) in entries_to_normalize {
-            self.0
-                .splice_children(index..index + 1, vec![normalized_entry.into()]);
+        // Normalize each entry
+        for entry in &mut entries {
+            if entry.normalize_field_spacing() {
+                any_changed = true;
+            }
         }
+
+        any_changed
     }
 
     /// Returns the value of the given key in the paragraph.
@@ -2330,9 +2276,9 @@ impl Entry {
     /// * `indentation` - The indentation to use
     /// * `immediate_empty_line` - Whether multi-line values should always start with an empty line
     /// * `max_line_length_one_liner` - If set, then this is the max length of the value if it is
-    ///    crammed into a "one-liner" value
+    ///   crammed into a "one-liner" value
     /// * `format_value` - If set, then this function will format the value according to the given
-    ///    function
+    ///   function
     ///
     /// # Returns
     /// The reformatted entry
@@ -2524,8 +2470,11 @@ impl Entry {
     /// para.normalize_field_spacing();
     /// assert_eq!(para.get("Field").as_deref(), Some("value"));
     /// ```
-    pub fn normalize_field_spacing(&mut self) {
+    pub fn normalize_field_spacing(&mut self) -> bool {
         use rowan::GreenNodeBuilder;
+
+        // Store the original text for comparison
+        let original_text = self.0.text().to_string();
 
         // Build normalized entry
         let mut builder = GreenNodeBuilder::new();
@@ -2570,13 +2519,21 @@ impl Entry {
         }
 
         builder.finish_node();
-        let normalized = SyntaxNode::new_root_mut(builder.finish());
+        let normalized_green = builder.finish();
+        let normalized = SyntaxNode::new_root_mut(normalized_green);
 
-        // Replace this entry in place
-        if let Some(parent) = self.0.parent() {
-            let index = self.0.index();
-            parent.splice_children(index..index + 1, vec![normalized.into()]);
+        // Check if normalization made any changes
+        let changed = original_text != normalized.text().to_string();
+
+        if changed {
+            // Replace this entry in place
+            if let Some(parent) = self.0.parent() {
+                let index = self.0.index();
+                parent.splice_children(index..index + 1, vec![normalized.into()]);
+            }
         }
+
+        changed
     }
 
     /// Detach this entry from the paragraph.
