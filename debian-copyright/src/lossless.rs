@@ -1531,8 +1531,8 @@ License: GPL-3+
     }
 
     #[test]
-    fn test_set_license_preserves_unusual_indentation_bug() {
-        // Regression test for bug: set_license() should NOT preserve unusual indentation
+    fn test_set_license_normalizes_unusual_indentation() {
+        // Regression test: set_license() should NOT preserve unusual indentation
         // from the original paragraph, it should always use 1-space indentation
         let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 
@@ -1557,9 +1557,8 @@ License: Apache-2.0
         // Verify the output uses 1-space indentation, NOT the 33-space from the original
         let result = copyright.to_string();
 
-        // FIXME: This documents the current buggy behavior - it preserves the unusual indentation
-        // Expected output should use 1-space indentation, but currently it uses the original 33-space indentation
-        let expected = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\nLicense: Apache-2.0\n                                 Licensed under the Apache License, Version 2.0 (the \"License\");\n                                 you may not use this file except in compliance with the License.\n                                 You may obtain a copy of the License at\n                                 .\n                                 http://www.apache.org/licenses/LICENSE-2.0\n";
+        // The bug is now fixed - output uses 1-space indentation regardless of the original formatting
+        let expected = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\nLicense: Apache-2.0\n Licensed under the Apache License, Version 2.0 (the \"License\");\n you may not use this file except in compliance with the License.\n You may obtain a copy of the License at\n .\n http://www.apache.org/licenses/LICENSE-2.0\n";
 
         assert_eq!(result, expected);
     }
