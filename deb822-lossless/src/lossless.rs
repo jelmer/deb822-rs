@@ -579,7 +579,6 @@ pub(crate) fn parse(text: &str) -> Parse {
 /// It is also immutable, like a GreenNode,
 /// but it contains parent pointers, offsets, and
 /// has identity semantics.
-
 type SyntaxNode = rowan::SyntaxNode<Lang>;
 #[allow(unused)]
 type SyntaxToken = rowan::SyntaxToken<Lang>;
@@ -713,15 +712,15 @@ impl Deb822 {
     /// * `control` - The control file to format
     /// * `indentation` - The indentation to use
     /// * `immediate_empty_line` - Whether the value should always start with an empty line. If true,
-    ///                  then the result becomes something like "Field:\n value". This parameter
-    ///                  only applies to the values that will be formatted over more than one line.
+    ///   then the result becomes something like "Field:\n value". This parameter
+    ///   only applies to the values that will be formatted over more than one line.
     /// * `max_line_length_one_liner` - If set, then this is the max length of the value
-    ///                        if it is crammed into a "one-liner" value. If the value(s) fit into
-    ///                        one line, this parameter will overrule immediate_empty_line.
+    ///   if it is crammed into a "one-liner" value. If the value(s) fit into
+    ///   one line, this parameter will overrule immediate_empty_line.
     /// * `sort_paragraphs` - If set, then this function will sort the paragraphs according to the
-    ///                given function.
+    ///   given function.
     /// * `sort_entries` - If set, then this function will sort the entries according to the
-    ///               given function.
+    ///   given function.
     #[must_use]
     pub fn wrap_and_sort(
         &self,
@@ -1287,9 +1286,9 @@ impl Paragraph {
     /// * `indentation` - The indentation to use
     /// * `immediate_empty_line` - Whether multi-line values should always start with an empty line
     /// * `max_line_length_one_liner` - If set, then this is the max length of the value if it is
-    ///     crammed into a "one-liner" value
+    ///   crammed into a "one-liner" value
     /// * `sort_entries` - If set, then this function will sort the entries according to the given
-    /// function
+    ///   function
     /// * `format_value` - If set, then this function will format the value according to the given
     ///   function
     #[must_use]
@@ -2277,9 +2276,9 @@ impl Entry {
     /// * `indentation` - The indentation to use
     /// * `immediate_empty_line` - Whether multi-line values should always start with an empty line
     /// * `max_line_length_one_liner` - If set, then this is the max length of the value if it is
-    ///    crammed into a "one-liner" value
+    ///   crammed into a "one-liner" value
     /// * `format_value` - If set, then this function will format the value according to the given
-    ///    function
+    ///   function
     ///
     /// # Returns
     /// The reformatted entry
