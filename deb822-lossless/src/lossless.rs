@@ -597,6 +597,32 @@ impl Parse {
     }
 }
 
+/// Calculate line and column (both 0-indexed) for the given offset in the tree.
+/// Column is measured in bytes from the start of the line.
+fn line_col_at_offset(node: &SyntaxNode, offset: rowan::TextSize) -> (usize, usize) {
+    let root = node.ancestors().last().unwrap_or_else(|| node.clone());
+    let mut line = 0;
+    let mut last_newline_offset = rowan::TextSize::from(0);
+
+    for element in root.preorder_with_tokens() {
+        if let rowan::WalkEvent::Enter(rowan::NodeOrToken::Token(token)) = element {
+            if token.text_range().start() >= offset {
+                break;
+            }
+
+            // Count newlines and track position of last one
+            for (idx, _) in token.text().match_indices('\n') {
+                line += 1;
+                last_newline_offset =
+                    token.text_range().start() + rowan::TextSize::from((idx + 1) as u32);
+            }
+        }
+    }
+
+    let column: usize = (offset - last_newline_offset).into();
+    (line, column)
+}
+
 macro_rules! ast_node {
     ($ast:ident, $kind:ident) => {
         #[doc = "An AST node representing a `"]
@@ -613,6 +639,22 @@ macro_rules! ast_node {
                 } else {
                     None
                 }
+            }
+
+            /// Get the line number (0-indexed) where this node starts.
+            pub fn line(&self) -> usize {
+                line_col_at_offset(&self.0, self.0.text_range().start()).0
+            }
+
+            /// Get the column number (0-indexed, in bytes) where this node starts.
+            pub fn column(&self) -> usize {
+                line_col_at_offset(&self.0, self.0.text_range().start()).1
+            }
+
+            /// Get both line and column (0-indexed) where this node starts.
+            /// Returns (line, column) where column is measured in bytes from the start of the line.
+            pub fn line_col(&self) -> (usize, usize) {
+                line_col_at_offset(&self.0, self.0.text_range().start())
             }
         }
 
@@ -4800,4 +4842,49 @@ fn test_field_with_value_then_empty_continuation() {
         has_empty_line_error,
         "Should have error about empty continuation line"
     );
+}
+
+#[test]
+fn test_line_col() {
+    let text = r#"Source: foo
+Maintainer: Foo Bar <jelmer@jelmer.uk>
+Section: net
+
+Package: foo
+Architecture: all
+Depends: libc6
+Description: This is a description
+ With details
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Test paragraph line numbers
+    let paras: Vec<_> = deb822.paragraphs().collect();
+    assert_eq!(paras.len(), 2);
+
+    // First paragraph starts at line 0
+    assert_eq!(paras[0].line(), 0);
+    assert_eq!(paras[0].column(), 0);
+
+    // Second paragraph starts at line 4 (after the empty line)
+    assert_eq!(paras[1].line(), 4);
+    assert_eq!(paras[1].column(), 0);
+
+    // Test entry line numbers
+    let entries: Vec<_> = paras[0].entries().collect();
+    assert_eq!(entries[0].line(), 0); // Source: foo
+    assert_eq!(entries[1].line(), 1); // Maintainer: ...
+    assert_eq!(entries[2].line(), 2); // Section: net
+
+    // Test column numbers
+    assert_eq!(entries[0].column(), 0); // Start of line
+    assert_eq!(entries[1].column(), 0); // Start of line
+
+    // Test line_col() method
+    assert_eq!(paras[1].line_col(), (4, 0));
+    assert_eq!(entries[0].line_col(), (0, 0));
+
+    // Test multi-line entry
+    let second_para_entries: Vec<_> = paras[1].entries().collect();
+    assert_eq!(second_para_entries[3].line(), 7); // Description starts at line 7
 }
