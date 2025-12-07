@@ -36,6 +36,7 @@
 //! ```
 
 use crate::{License, CURRENT_FORMAT, KNOWN_FORMATS};
+use deb822_lossless::IndentPattern;
 use deb822_lossless::{Deb822, Paragraph};
 use std::path::Path;
 
@@ -225,7 +226,12 @@ impl Copyright {
             License::Named(name, text) => format!("{}\n{}", name, text),
             License::Text(text) => text.to_string(),
         };
-        para.set_with_field_order("License", &license_text, FILES_FIELD_ORDER);
+        para.set_with_forced_indent(
+            "License",
+            &license_text,
+            &IndentPattern::Fixed(1),
+            Some(FILES_FIELD_ORDER),
+        );
         FilesParagraph(para)
     }
 
@@ -236,10 +242,16 @@ impl Copyright {
         let mut para = self.0.add_paragraph();
         let license_text = match license {
             License::Name(name) => name.to_string(),
-            License::Named(name, text) => format!("{}\n{}", name, text),
-            License::Text(text) => text.to_string(),
+            License::Named(name, text) => format!("{}\n{}", name, encode_field_text(text)),
+            License::Text(text) => encode_field_text(text),
         };
-        para.set_with_field_order("License", &license_text, LICENSE_FIELD_ORDER);
+        // Force 1-space indentation for License field according to DEP-5 spec
+        para.set_with_indent_pattern(
+            "License",
+            &license_text,
+            Some(&IndentPattern::Fixed(1)),
+            Some(LICENSE_FIELD_ORDER),
+        );
         LicenseParagraph(para)
     }
 
@@ -548,7 +560,7 @@ impl FilesParagraph {
 
     /// License in the paragraph
     pub fn license(&self) -> Option<License> {
-        self.0.get("License").map(|x| {
+        self.0.get_multiline("License").map(|x| {
             x.split_once('\n').map_or_else(
                 || License::Name(x.to_string()),
                 |(name, text)| {
@@ -571,12 +583,8 @@ impl FilesParagraph {
         };
         // Force 1-space indentation for License field according to DEP-5 spec
         let indent_pattern = deb822_lossless::IndentPattern::Fixed(1);
-        self.0.set_with_indent_pattern(
-            "License",
-            &text,
-            Some(&indent_pattern),
-            Some(FILES_FIELD_ORDER),
-        );
+        self.0
+            .set_with_forced_indent("License", &text, &indent_pattern, Some(FILES_FIELD_ORDER));
     }
 }
 
@@ -585,7 +593,7 @@ pub struct LicenseParagraph(Paragraph);
 
 impl From<LicenseParagraph> for License {
     fn from(p: LicenseParagraph) -> Self {
-        let x = p.0.get("License").unwrap();
+        let x = p.0.get_multiline("License").unwrap();
         x.split_once('\n').map_or_else(
             || License::Name(x.to_string()),
             |(name, text)| {
@@ -614,20 +622,20 @@ impl LicenseParagraph {
     /// Name of the license
     pub fn name(&self) -> Option<String> {
         self.0
-            .get("License")
+            .get_multiline("License")
             .and_then(|x| x.split_once('\n').map(|(name, _)| name.to_string()))
     }
 
     /// Text of the license
     pub fn text(&self) -> Option<String> {
         self.0
-            .get("License")
+            .get_multiline("License")
             .and_then(|x| x.split_once('\n').map(|(_, text)| decode_field_text(text)))
     }
 
     /// Get the license as a License enum
     pub fn license(&self) -> License {
-        let x = self.0.get("License").unwrap();
+        let x = self.0.get_multiline("License").unwrap();
         x.split_once('\n').map_or_else(
             || License::Name(x.to_string()),
             |(name, text)| {
@@ -650,12 +658,8 @@ impl LicenseParagraph {
         };
         // Force 1-space indentation for License field according to DEP-5 spec
         let indent_pattern = deb822_lossless::IndentPattern::Fixed(1);
-        self.0.set_with_indent_pattern(
-            "License",
-            &text,
-            Some(&indent_pattern),
-            Some(LICENSE_FIELD_ORDER),
-        );
+        self.0
+            .set_with_forced_indent("License", &text, &indent_pattern, Some(LICENSE_FIELD_ORDER));
     }
 
     /// Set just the license name (short name on the first line)
@@ -957,7 +961,7 @@ License: GPL-3+
             "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
              Files: *\n\
              Copyright: 2024 Test Author\n\
-             License: MIT\n         Permission is hereby granted...\n"
+             License: MIT\n Permission is hereby granted...\n"
         );
     }
 
@@ -982,7 +986,7 @@ License: GPL-3+
         assert_eq!(
             copyright.to_string(),
             "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
-             License: GPL-3+\n         This is the GPL-3+ license text.\n"
+             License: GPL-3+\n This is the GPL-3+ license text.\n"
         );
     }
 
@@ -1025,7 +1029,7 @@ License: GPL-3+
              Files: debian/*\n\
              Copyright: 2024 Author Two\n\
              License: GPL-3+\n\n\
-             License: GPL-3+\n         Full GPL-3+ text here.\n"
+             License: GPL-3+\n Full GPL-3+ text here.\n"
         );
     }
 

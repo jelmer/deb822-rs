@@ -763,7 +763,7 @@ impl Package {
 
     /// Get the description of the package.
     pub fn description(&self) -> Option<String> {
-        self.0.get("Description").map(|s| s.to_string())
+        self.0.get_multiline("Description")
     }
 
     /// Set the description of the package.
@@ -1118,7 +1118,7 @@ impl Release {
 
     /// Get the description
     pub fn description(&self) -> Option<String> {
-        self.0.get("Description").map(|s| s.to_string())
+        self.0.get_multiline("Description")
     }
 
     /// Set the description

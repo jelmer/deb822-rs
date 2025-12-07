@@ -1318,7 +1318,7 @@ impl Binary {
 
     /// Binary package description
     pub fn description(&self) -> Option<String> {
-        self.paragraph.get("Description")
+        self.paragraph.get_multiline("Description")
     }
 
     /// Set the binary package description

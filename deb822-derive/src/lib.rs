@@ -1,7 +1,6 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::spanned::Spanned;
 use syn::{parse_macro_input, DeriveInput};
 use syn::{Type, TypePath};
 
@@ -12,6 +11,25 @@ fn is_option(ty: &syn::Type) -> bool {
         }
     }
     false
+}
+
+/// Generate code to format a field value based on its FieldType
+fn apply_field_formatting(
+    field_type: Option<FieldType>,
+    field_name: &str,
+) -> proc_macro2::TokenStream {
+    match field_type {
+        Some(FieldType::SingleLine) => quote! {
+            deb822_fast::convert::format_single_line(&value, #field_name)
+        },
+        Some(FieldType::MultiLine) => quote! {
+            deb822_fast::convert::format_multi_line(&value)
+        },
+        Some(FieldType::Folded) => quote! {
+            deb822_fast::convert::format_folded(&value)
+        },
+        None => quote! { value },
+    }
 }
 
 // Generate `from_paragraph`, ``to_paragraph`` methods for the annotated struct, i.e.:
@@ -87,66 +105,86 @@ fn is_option(ty: &syn::Type) -> bool {
 // }
 // ```
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FieldType {
+    SingleLine,
+    MultiLine,
+    Folded,
+}
+
 struct FieldAttributes {
     field: Option<String>,
     serialize_with: Option<syn::ExprPath>,
     deserialize_with: Option<syn::ExprPath>,
+    field_type: Option<FieldType>,
 }
 
 fn extract_field_attributes(attrs: &[syn::Attribute]) -> Result<FieldAttributes, syn::Error> {
     let mut field = None;
     let mut serialize_with = None;
     let mut deserialize_with = None;
+    let mut field_type = None;
+
     for attr in attrs {
         if !attr.path().is_ident("deb822") {
             continue;
         }
-        let name_values: syn::punctuated::Punctuated<syn::MetaNameValue, syn::Token![,]> =
-            attr.parse_args_with(syn::punctuated::Punctuated::parse_terminated)?;
-        for nv in name_values {
-            if nv.path.is_ident("field") {
-                if let syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(s),
-                    ..
-                }) = nv.value
-                {
-                    field = Some(s.value());
-                } else {
-                    return Err(syn::Error::new(
-                        nv.value.span(),
-                        "expected string literal in deb822 attribute",
+
+        // Parse the attribute arguments
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("field") {
+                let value = meta.value()?;
+                let s: syn::LitStr = value.parse()?;
+                field = Some(s.value());
+                Ok(())
+            } else if meta.path.is_ident("serialize_with") {
+                let value = meta.value()?;
+                let path: syn::ExprPath = value.parse()?;
+                serialize_with = Some(path);
+                Ok(())
+            } else if meta.path.is_ident("deserialize_with") {
+                let value = meta.value()?;
+                let path: syn::ExprPath = value.parse()?;
+                deserialize_with = Some(path);
+                Ok(())
+            } else if meta.path.is_ident("folded") {
+                if field_type.is_some() {
+                    return Err(meta.error(
+                        "only one of 'folded', 'single_line', or 'multi_line' can be specified",
                     ));
                 }
-            } else if nv.path.is_ident("serialize_with") {
-                if let syn::Expr::Path(s) = nv.value {
-                    serialize_with = Some(s);
-                } else {
-                    return Err(syn::Error::new(
-                        nv.value.span(),
-                        "expected path in deb822 attribute",
+                field_type = Some(FieldType::Folded);
+                Ok(())
+            } else if meta.path.is_ident("single_line") {
+                if field_type.is_some() {
+                    return Err(meta.error(
+                        "only one of 'folded', 'single_line', or 'multi_line' can be specified",
                     ));
                 }
-            } else if nv.path.is_ident("deserialize_with") {
-                if let syn::Expr::Path(s) = nv.value {
-                    deserialize_with = Some(s);
-                } else {
-                    return Err(syn::Error::new(
-                        nv.value.span(),
-                        "expected path in deb822 attribute",
+                field_type = Some(FieldType::SingleLine);
+                Ok(())
+            } else if meta.path.is_ident("multi_line") {
+                if field_type.is_some() {
+                    return Err(meta.error(
+                        "only one of 'folded', 'single_line', or 'multi_line' can be specified",
                     ));
                 }
+                field_type = Some(FieldType::MultiLine);
+                Ok(())
             } else {
-                return Err(syn::Error::new(
-                    nv.span(),
-                    format!("unsupported attribute: {}", nv.path.get_ident().unwrap()),
-                ));
+                Err(meta.error(format!(
+                    "unsupported attribute: {}",
+                    meta.path.get_ident().unwrap()
+                )))
             }
-        }
+        })?;
     }
+
     Ok(FieldAttributes {
         field,
         serialize_with,
         deserialize_with,
+        field_type,
     })
 }
 
@@ -227,32 +265,43 @@ pub fn derive_to_deb822(input: TokenStream) -> TokenStream {
             quote! { ToString::to_string }
         };
 
+        let field_type = attrs.field_type;
+        let format_value = apply_field_formatting(field_type, &key);
+
         let ty = &f.ty;
         let is_option = is_option(ty);
 
         to_fields.push(if is_option {
             quote! {
                 if let Some(v) = &self.#ident {
-                    fields.push((#key.to_string(), #serialize_with(&v)));
+                    let value = #serialize_with(&v);
+                    let formatted = #format_value;
+                    fields.push((#key.to_string(), formatted));
                 }
             }
         } else {
             quote! {
-                fields.push((#key.to_string(), #serialize_with(&self.#ident)));
+                let value = #serialize_with(&self.#ident);
+                let formatted = #format_value;
+                fields.push((#key.to_string(), formatted));
             }
         });
 
         update_fields.push(if is_option {
             quote! {
                 if let Some(v) = &self.#ident {
-                    para.set(#key, #serialize_with(&v).as_str());
+                    let value = #serialize_with(&v);
+                    let formatted = #format_value;
+                    para.set(#key, formatted.as_str());
                 } else {
                     para.remove(#key);
                 }
             }
         } else {
             quote! {
-                para.set(#key, #serialize_with(&self.#ident).as_str());
+                let value = #serialize_with(&self.#ident);
+                let formatted = #format_value;
+                para.set(#key, formatted.as_str());
             }
         });
     }
