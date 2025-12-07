@@ -400,6 +400,7 @@ impl Header {
     }
 
     /// Return the underlying Deb822 paragraph, mutably
+    #[deprecated = "Use as_deb822 instead"]
     pub fn as_mut_deb822(&mut self) -> &mut Paragraph {
         &mut self.0
     }
@@ -481,6 +482,11 @@ impl Header {
 pub struct FilesParagraph(Paragraph);
 
 impl FilesParagraph {
+    /// Return the underlying Deb822 paragraph
+    pub fn as_deb822(&self) -> &Paragraph {
+        &self.0
+    }
+
     /// List of file patterns in the paragraph
     pub fn files(&self) -> Vec<String> {
         self.0
@@ -608,6 +614,11 @@ impl From<LicenseParagraph> for License {
 }
 
 impl LicenseParagraph {
+    /// Return the underlying Deb822 paragraph
+    pub fn as_deb822(&self) -> &Paragraph {
+        &self.0
+    }
+
     /// Comment associated with the license
     pub fn comment(&self) -> Option<String> {
         self.0.get("Comment")
@@ -1479,5 +1490,43 @@ License: Apache-2.0
         let result = copyright.to_string();
         let expected = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\nLicense: Apache-2.0\n Licensed under the Apache License, Version 2.0\n";
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_header_as_deb822() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: foo
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let header = copyright.header().unwrap();
+        let para = header.as_deb822();
+        assert_eq!(para.get("Upstream-Name"), Some("foo".to_string()));
+    }
+
+    #[test]
+    fn test_files_paragraph_as_deb822() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: *
+Copyright: 2024 Test
+License: MIT
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let files = copyright.iter_files().next().unwrap();
+        let para = files.as_deb822();
+        assert_eq!(para.get("Files"), Some("*".to_string()));
+    }
+
+    #[test]
+    fn test_license_paragraph_as_deb822() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ License text
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let license = copyright.iter_licenses().next().unwrap();
+        let para = license.as_deb822();
+        assert!(para.get("License").unwrap().starts_with("GPL-3+"));
     }
 }
