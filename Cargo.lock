@@ -443,7 +443,7 @@ dependencies = [
 
 [[package]]
 name = "debian-copyright"
-version = "0.1.38"
+version = "0.1.39"
 dependencies = [
  "deb822-fast",
  "deb822-lossless",
