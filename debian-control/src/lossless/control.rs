@@ -1318,8 +1318,7 @@ impl Binary {
 
     /// Binary package description
     pub fn description(&self) -> Option<String> {
-        self.paragraph
-            .get_with_indent("Description", &deb822_lossless::IndentPattern::Fixed(1))
+        self.paragraph.get_multiline("Description")
     }
 
     /// Set the binary package description

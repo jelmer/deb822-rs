@@ -1484,6 +1484,70 @@ impl Paragraph {
             })
     }
 
+    /// Get a multi-line field value with single-space indentation stripped.
+    ///
+    /// This is a convenience wrapper around `get_with_indent()` that uses
+    /// `IndentPattern::Fixed(1)`, which is the standard indentation for
+    /// multi-line fields in Debian control files.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The field name (case-insensitive)
+    ///
+    /// # Returns
+    ///
+    /// The field value with single-space indentation stripped from continuation lines,
+    /// or `None` if the field doesn't exist.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    ///
+    /// let text = "Description: Short description\n Additional line\n";
+    /// let deb822 = Deb822::parse(text).tree();
+    /// let para = deb822.paragraphs().next().unwrap();
+    /// let value = para.get_multiline("Description").unwrap();
+    /// assert_eq!(value, "Short description\nAdditional line");
+    /// ```
+    pub fn get_multiline(&self, key: &str) -> Option<String> {
+        self.get_with_indent(key, &IndentPattern::Fixed(1))
+    }
+
+    /// Set a multi-line field value with single-space indentation.
+    ///
+    /// This is a convenience wrapper around `try_set_with_forced_indent()` that uses
+    /// `IndentPattern::Fixed(1)`, which is the standard indentation for
+    /// multi-line fields in Debian control files.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The field name
+    /// * `value` - The field value (will be formatted with single-space indentation)
+    /// * `field_order` - Optional field ordering specification
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if successful, or an `Error` if the value is invalid.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use deb822_lossless::Paragraph;
+    ///
+    /// let mut para = Paragraph::new();
+    /// para.set_multiline("Description", "Short description\nAdditional line", None).unwrap();
+    /// assert_eq!(para.get_multiline("Description").unwrap(), "Short description\nAdditional line");
+    /// ```
+    pub fn set_multiline(
+        &mut self,
+        key: &str,
+        value: &str,
+        field_order: Option<&[&str]>,
+    ) -> Result<(), Error> {
+        self.try_set_with_forced_indent(key, value, &IndentPattern::Fixed(1), field_order)
+    }
+
     /// Returns whether the paragraph contains the given key.
     pub fn contains_key(&self, key: &str) -> bool {
         self.get(key).is_some()

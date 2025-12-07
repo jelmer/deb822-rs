@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "deb822-lossless"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "criterion",
  "deb822-fast",
