@@ -15,3 +15,8 @@ deb822-derive = { path = "../deb822-derive", version = "^0.3", optional = true }
 
 [features]
 derive = ["dep:deb822-derive"]
+
+[[test]]
+path = "tests/field_formatting.rs"
+name = "field_formatting"
+required-features = ["derive"]
