@@ -763,7 +763,8 @@ impl Package {
 
     /// Get the description of the package.
     pub fn description(&self) -> Option<String> {
-        self.0.get("Description").map(|s| s.to_string())
+        self.0
+            .get_with_indent("Description", &deb822_lossless::IndentPattern::Fixed(1))
     }
 
     /// Set the description of the package.
@@ -1118,7 +1119,8 @@ impl Release {
 
     /// Get the description
     pub fn description(&self) -> Option<String> {
-        self.0.get("Description").map(|s| s.to_string())
+        self.0
+            .get_with_indent("Description", &deb822_lossless::IndentPattern::Fixed(1))
     }
 
     /// Set the description

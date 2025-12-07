@@ -161,7 +161,8 @@ impl Changes {
 
     /// Returns the description of the source package.
     pub fn description(&self) -> Option<String> {
-        self.0.get("Description").map(|s| s.to_string())
+        self.0
+            .get_with_indent("Description", &deb822_lossless::IndentPattern::Fixed(1))
     }
 
     /// Returns the SHA-1 checksums of the files in the source package.

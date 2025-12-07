@@ -1413,6 +1413,77 @@ impl Paragraph {
             .map(|e| e.value())
     }
 
+    /// Returns the value of the given key with a specific indentation pattern applied.
+    ///
+    /// This returns the field value reformatted as if it were written with the specified
+    /// indentation pattern. For single-line values, this is the same as `get()`.
+    /// For multi-line values, the continuation lines are prefixed with indentation
+    /// calculated from the indent pattern.
+    ///
+    /// Field names are compared case-insensitively.
+    ///
+    /// # Arguments
+    /// * `key` - The field name to retrieve
+    /// * `indent_pattern` - The indentation pattern to apply
+    ///
+    /// # Example
+    /// ```
+    /// use deb822_lossless::{Deb822, IndentPattern};
+    /// use std::str::FromStr;
+    ///
+    /// let input = "Field: First\n   Second\n   Third\n";
+    /// let deb = Deb822::from_str(input).unwrap();
+    /// let para = deb.paragraphs().next().unwrap();
+    ///
+    /// // Get with fixed 2-space indentation - strips 2 spaces from each line
+    /// let value = para.get_with_indent("Field", &IndentPattern::Fixed(2)).unwrap();
+    /// assert_eq!(value, "First\n Second\n Third");
+    /// ```
+    pub fn get_with_indent(&self, key: &str, indent_pattern: &IndentPattern) -> Option<String> {
+        use crate::lex::SyntaxKind::{INDENT, VALUE};
+
+        self.entries()
+            .find(|e| {
+                e.key()
+                    .as_deref()
+                    .is_some_and(|k| k.eq_ignore_ascii_case(key))
+            })
+            .and_then(|e| {
+                let field_key = e.key()?;
+                let expected_indent = indent_pattern.to_string(&field_key);
+                let expected_len = expected_indent.len();
+
+                let mut result = String::new();
+                let mut first = true;
+                let mut last_indent: Option<String> = None;
+
+                for token in e.0.children_with_tokens().filter_map(|it| it.into_token()) {
+                    match token.kind() {
+                        INDENT => {
+                            last_indent = Some(token.text().to_string());
+                        }
+                        VALUE => {
+                            if !first {
+                                result.push('\n');
+                                // Add any indentation beyond the expected amount
+                                if let Some(ref indent_text) = last_indent {
+                                    if indent_text.len() > expected_len {
+                                        result.push_str(&indent_text[expected_len..]);
+                                    }
+                                }
+                            }
+                            result.push_str(token.text());
+                            first = false;
+                            last_indent = None;
+                        }
+                        _ => {}
+                    }
+                }
+
+                Some(result)
+            })
+    }
+
     /// Returns whether the paragraph contains the given key.
     pub fn contains_key(&self, key: &str) -> bool {
         self.get(key).is_some()
@@ -3224,6 +3295,83 @@ Maintainer: Bar Foo <bar@example.com>"#
         assert_eq!(
             p.get_all("Maintainer").collect::<Vec<_>>(),
             vec!["Foo Bar <foo@example.com>", "Bar Foo <bar@example.com>"]
+        );
+    }
+
+    #[test]
+    fn test_get_with_indent_single_line() {
+        let input = "Field: single line value\n";
+        let deb = super::Deb822::from_str(input).unwrap();
+        let para = deb.paragraphs().next().unwrap();
+
+        // Single-line values should be unchanged regardless of indent pattern
+        assert_eq!(
+            para.get_with_indent("Field", &super::IndentPattern::Fixed(2)),
+            Some("single line value".to_string())
+        );
+        assert_eq!(
+            para.get_with_indent("Field", &super::IndentPattern::FieldNameLength),
+            Some("single line value".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_with_indent_fixed() {
+        let input = "Field: First\n   Second\n   Third\n";
+        let deb = super::Deb822::from_str(input).unwrap();
+        let para = deb.paragraphs().next().unwrap();
+
+        // Get with fixed 2-space indentation - strips 2 spaces, leaves 1
+        let value = para
+            .get_with_indent("Field", &super::IndentPattern::Fixed(2))
+            .unwrap();
+        assert_eq!(value, "First\n Second\n Third");
+
+        // Get with fixed 1-space indentation - strips 1 space, leaves 2
+        let value = para
+            .get_with_indent("Field", &super::IndentPattern::Fixed(1))
+            .unwrap();
+        assert_eq!(value, "First\n  Second\n  Third");
+
+        // Get with fixed 3-space indentation - strips all 3 spaces
+        let value = para
+            .get_with_indent("Field", &super::IndentPattern::Fixed(3))
+            .unwrap();
+        assert_eq!(value, "First\nSecond\nThird");
+    }
+
+    #[test]
+    fn test_get_with_indent_field_name_length() {
+        let input = "Description: First line\n             Second line\n             Third line\n";
+        let deb = super::Deb822::from_str(input).unwrap();
+        let para = deb.paragraphs().next().unwrap();
+
+        // Get with FieldNameLength pattern
+        // "Description: " is 13 characters, so strips 13 spaces, leaves 0
+        let value = para
+            .get_with_indent("Description", &super::IndentPattern::FieldNameLength)
+            .unwrap();
+        assert_eq!(value, "First line\nSecond line\nThird line");
+
+        // Get with fixed 2-space indentation - strips 2, leaves 11
+        let value = para
+            .get_with_indent("Description", &super::IndentPattern::Fixed(2))
+            .unwrap();
+        assert_eq!(
+            value,
+            "First line\n           Second line\n           Third line"
+        );
+    }
+
+    #[test]
+    fn test_get_with_indent_nonexistent() {
+        let input = "Field: value\n";
+        let deb = super::Deb822::from_str(input).unwrap();
+        let para = deb.paragraphs().next().unwrap();
+
+        assert_eq!(
+            para.get_with_indent("NonExistent", &super::IndentPattern::Fixed(2)),
+            None
         );
     }
 
