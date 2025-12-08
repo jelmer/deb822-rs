@@ -167,6 +167,16 @@ impl Paragraph {
         None
     }
 
+    /// Get a field by name.
+    ///
+    /// Field names are compared case-insensitively.
+    /// Returns `None` if the field does not exist.
+    pub fn get_entry(&self, name: &str) -> Option<&Field> {
+        self.fields
+            .iter()
+            .find(|field| field.name.eq_ignore_ascii_case(name))
+    }
+
     /// Check if the paragraph is empty.
     pub fn is_empty(&self) -> bool {
         self.fields.is_empty()
@@ -1342,5 +1352,36 @@ Version: 1.0
         para.set("package", "updated");
         assert_eq!(para.fields[0].name, "Package");
         assert_eq!(para.fields[0].value, "updated");
+    }
+
+    #[test]
+    fn test_get_entry() {
+        let para = Paragraph {
+            fields: vec![
+                Field {
+                    name: "Package".to_string(),
+                    value: "test".to_string(),
+                },
+                Field {
+                    name: "Version".to_string(),
+                    value: "1.0".to_string(),
+                },
+            ],
+        };
+
+        // Test getting existing field
+        let field = para.get_entry("Package");
+        assert!(field.is_some());
+        let field = field.unwrap();
+        assert_eq!(field.name, "Package");
+        assert_eq!(field.value, "test");
+
+        // Test case-insensitive lookup
+        let field = para.get_entry("package");
+        assert!(field.is_some());
+        assert_eq!(field.unwrap().value, "test");
+
+        // Test non-existent field
+        assert_eq!(para.get_entry("NonExistent"), None);
     }
 }
