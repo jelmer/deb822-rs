@@ -1401,6 +1401,17 @@ impl Paragraph {
             .map(|e| e.value())
     }
 
+    /// Returns the entry for the given key in the paragraph.
+    ///
+    /// Field names are compared case-insensitively.
+    pub fn get_entry(&self, key: &str) -> Option<Entry> {
+        self.entries().find(|e| {
+            e.key()
+                .as_deref()
+                .is_some_and(|k| k.eq_ignore_ascii_case(key))
+        })
+    }
+
     /// Returns the value of the given key with a specific indentation pattern applied.
     ///
     /// This returns the field value reformatted as if it were written with the specified
@@ -3436,6 +3447,40 @@ Maintainer: Bar Foo <bar@example.com>"#
             para.get_with_indent("NonExistent", &super::IndentPattern::Fixed(2)),
             None
         );
+    }
+
+    #[test]
+    fn test_get_entry() {
+        let input = r#"Package: test-package
+Maintainer: Test User <test@example.com>
+Description: A simple test package
+ with multiple lines
+"#;
+        let deb = super::Deb822::from_str(input).unwrap();
+        let para = deb.paragraphs().next().unwrap();
+
+        // Test getting existing entry
+        let entry = para.get_entry("Package");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.key(), Some("Package".to_string()));
+        assert_eq!(entry.value(), "test-package");
+
+        // Test case-insensitive lookup
+        let entry = para.get_entry("package");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().value(), "test-package");
+
+        // Test multi-line value
+        let entry = para.get_entry("Description");
+        assert!(entry.is_some());
+        assert_eq!(
+            entry.unwrap().value(),
+            "A simple test package\nwith multiple lines"
+        );
+
+        // Test non-existent field
+        assert_eq!(para.get_entry("NonExistent"), None);
     }
 
     #[test]
