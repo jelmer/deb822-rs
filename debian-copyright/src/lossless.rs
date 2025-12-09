@@ -117,7 +117,7 @@ const LICENSE_FIELD_ORDER: &[&str] = &["License", "Comment"];
 const FILES_SEPARATOR: &str = " ";
 
 /// A copyright file
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Copyright(Deb822);
 
 impl Copyright {

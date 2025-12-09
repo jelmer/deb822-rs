@@ -20,7 +20,7 @@ fn serialize_yesno(b: &bool) -> String {
 }
 
 /// The source package.
-#[derive(FromDeb822, ToDeb822, Default)]
+#[derive(FromDeb822, ToDeb822, Default, Clone, PartialEq)]
 pub struct Source {
     #[deb822(field = "Source")]
     /// The name of the source package.
@@ -87,7 +87,7 @@ impl std::fmt::Display for Source {
 }
 
 /// A binary package.
-#[derive(FromDeb822, ToDeb822, Default)]
+#[derive(FromDeb822, ToDeb822, Default, Clone, PartialEq)]
 pub struct Binary {
     #[deb822(field = "Package")]
     /// The name of the package.
@@ -151,6 +151,7 @@ impl std::fmt::Display for Binary {
 }
 
 /// A control file.
+#[derive(Clone, PartialEq)]
 pub struct Control {
     /// The source package.
     pub source: Source,

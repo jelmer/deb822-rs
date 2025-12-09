@@ -389,7 +389,7 @@ impl FromStr for Urgency {
 }
 
 /// Multi-arch policy
-#[derive(PartialEq, Eq, Debug, Default)]
+#[derive(PartialEq, Eq, Debug, Default, Clone)]
 pub enum MultiArch {
     /// Indicates that the package is identical across all architectures. The package can satisfy dependencies for other architectures.
     Same,
