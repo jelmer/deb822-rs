@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "debian-control"
-version = "0.2.12"
+version = "0.2.13"
 dependencies = [
  "chrono",
  "deb822-fast",
@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "debian-copyright"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "deb822-fast",
  "deb822-lossless",
