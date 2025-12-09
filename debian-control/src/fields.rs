@@ -20,6 +20,13 @@ pub enum Priority {
     Extra,
 
     /// Source
+    ///
+    /// Note: This priority is not officially documented in Debian policy,
+    /// but is commonly used to indicate source packages.
+    ///
+    /// While packages generally follow the priority values defined in policy, for source packages
+    /// the archive-management software (such as dak, the
+    /// Debian Archive Kit) may set "Priority: source".
     Source,
 }
 
