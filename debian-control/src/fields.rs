@@ -18,6 +18,9 @@ pub enum Priority {
 
     /// Extra
     Extra,
+
+    /// Source
+    Source,
 }
 
 impl std::fmt::Display for Priority {
@@ -28,6 +31,7 @@ impl std::fmt::Display for Priority {
             Priority::Standard => "standard",
             Priority::Optional => "optional",
             Priority::Extra => "extra",
+            Priority::Source => "source",
         })
     }
 }
@@ -42,6 +46,7 @@ impl std::str::FromStr for Priority {
             "standard" => Ok(Priority::Standard),
             "optional" => Ok(Priority::Optional),
             "extra" => Ok(Priority::Extra),
+            "source" => Ok(Priority::Source),
             _ => Err(format!("Invalid priority: {}", s)),
         }
     }
