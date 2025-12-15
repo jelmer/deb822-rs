@@ -813,7 +813,12 @@ impl Relations {
         let num_entries = entries.len();
 
         if num_entries == 0 {
-            return String::from(""); // Empty list - first entry gets no prefix
+            // Check if there are any substvars
+            if self.substvars().next().is_some() {
+                // Has substvars but no entries - use default spacing
+                return default.to_string();
+            }
+            return String::from(""); // Truly empty - first entry gets no prefix
         }
 
         if num_entries == 1 {
@@ -3894,6 +3899,16 @@ Description: test
         relations.ensure_substvar("${misc:Depends}").unwrap();
         // Should preserve the double-space pattern
         assert_eq!(relations.to_string(), "python3,  rustc,  ${misc:Depends}");
+    }
+
+    #[test]
+    fn test_ensure_substvar_to_existing_substvar() {
+        // Test adding a substvar to existing substvar (no entries)
+        // This reproduces the bug where space after comma is lost
+        let (mut relations, _) = Relations::parse_relaxed("${shlibs:Depends}", true);
+        relations.ensure_substvar("${misc:Depends}").unwrap();
+        // Should have a space after the comma
+        assert_eq!(relations.to_string(), "${shlibs:Depends}, ${misc:Depends}");
     }
 
     #[test]
