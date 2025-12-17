@@ -527,7 +527,7 @@ impl std::str::FromStr for SourceRelation {
         };
 
         let mut version_str = "".to_string();
-        while let Some((token, value)) = tokens.next() {
+        for (token, value) in tokens.by_ref() {
             if token != R_PARENS {
                 version_str.push_str(&value);
             } else {
