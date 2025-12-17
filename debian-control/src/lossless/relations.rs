@@ -1241,6 +1241,72 @@ impl Relations {
         self.push(Entry::from(relation));
     }
 
+    /// Ensure that a relation exists in the dependencies.
+    ///
+    /// This function checks if the provided entry is already satisfied by an
+    /// existing entry. If it is, no changes are made. If an existing entry is
+    /// weaker than the new entry (i.e., the new entry implies the existing one),
+    /// the existing entry is replaced with the new one. Otherwise, the new entry
+    /// is added.
+    ///
+    /// # Arguments
+    /// * `new_entry` - The entry to ensure exists
+    ///
+    /// # Returns
+    /// `true` if the entry was added or replaced, `false` if it was already satisfied
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::{Relations, Entry};
+    ///
+    /// let mut relations: Relations = "python3".parse().unwrap();
+    /// let new_entry: Entry = "debhelper (>= 12)".parse().unwrap();
+    /// let added = relations.ensure_relation(new_entry);
+    /// assert!(added);
+    /// assert!(relations.to_string().contains("debhelper (>= 12)"));
+    /// ```
+    pub fn ensure_relation(&mut self, new_entry: Entry) -> bool {
+        let mut to_replace: Vec<usize> = Vec::new();
+        let mut to_remove: Vec<usize> = Vec::new();
+        let mut already_satisfied = false;
+
+        // Check existing entries
+        for (idx, existing_entry) in self.entries().enumerate() {
+            if new_entry.is_implied_by(&existing_entry) {
+                // The new entry is already satisfied by an existing entry
+                already_satisfied = true;
+                break;
+            }
+            if existing_entry.is_implied_by(&new_entry) {
+                // The new entry implies the existing one (is stronger)
+                // We should replace/remove the weaker existing entry
+                if to_replace.is_empty() {
+                    to_replace.push(idx);
+                } else {
+                    to_remove.push(idx);
+                }
+            }
+        }
+
+        if already_satisfied {
+            return false;
+        }
+
+        // Remove weaker entries in reverse order
+        for idx in to_remove.into_iter().rev() {
+            self.remove_entry(idx);
+        }
+
+        // Replace or add the entry
+        if let Some(&idx) = to_replace.first() {
+            self.replace(idx, new_entry);
+        } else {
+            self.add_dependency(new_entry, None);
+        }
+
+        true
+    }
+
     /// Ensure that a substitution variable is present in the relations.
     ///
     /// If the substvar already exists, it is left unchanged. Otherwise, it is added
@@ -4693,5 +4759,146 @@ Description: test
             relation.version(),
             Some((VersionConstraint::LessThan, "1:2.3.2-2~".parse().unwrap()))
         );
+    }
+
+    #[test]
+    fn test_ensure_relation_add_new() {
+        // Test adding a new relation that doesn't exist yet
+        let mut relations: Relations = "python3".parse().unwrap();
+        let new_entry: Entry = "debhelper (>= 12)".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(added);
+        // debhelper is inserted in sorted position (alphabetically before python3)
+        assert_eq!(relations.to_string(), "debhelper (>= 12), python3");
+    }
+
+    #[test]
+    fn test_ensure_relation_already_satisfied() {
+        // Test that a relation is not added if it's already satisfied by a stronger constraint
+        let mut relations: Relations = "debhelper (>= 13)".parse().unwrap();
+        let new_entry: Entry = "debhelper (>= 12)".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(!added);
+        assert_eq!(relations.to_string(), "debhelper (>= 13)");
+    }
+
+    #[test]
+    fn test_ensure_relation_replace_weaker() {
+        // Test that a weaker relation is replaced with a stronger one
+        let mut relations: Relations = "debhelper (>= 11)".parse().unwrap();
+        let new_entry: Entry = "debhelper (>= 13)".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(added);
+        assert_eq!(relations.to_string(), "debhelper (>= 13)");
+    }
+
+    #[test]
+    fn test_ensure_relation_replace_multiple_weaker() {
+        // Test that multiple weaker relations are replaced/removed when a stronger one is added
+        let mut relations: Relations = "debhelper (>= 11), debhelper (>= 10), python3"
+            .parse()
+            .unwrap();
+        let new_entry: Entry = "debhelper (>= 13)".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(added);
+        assert_eq!(relations.to_string(), "debhelper (>= 13), python3");
+    }
+
+    #[test]
+    fn test_ensure_relation_identical_entry() {
+        // Test that an identical entry is not added again
+        let mut relations: Relations = "debhelper (>= 12)".parse().unwrap();
+        let new_entry: Entry = "debhelper (>= 12)".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(!added);
+        assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_relation_no_version_constraint() {
+        // Test that a relation without version constraint is added
+        let mut relations: Relations = "python3".parse().unwrap();
+        let new_entry: Entry = "debhelper".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(added);
+        // debhelper is inserted in sorted position (alphabetically before python3)
+        assert_eq!(relations.to_string(), "debhelper, python3");
+    }
+
+    #[test]
+    fn test_ensure_relation_strengthen_unversioned() {
+        // Test that a versioned constraint replaces an unversioned one
+        // An unversioned dependency is weaker than a versioned one
+        let mut relations: Relations = "debhelper".parse().unwrap();
+        let new_entry: Entry = "debhelper (>= 12)".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(added);
+        assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_relation_versioned_implies_unversioned() {
+        // Test that an unversioned dependency is already satisfied by a versioned one
+        // A versioned dependency is stronger and implies the unversioned one
+        let mut relations: Relations = "debhelper (>= 12)".parse().unwrap();
+        let new_entry: Entry = "debhelper".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(!added);
+        assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_relation_preserves_whitespace() {
+        // Test that whitespace is preserved when adding a new relation
+        let mut relations: Relations = "python3,  rustc".parse().unwrap();
+        let new_entry: Entry = "debhelper (>= 12)".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(added);
+        // debhelper is inserted in sorted position (alphabetically before python3 and rustc)
+        assert_eq!(relations.to_string(), "debhelper (>= 12),  python3,  rustc");
+    }
+
+    #[test]
+    fn test_ensure_relation_empty_relations() {
+        // Test adding to empty relations
+        let mut relations: Relations = Relations::new();
+        let new_entry: Entry = "debhelper (>= 12)".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(added);
+        assert_eq!(relations.to_string(), "debhelper (>= 12)");
+    }
+
+    #[test]
+    fn test_ensure_relation_alternative_dependencies() {
+        // Test with alternative dependencies (|)
+        let mut relations: Relations = "python3 | python3-minimal".parse().unwrap();
+        let new_entry: Entry = "debhelper (>= 12)".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(added);
+        // debhelper is inserted in sorted position (alphabetically before python3)
+        assert_eq!(
+            relations.to_string(),
+            "debhelper (>= 12), python3 | python3-minimal"
+        );
+    }
+
+    #[test]
+    fn test_ensure_relation_replace_in_middle() {
+        // Test that replacing a weaker entry in the middle preserves order
+        let mut relations: Relations = "python3, debhelper (>= 11), rustc".parse().unwrap();
+        let new_entry: Entry = "debhelper (>= 13)".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(added);
+        assert_eq!(relations.to_string(), "python3, debhelper (>= 13), rustc");
+    }
+
+    #[test]
+    fn test_ensure_relation_with_different_package() {
+        // Test that adding a different package doesn't affect existing ones
+        let mut relations: Relations = "python3, debhelper (>= 12)".parse().unwrap();
+        let new_entry: Entry = "rustc".parse().unwrap();
+        let added = relations.ensure_relation(new_entry);
+        assert!(added);
+        assert_eq!(relations.to_string(), "python3, debhelper (>= 12), rustc");
     }
 }
