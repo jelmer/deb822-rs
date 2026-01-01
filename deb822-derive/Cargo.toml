@@ -14,7 +14,7 @@ categories = ["parser-implementations"]
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1.0.101"
+proc-macro2 = "1.0.104"
 quote = "1.0.41"
 syn = { version = "2", features = ["parsing"] }
 
