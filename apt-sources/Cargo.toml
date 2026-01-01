@@ -23,7 +23,7 @@ tracing = ["dep:tracing"]
 [dependencies]
 deb822-fast = { version = ">=0.1, <0.3", path = "../deb822-fast", features = ["derive"] }
 url = { version = "2.5.4", features = ["serde"] }
-url-macro = { version = "0.2.0" }
+url-macro = { version = "0.2.3" }
 tracing = { version = "0.1", optional = true }
 sequoia-net = { version = "0.30", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt", "macros"], optional = true }
