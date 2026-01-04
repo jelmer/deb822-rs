@@ -87,6 +87,7 @@ pub const BINARY_FIELD_ORDER: &[&str] = &[
     "Essential",
     "Build-Profiles",
     "Built-Using",
+    "Static-Built-Using",
     "Pre-Depends",
     "Depends",
     "Recommends",
@@ -914,7 +915,7 @@ impl<'py> pyo3::IntoPyObject<'py> for Source {
 }
 
 #[cfg(feature = "python-debian")]
-impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Source {
+impl<'py> pyo3::IntoPyObject<'py> for &Source {
     type Target = pyo3::PyAny;
     type Output = pyo3::Bound<'py, Self::Target>;
     type Error = pyo3::PyErr;
@@ -995,7 +996,7 @@ impl<'py> pyo3::IntoPyObject<'py> for Binary {
 }
 
 #[cfg(feature = "python-debian")]
-impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Binary {
+impl<'py> pyo3::IntoPyObject<'py> for &Binary {
     type Target = pyo3::PyAny;
     type Output = pyo3::Bound<'py, Self::Target>;
     type Error = pyo3::PyErr;
@@ -1282,6 +1283,25 @@ impl Binary {
             self.set("Built-Using", built_using.to_string().as_str());
         } else {
             self.paragraph.remove("Built-Using");
+        }
+    }
+
+    /// Return the Static-Built-Using field
+    pub fn static_built_using(&self) -> Option<Relations> {
+        self.paragraph
+            .get("Static-Built-Using")
+            .map(|s| self.parse_relations(&s))
+    }
+
+    /// Set the Static-Built-Using field
+    pub fn set_static_built_using(&mut self, static_built_using: Option<&Relations>) {
+        if let Some(static_built_using) = static_built_using {
+            self.set(
+                "Static-Built-Using",
+                static_built_using.to_string().as_str(),
+            );
+        } else {
+            self.paragraph.remove("Static-Built-Using");
         }
     }
 

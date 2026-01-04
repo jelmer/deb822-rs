@@ -27,7 +27,7 @@ impl<'py> pyo3::IntoPyObject<'py> for Source {
 }
 
 #[cfg(feature = "python-debian")]
-impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Source {
+impl<'py> pyo3::IntoPyObject<'py> for &Source {
     type Target = pyo3::PyAny;
     type Output = pyo3::Bound<'py, Self::Target>;
     type Error = pyo3::PyErr;
@@ -548,7 +548,7 @@ impl<'py> pyo3::IntoPyObject<'py> for Package {
 }
 
 #[cfg(feature = "python-debian")]
-impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Package {
+impl<'py> pyo3::IntoPyObject<'py> for &Package {
     type Target = pyo3::PyAny;
     type Output = pyo3::Bound<'py, Self::Target>;
     type Error = pyo3::PyErr;
@@ -915,7 +915,7 @@ impl<'py> pyo3::IntoPyObject<'py> for Release {
 }
 
 #[cfg(feature = "python-debian")]
-impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Release {
+impl<'py> pyo3::IntoPyObject<'py> for &Release {
     type Target = pyo3::PyAny;
     type Output = pyo3::Bound<'py, Self::Target>;
     type Error = pyo3::PyErr;

@@ -2,7 +2,7 @@
 
 use deb822_fast::{FromDeb822, FromDeb822Paragraph, ToDeb822};
 
-fn serialize_list(list: &Vec<String>) -> String {
+fn serialize_list(list: &[String]) -> String {
     list.join("\n")
 }
 

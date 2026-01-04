@@ -2107,7 +2107,7 @@ impl<'py> pyo3::IntoPyObject<'py> for Paragraph {
 }
 
 #[cfg(feature = "python-debian")]
-impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Paragraph {
+impl<'py> pyo3::IntoPyObject<'py> for &Paragraph {
     type Target = pyo3::PyAny;
     type Output = pyo3::Bound<'py, Self::Target>;
     type Error = pyo3::PyErr;

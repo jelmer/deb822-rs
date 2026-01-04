@@ -294,7 +294,7 @@ impl<'py> pyo3::IntoPyObject<'py> for Changes {
 }
 
 #[cfg(feature = "python-debian")]
-impl<'a, 'py> pyo3::IntoPyObject<'py> for &'a Changes {
+impl<'py> pyo3::IntoPyObject<'py> for &Changes {
     type Target = pyo3::PyAny;
     type Output = pyo3::Bound<'py, Self::Target>;
     type Error = pyo3::PyErr;

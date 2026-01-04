@@ -122,6 +122,9 @@ pub struct Binary {
     #[deb822(field = "Built-Using")]
     /// The packages that this package is built using.
     pub built_using: Option<Relations>,
+    #[deb822(field = "Static-Built-Using")]
+    /// The packages that this package is statically built using.
+    pub static_built_using: Option<Relations>,
     #[deb822(field = "Architecture")]
     /// The architecture the package is built for.
     pub architecture: Option<String>,
