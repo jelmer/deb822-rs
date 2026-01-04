@@ -300,6 +300,10 @@ pub struct Package {
     #[deb822(field = "Built-Using")]
     pub built_using: Option<Relations>,
 
+    /// Static-Built-Using
+    #[deb822(field = "Static-Built-Using")]
+    pub static_built_using: Option<Relations>,
+
     /// Description
     #[deb822(field = "Description")]
     pub description: Option<String>,

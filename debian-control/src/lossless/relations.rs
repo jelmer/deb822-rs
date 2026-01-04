@@ -1777,24 +1777,7 @@ impl Default for Entry {
 
 impl PartialOrd for Entry {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        let mut rels_a = self.relations();
-        let mut rels_b = other.relations();
-        while let (Some(a), Some(b)) = (rels_a.next(), rels_b.next()) {
-            match a.cmp(&b) {
-                std::cmp::Ordering::Equal => continue,
-                x => return Some(x),
-            }
-        }
-
-        if rels_a.next().is_some() {
-            return Some(std::cmp::Ordering::Greater);
-        }
-
-        if rels_b.next().is_some() {
-            return Some(std::cmp::Ordering::Less);
-        }
-
-        Some(std::cmp::Ordering::Equal)
+        Some(self.cmp(other))
     }
 }
 
@@ -1802,7 +1785,24 @@ impl Eq for Entry {}
 
 impl Ord for Entry {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
+        let mut rels_a = self.relations();
+        let mut rels_b = other.relations();
+        while let (Some(a), Some(b)) = (rels_a.next(), rels_b.next()) {
+            match a.cmp(&b) {
+                std::cmp::Ordering::Equal => continue,
+                x => return x,
+            }
+        }
+
+        if rels_a.next().is_some() {
+            return std::cmp::Ordering::Greater;
+        }
+
+        if rels_b.next().is_some() {
+            return std::cmp::Ordering::Less;
+        }
+
+        std::cmp::Ordering::Equal
     }
 }
 
@@ -2959,10 +2959,18 @@ impl RelationBuilder {
 
 impl PartialOrd for Relation {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for Relation {}
+
+impl Ord for Relation {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Compare by name first, then by version
         let name_cmp = self.name().cmp(&other.name());
         if name_cmp != std::cmp::Ordering::Equal {
-            return Some(name_cmp);
+            return name_cmp;
         }
 
         let self_version = self.version();
@@ -2972,23 +2980,15 @@ impl PartialOrd for Relation {
             (Some((self_vc, self_version)), Some((other_vc, other_version))) => {
                 let vc_cmp = self_vc.cmp(&other_vc);
                 if vc_cmp != std::cmp::Ordering::Equal {
-                    return Some(vc_cmp);
+                    return vc_cmp;
                 }
 
-                Some(self_version.cmp(&other_version))
+                self_version.cmp(&other_version)
             }
-            (Some(_), None) => Some(std::cmp::Ordering::Greater),
-            (None, Some(_)) => Some(std::cmp::Ordering::Less),
-            (None, None) => Some(std::cmp::Ordering::Equal),
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (None, None) => std::cmp::Ordering::Equal,
         }
-    }
-}
-
-impl Eq for Relation {}
-
-impl Ord for Relation {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
     }
 }
 

@@ -107,6 +107,18 @@ impl<T> Parse<T> {
 unsafe impl<T> Send for Parse<T> {}
 unsafe impl<T> Sync for Parse<T> {}
 
+impl Parse<Deb822> {
+    /// Parse deb822 text, returning a Parse result
+    pub fn parse_deb822(text: &str) -> Self {
+        let parsed = crate::lossless::parse(text);
+        Parse::new_with_positioned_errors(
+            parsed.green_node,
+            parsed.errors,
+            parsed.positioned_errors,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,17 +170,5 @@ mod tests {
                 assert!(!error_text.is_empty());
             }
         }
-    }
-}
-
-impl Parse<Deb822> {
-    /// Parse deb822 text, returning a Parse result
-    pub fn parse_deb822(text: &str) -> Self {
-        let parsed = crate::lossless::parse(text);
-        Parse::new_with_positioned_errors(
-            parsed.green_node,
-            parsed.errors,
-            parsed.positioned_errors,
-        )
     }
 }
