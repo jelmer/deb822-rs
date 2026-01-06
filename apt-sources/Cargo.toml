@@ -19,6 +19,7 @@ lossless = []
 legacy = ["dep:regex"]
 key-management = ["dep:sequoia-openpgp", "dep:sequoia-net", "dep:tokio"]
 tracing = ["dep:tracing"]
+launchpad = ["dep:launchpadlib", "dep:reqwest", "dep:clap", "dep:env_logger", "dep:log"]
 
 [dependencies]
 deb822-fast = { version = ">=0.1, <0.3", path = "../deb822-fast", features = ["derive"] }
@@ -33,6 +34,16 @@ sequoia-openpgp = { version = "2.0", default-features = false, features = [
 ], optional = true }
 regex = { version = "1.11.1", optional = true }
 itertools = { version = "0.14.0" }
+launchpadlib = { version = "0.5.5", optional = true, default-features = false, features = ["blocking", "api-v1_0", "packages", "keyring"] }
+reqwest = { version = "0.12", features = ["blocking"], optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
+env_logger = { version = "0.11", optional = true }
+log = { version = "0.4", optional = true }
+
+[[bin]]
+name = "ppa-info"
+path = "src/bin/ppa-info.rs"
+required-features = ["launchpad"]
 
 [dev-dependencies]
 indoc = { version = "2.0.6" }

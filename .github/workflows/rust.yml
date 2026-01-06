@@ -24,16 +24,30 @@ jobs:
       - name: Install OpenSSL on macOS
         if: matrix.os == 'macos-latest'
         run: brew install openssl@3
-      - name: Install all-features
-        run: cargo install cargo-all-features
       - name: Format check
         run: cargo fmt --all -- --check
-      - name: Build
-        run: cargo build-all-features -- --workspace
+      - name: Build (no features)
+        run: cargo build --workspace --no-default-features
         env:
           RUSTFLAGS: -Dwarnings
-      - name: Run tests
-        run: cargo test-all-features -- --workspace
+      - name: Build (default features)
+        run: cargo build --workspace
+        env:
+          RUSTFLAGS: -Dwarnings
+      - name: Build (all features)
+        run: cargo build --workspace --all-features
+        env:
+          RUSTFLAGS: -Dwarnings
+      - name: Test (no features)
+        run: cargo test --workspace --no-default-features
+        env:
+          RUSTFLAGS: -Dwarnings
+      - name: Test (default features)
+        run: cargo test --workspace
+        env:
+          RUSTFLAGS: -Dwarnings
+      - name: Test (all features)
+        run: cargo test --workspace --all-features
         env:
           RUSTFLAGS: -Dwarnings
 
