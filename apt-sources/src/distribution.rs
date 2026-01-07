@@ -1,5 +1,4 @@
 use std::fs;
-use std::process::Command;
 
 /// Represents a Linux distribution
 #[derive(Debug, Clone, PartialEq)]
@@ -12,19 +11,31 @@ pub enum Distribution {
     Other(String),
 }
 
+impl std::fmt::Display for Distribution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Distribution::Ubuntu => write!(f, "Ubuntu"),
+            Distribution::Debian => write!(f, "Debian"),
+            Distribution::Other(name) => write!(f, "{}", name),
+        }
+    }
+}
+
 impl Distribution {
     /// Get the current system's distribution information
-    pub fn current() -> Result<Distribution, String> {
-        // First try lsb_release for distribution ID
-        let lsb_id = Command::new("lsb_release").args(["-i", "-s"]).output();
+    ///
+    /// Returns None if /etc/os-release is not present or cannot be parsed.
+    pub fn current() -> Option<Distribution> {
+        let content = fs::read_to_string("/etc/os-release").ok()?;
 
-        if let Ok(output) = lsb_id {
-            if output.status.success() {
-                let distro_id = String::from_utf8_lossy(&output.stdout)
-                    .trim()
+        for line in content.lines() {
+            if line.starts_with("ID=") {
+                let id = line
+                    .trim_start_matches("ID=")
+                    .trim_matches('"')
                     .to_lowercase();
 
-                return Ok(match distro_id.as_str() {
+                return Some(match id.as_str() {
                     "ubuntu" => Distribution::Ubuntu,
                     "debian" => Distribution::Debian,
                     other => Distribution::Other(other.to_owned()),
@@ -32,26 +43,7 @@ impl Distribution {
             }
         }
 
-        // Fall back to /etc/os-release if lsb_release fails
-        if let Ok(content) = fs::read_to_string("/etc/os-release") {
-            for line in content.lines() {
-                if line.starts_with("ID=") {
-                    let id = line
-                        .trim_start_matches("ID=")
-                        .trim_matches('"')
-                        .to_lowercase();
-
-                    return Ok(match id.as_str() {
-                        "ubuntu" => Distribution::Ubuntu,
-                        "debian" => Distribution::Debian,
-                        other => Distribution::Other(other.to_owned()),
-                    });
-                }
-            }
-        }
-
-        // If all else fails, assume Debian-based
-        Ok(Distribution::Other("unknown".to_owned()))
+        None
     }
 
     /// Get default components for this distribution
@@ -60,6 +52,18 @@ impl Distribution {
             Distribution::Ubuntu => vec!["main", "universe"],
             Distribution::Debian => vec!["main"],
             Distribution::Other(_) => vec!["main"],
+        }
+    }
+
+    /// Get the base name for the main sources file for this distribution
+    ///
+    /// For example, returns "ubuntu" for Ubuntu, "debian" for Debian.
+    /// This can be used to construct filenames like "ubuntu.sources".
+    pub fn sources_basename(&self) -> Option<&'static str> {
+        match self {
+            Distribution::Ubuntu => Some("ubuntu"),
+            Distribution::Debian => Some("debian"),
+            Distribution::Other(_) => None,
         }
     }
 
@@ -94,37 +98,25 @@ impl Distribution {
     }
 }
 
-/// Get system information (codename and architecture)
-pub fn get_system_info() -> Result<(String, String), String> {
-    // Get distribution codename
-    let lsb_release = Command::new("lsb_release")
-        .args(["-c", "-s"])
-        .output()
-        .map_err(|e| format!("Failed to run lsb_release: {e}"))?;
+/// Get system codename from /etc/os-release
+///
+/// Returns None if /etc/os-release is not present or doesn't contain VERSION_CODENAME.
+/// The architecture is always an empty string (APT will use the system's native architecture).
+pub fn get_system_info() -> Option<(String, String)> {
+    let content = fs::read_to_string("/etc/os-release").ok()?;
 
-    if !lsb_release.status.success() {
-        return Err("Failed to determine distribution codename".to_string());
-    }
+    let codename = content
+        .lines()
+        .find(|line| line.starts_with("VERSION_CODENAME="))
+        .map(|line| {
+            line.trim_start_matches("VERSION_CODENAME=")
+                .trim_matches('"')
+                .to_string()
+        })?;
 
-    let codename = String::from_utf8_lossy(&lsb_release.stdout)
-        .trim()
-        .to_string();
-
-    // Get architecture
-    let dpkg_arch = Command::new("dpkg")
-        .arg("--print-architecture")
-        .output()
-        .map_err(|e| format!("Failed to run dpkg: {e}"))?;
-
-    if !dpkg_arch.status.success() {
-        return Err("Failed to determine system architecture".to_string());
-    }
-
-    let arch = String::from_utf8_lossy(&dpkg_arch.stdout)
-        .trim()
-        .to_string();
-
-    Ok((codename, arch))
+    // Return empty string for architecture - APT will use the system's native architecture
+    // when the Architectures field is omitted from the sources file
+    Some((codename, String::new()))
 }
 
 #[cfg(test)]

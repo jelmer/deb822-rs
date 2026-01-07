@@ -311,6 +311,42 @@ impl From<LegacyRepositories> for super::Repositories {
     }
 }
 
+impl From<&super::Repository> for LegacyRepositories {
+    /// Convert a DEB822 Repository to legacy format lines.
+    /// Since a Repository can have multiple types/uris/suites, this may produce multiple lines.
+    fn from(repo: &super::Repository) -> Self {
+        let mut repos = Vec::new();
+
+        for typ in &repo.types {
+            for uri in &repo.uris {
+                for suite in &repo.suites {
+                    repos.push(LegacyRepository {
+                        enabled: repo.enabled.unwrap_or(true),
+                        typ: typ.clone(),
+                        uri: uri.clone(),
+                        suite: suite.clone(),
+                        components: repo.components.clone().unwrap_or_default(),
+                        architectures: repo.architectures.clone(),
+                        languages: repo.languages.clone().unwrap_or_default(),
+                        targets: repo.targets.clone().unwrap_or_default(),
+                        pdiffs: repo.pdiffs,
+                        by_hash: repo.by_hash,
+                        allow_insecure: repo.allow_insecure.unwrap_or(false),
+                        allow_weak: repo.allow_weak.unwrap_or(false),
+                        allow_downgrade_to_insecure: repo
+                            .allow_downgrade_to_insecure
+                            .unwrap_or(false),
+                        trusted: repo.trusted,
+                        signature: repo.signature.clone(),
+                    });
+                }
+            }
+        }
+
+        LegacyRepositories(repos)
+    }
+}
+
 fn option_output<O: AsRef<str> + Display>(name: &str, option: &[O]) -> Cow<'static, str> {
     if option.is_empty() {
         Cow::Borrowed("")
@@ -368,6 +404,18 @@ impl Display for LegacyRepository {
         write!(f, " {}", self.uri)?;
         write!(f, " {}", self.suite)?;
         write!(f, " {}", self.components.join(" "))
+    }
+}
+
+impl Display for LegacyRepositories {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, repo) in self.0.iter().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "{}", repo)?;
+        }
+        Ok(())
     }
 }
 
@@ -556,5 +604,57 @@ mod tests {
             list_text,
             "deb [arch=amd64 signed-by=/usr/share/keyrings/rcn-ee-archive-keyring.gpg] http://debian.beagleboard.org/arm64/ jammy main"
         )
+    }
+
+    #[test]
+    fn test_conversion_from_deb822_to_legacy() {
+        use std::collections::HashSet;
+
+        let repo = Repository {
+            enabled: Some(true),
+            types: HashSet::from([RepositoryType::Binary, RepositoryType::Source]),
+            uris: vec![url!("http://archive.ubuntu.com/ubuntu")],
+            suites: vec!["jammy".to_string()],
+            components: Some(vec!["main".to_string(), "universe".to_string()]),
+            architectures: vec!["amd64".to_string()],
+            ..Default::default()
+        };
+
+        let legacy = LegacyRepositories::from(&repo);
+        assert_eq!(legacy.len(), 2); // One for deb, one for deb-src
+
+        let legacy_str = legacy.to_string();
+        assert!(legacy_str.contains("deb [arch=amd64]"));
+        assert!(legacy_str.contains("deb-src [arch=amd64]"));
+        assert!(legacy_str.contains("http://archive.ubuntu.com/ubuntu"));
+        assert!(legacy_str.contains("jammy main universe"));
+    }
+
+    #[test]
+    fn test_legacy_repositories_display() {
+        let repos = LegacyRepositories(vec![
+            LegacyRepository {
+                enabled: true,
+                typ: RepositoryType::Binary,
+                uri: url!("http://example.com/ubuntu"),
+                suite: "jammy".to_string(),
+                components: vec!["main".to_string()],
+                ..Default::default()
+            },
+            LegacyRepository {
+                enabled: true,
+                typ: RepositoryType::Source,
+                uri: url!("http://example.com/ubuntu"),
+                suite: "jammy".to_string(),
+                components: vec!["main".to_string()],
+                ..Default::default()
+            },
+        ]);
+
+        let display = repos.to_string();
+        assert_eq!(
+            display,
+            "deb http://example.com/ubuntu jammy main\ndeb-src http://example.com/ubuntu jammy main"
+        );
     }
 }
