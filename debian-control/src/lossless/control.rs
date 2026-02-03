@@ -637,11 +637,21 @@ impl Source {
             .map(|s| self.parse_relations(&s))
     }
 
+    /// Set the Build-Depends-Indep field
+    pub fn set_build_depends_indep(&mut self, relations: &Relations) {
+        self.set("Build-Depends-Indep", relations.to_string().as_str());
+    }
+
     /// Return the Build-Depends-Arch field
     pub fn build_depends_arch(&self) -> Option<Relations> {
         self.paragraph
             .get("Build-Depends-Arch")
             .map(|s| self.parse_relations(&s))
+    }
+
+    /// Set the Build-Depends-Arch field
+    pub fn set_build_depends_arch(&mut self, relations: &Relations) {
+        self.set("Build-Depends-Arch", relations.to_string().as_str());
     }
 
     /// The build conflicts of the package.
@@ -651,11 +661,21 @@ impl Source {
             .map(|s| self.parse_relations(&s))
     }
 
+    /// Set the Build-Conflicts field
+    pub fn set_build_conflicts(&mut self, relations: &Relations) {
+        self.set("Build-Conflicts", relations.to_string().as_str());
+    }
+
     /// Return the Build-Conflicts-Indep field
     pub fn build_conflicts_indep(&self) -> Option<Relations> {
         self.paragraph
             .get("Build-Conflicts-Indep")
             .map(|s| self.parse_relations(&s))
+    }
+
+    /// Set the Build-Conflicts-Indep field
+    pub fn set_build_conflicts_indep(&mut self, relations: &Relations) {
+        self.set("Build-Conflicts-Indep", relations.to_string().as_str());
     }
 
     /// Return the Build-Conflicts-Arch field
