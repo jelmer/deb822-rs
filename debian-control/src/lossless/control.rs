@@ -166,6 +166,21 @@ impl Control {
         &self.deb822
     }
 
+    /// Create an independent snapshot of this Control file.
+    ///
+    /// This creates a new Control with an independent copy of the underlying
+    /// deb822 data. Modifications to the original will not affect the snapshot
+    /// and vice versa.
+    ///
+    /// This is more efficient than serializing and re-parsing because it reuses
+    /// the GreenNode structure from the rowan tree.
+    pub fn snapshot(&self) -> Self {
+        Control {
+            deb822: self.deb822.snapshot(),
+            parse_mode: self.parse_mode,
+        }
+    }
+
     /// Parse control file text, returning a Parse result
     pub fn parse(text: &str) -> deb822_lossless::Parse<Control> {
         let deb822_parse = Deb822::parse(text);

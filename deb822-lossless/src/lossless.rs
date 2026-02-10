@@ -692,6 +692,34 @@ impl Default for Deb822 {
 }
 
 impl Deb822 {
+    /// Create an independent snapshot of this Deb822 file.
+    ///
+    /// This creates a new mutable tree that shares the same underlying immutable
+    /// GreenNode data. Modifications to the original will not affect the snapshot
+    /// and vice versa.
+    ///
+    /// This is more efficient than serializing and re-parsing because it reuses
+    /// the GreenNode structure.
+    ///
+    /// # Example
+    /// ```
+    /// use deb822_lossless::Deb822;
+    ///
+    /// let text = "Package: foo\n";
+    /// let deb822: Deb822 = text.parse().unwrap();
+    /// let snapshot = deb822.snapshot();
+    ///
+    /// // Modifications to deb822 won't affect snapshot
+    /// let mut para = deb822.paragraphs().next().unwrap();
+    /// para.set("Package", "modified");
+    ///
+    /// let snapshot_para = snapshot.paragraphs().next().unwrap();
+    /// assert_eq!(snapshot_para.get("Package").as_deref(), Some("foo"));
+    /// ```
+    pub fn snapshot(&self) -> Self {
+        Deb822(SyntaxNode::new_root_mut(self.0.green().into_owned()))
+    }
+
     /// Create a new empty deb822 file.
     pub fn new() -> Deb822 {
         let mut builder = GreenNodeBuilder::new();
@@ -1278,6 +1306,18 @@ impl Paragraph {
         builder.start_node(PARAGRAPH.into());
         builder.finish_node();
         Paragraph(SyntaxNode::new_root_mut(builder.finish()))
+    }
+
+    /// Create an independent snapshot of this Paragraph.
+    ///
+    /// This creates a new mutable tree that shares the same underlying immutable
+    /// GreenNode data. Modifications to the original will not affect the snapshot
+    /// and vice versa.
+    ///
+    /// This is more efficient than serializing and re-parsing because it reuses
+    /// the GreenNode structure.
+    pub fn snapshot(&self) -> Self {
+        Paragraph(SyntaxNode::new_root_mut(self.0.green().into_owned()))
     }
 
     /// Reformat this paragraph
@@ -2137,6 +2177,18 @@ impl<'py> pyo3::FromPyObject<'_, 'py> for Paragraph {
 }
 
 impl Entry {
+    /// Create an independent snapshot of this Entry.
+    ///
+    /// This creates a new mutable tree that shares the same underlying immutable
+    /// GreenNode data. Modifications to the original will not affect the snapshot
+    /// and vice versa.
+    ///
+    /// This is more efficient than serializing and re-parsing because it reuses
+    /// the GreenNode structure.
+    pub fn snapshot(&self) -> Self {
+        Entry(SyntaxNode::new_root_mut(self.0.green().into_owned()))
+    }
+
     /// Returns the text range of this entry in the source text.
     pub fn text_range(&self) -> rowan::TextRange {
         self.0.text_range()
@@ -4889,4 +4941,108 @@ Description: This is a description
     // Test multi-line entry
     let second_para_entries: Vec<_> = paras[1].entries().collect();
     assert_eq!(second_para_entries[3].line(), 7); // Description starts at line 7
+}
+
+#[test]
+fn test_deb822_snapshot_independence() {
+    // Test that snapshot() creates an independent copy
+    let text = r#"Source: foo
+Maintainer: Joe <joe@example.com>
+
+Package: foo
+Architecture: all
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let snapshot = deb822.snapshot();
+
+    // Modify the original
+    let mut para = deb822.paragraphs().next().unwrap();
+    para.set("Source", "modified");
+
+    // Verify the snapshot is unchanged
+    let snapshot_para = snapshot.paragraphs().next().unwrap();
+    assert_eq!(snapshot_para.get("Source").as_deref(), Some("foo"));
+
+    // Modify the snapshot
+    let mut snapshot_para = snapshot.paragraphs().next().unwrap();
+    snapshot_para.set("Source", "snapshot-modified");
+
+    // Verify the original still has our first modification
+    let para = deb822.paragraphs().next().unwrap();
+    assert_eq!(para.get("Source").as_deref(), Some("modified"));
+}
+
+#[test]
+fn test_paragraph_snapshot_independence() {
+    // Test that snapshot() creates an independent copy
+    let text = "Package: foo\nArchitecture: all\n";
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let mut para = deb822.paragraphs().next().unwrap();
+    let mut snapshot = para.snapshot();
+
+    // Modify the original
+    para.set("Package", "modified");
+
+    // Verify the snapshot is unchanged
+    assert_eq!(snapshot.get("Package").as_deref(), Some("foo"));
+
+    // Modify the snapshot
+    snapshot.set("Package", "snapshot-modified");
+
+    // Verify the original still has our first modification
+    assert_eq!(para.get("Package").as_deref(), Some("modified"));
+}
+
+#[test]
+fn test_entry_snapshot_independence() {
+    // Test that snapshot() creates an independent copy
+    let text = "Package: foo\n";
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let mut para = deb822.paragraphs().next().unwrap();
+    let entry = para.entries().next().unwrap();
+    let snapshot = entry.snapshot();
+
+    // Get values before modification
+    let original_value = entry.value();
+    let snapshot_value = snapshot.value();
+
+    // Both should start with the same value
+    assert_eq!(original_value, "foo");
+    assert_eq!(snapshot_value, "foo");
+
+    // Modify through the paragraph
+    para.set("Package", "modified");
+
+    // Verify the entry reflects the change (since it points to the same paragraph)
+    let entry_after = para.entries().next().unwrap();
+    assert_eq!(entry_after.value(), "modified");
+
+    // But the snapshot entry should still have the original value
+    // (it points to a different tree)
+    assert_eq!(snapshot.value(), "foo");
+}
+
+#[test]
+fn test_snapshot_preserves_structure() {
+    // Test that snapshot() preserves comments, whitespace, etc.
+    let text = r#"# Comment
+Source: foo
+## Another comment
+Maintainer: Joe <joe@example.com>
+
+Package: foo
+Architecture: all
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let snapshot = deb822.snapshot();
+
+    // Both should have the same structure
+    assert_eq!(deb822.to_string(), snapshot.to_string());
+
+    // Verify they're independent
+    let mut snapshot_para = snapshot.paragraphs().next().unwrap();
+    snapshot_para.set("Source", "modified");
+
+    let original_para = deb822.paragraphs().next().unwrap();
+    assert_eq!(original_para.get("Source").as_deref(), Some("foo"));
 }
