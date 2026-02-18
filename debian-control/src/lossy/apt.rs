@@ -91,7 +91,7 @@ pub struct Release {
 }
 
 fn deserialize_binaries(value: &str) -> Result<Vec<String>, String> {
-    Ok(value.split_whitespace().map(|s| s.to_string()).collect())
+    Ok(value.split(",").map(|s| s.trim().to_string()).collect())
 }
 
 fn join_lines(components: &[String]) -> String {
