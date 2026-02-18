@@ -491,4 +491,51 @@ Suggests: apt-doc, aptitude | synaptic | wajig
             })
         );
     }
+
+    #[test]
+    fn test_source() {
+        let source = r#"Package: abinit
+Binary: abinit, abinit-doc, abinit-data
+Version: 9.10.4-3
+Maintainer: Debichem Team <debichem-devel@lists.alioth.debian.org>
+Uploaders: Andreas Tille <tille@debian.org>, Michael Banck <mbanck@debian.org>
+Build-Depends: debhelper (>= 11), gfortran, liblapack-dev, python3, graphviz, markdown, ghostscript, help2man, libfftw3-dev, libhdf5-dev, libnetcdff-dev, libssl-dev, libxc-dev, mpi-default-dev, python3-dev, python3-numpy, python3-pandas, python3-yaml, texlive-latex-extra, texlive-fonts-recommended, texlive-extra-utils, texlive-pstricks, texlive-publishers, texlive-luatex
+Architecture: any all
+Standards-Version: 3.9.8
+Format: 3.0 (quilt)
+Files:
+ 843550cbd14395c0b9408158a91a239c 2464 abinit_9.10.4-3.dsc
+ a323f11fbd4a7d0f461d99c931903b5c 130747285 abinit_9.10.4.orig.tar.gz
+ 27c12d3dac5cd105cebaa2af4247e807 15068 abinit_9.10.4-3.debian.tar.xz
+Vcs-Browser: https://salsa.debian.org/debichem-team/abinit
+Vcs-Git: https://salsa.debian.org/debichem-team/abinit.git
+Checksums-Sha256:
+ c3c217b14bc5705a1d8930a2e7fcef58e64beaa22abc213e2eacc7d5537ef840 2464 abinit_9.10.4-3.dsc
+ 6bf3c276c333956f722761f189f2b4324e150c8a50470ecb72ee07cc1c457d48 130747285 abinit_9.10.4.orig.tar.gz
+ 80c4fb7575d67f3167d7c34fd59477baf839810d0b863e19f1dd9fea1bc0b3b5 15068 abinit_9.10.4-3.debian.tar.xz
+Homepage: http://www.abinit.org/
+Package-List: 
+ abinit deb science optional arch=any
+ abinit-data deb science optional arch=all
+ abinit-doc deb doc optional arch=all
+Testsuite: autopkgtest
+Testsuite-Triggers: python3, python3-numpy, python3-pandas, python3-yaml
+Directory: pool/main/a/abinit
+Priority: optional
+Section: science
+"#;
+
+        let source: Source = source.parse().unwrap();
+
+        assert_eq!(source.package, "abinit");
+        assert_eq!(source.version, "9.10.4-3".parse().unwrap());
+        assert_eq!(
+            source.binaries,
+            Some(vec![
+                "abinit".to_string(),
+                "abinit-doc".to_string(),
+                "abinit-data".to_string()
+            ])
+        );
+    }
 }
