@@ -94,6 +94,10 @@ fn deserialize_binaries(value: &str) -> Result<Vec<String>, String> {
     Ok(value.split(",").map(|s| s.trim().to_string()).collect())
 }
 
+fn deserialize_testsuite_triggers(value: &str) -> Result<Vec<String>, String> {
+    Ok(value.split(",").map(|s| s.trim().to_string()).collect())
+}
+
 fn join_lines(components: &[String]) -> String {
     components.join("\n")
 }
@@ -168,6 +172,10 @@ pub struct Source {
     #[deb822(field = "Testsuite")]
     /// Testsuite of the source
     pub testsuite: Option<String>,
+
+    #[deb822(field = "Testsuite-Triggers", deserialize_with = deserialize_testsuite_triggers, serialize_with = join_whitespace)]
+    /// The packages triggering the testsuite of the source
+    pub testsuite_triggers: Option<Vec<String>>,
 
     #[deb822(field = "Vcs-Browser")]
     /// VCS browser of the source
