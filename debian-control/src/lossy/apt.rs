@@ -545,5 +545,53 @@ Section: science
                 "abinit-data".to_string()
             ])
         );
+
+        let build_depends = source.build_depends.as_ref();
+        let build_depends: Vec<_> = build_depends.iter().collect();
+        let build_depends = build_depends[0];
+
+        let expected_build_depends = &[
+            "debhelper",
+            "gfortran",
+            "liblapack-dev",
+            "python3",
+            "graphviz",
+            "markdown",
+            "ghostscript",
+            "help2man",
+            "libfftw3-dev",
+            "libhdf5-dev",
+            "libnetcdff-dev",
+            "libssl-dev",
+            "libxc-dev",
+            "mpi-default-dev",
+            "python3-dev",
+            "python3-numpy",
+            "python3-pandas",
+            "python3-yaml",
+            "texlive-latex-extra",
+            "texlive-fonts-recommended",
+            "texlive-extra-utils",
+            "texlive-pstricks",
+            "texlive-publishers",
+            "texlive-luatex",
+        ];
+
+        assert_eq!(build_depends.len(), expected_build_depends.len());
+        assert_eq!(build_depends[0][0].name, expected_build_depends[0]);
+        assert_eq!(
+            build_depends[build_depends.len() - 1][0].name,
+            expected_build_depends[build_depends.len() - 1]
+        );
+
+        assert_eq!(
+            source.testsuite_triggers,
+            Some(
+                ["python3", "python3-numpy", "python3-pandas", "python3-yaml"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect()
+            )
+        );
     }
 }
