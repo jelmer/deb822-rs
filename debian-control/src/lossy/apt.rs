@@ -131,7 +131,7 @@ pub struct Source {
 
     #[deb822(field = "Build-Depends")]
     /// Build dependencies of the source
-    pub build_depends: Option<String>,
+    pub build_depends: Option<Relations>,
 
     #[deb822(field = "Build-Depends-Indep")]
     /// Build dependencies independent of the architecture of the source
