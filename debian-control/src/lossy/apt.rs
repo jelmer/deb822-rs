@@ -137,6 +137,10 @@ pub struct Source {
     /// Build dependencies independent of the architecture of the source
     pub build_depends_indep: Option<Relations>,
 
+    #[deb822(field = "Build-Depends-Arch")]
+    /// Build dependencies dependent on the architecture of the source
+    pub build_depends_arch: Option<Relations>,
+
     #[deb822(field = "Build-Conflicts")]
     /// Build conflicts of the source
     pub build_conflicts: Option<Relations>,
@@ -144,6 +148,10 @@ pub struct Source {
     #[deb822(field = "Build-Conflicts-Indep")]
     /// Build conflicts independent of the architecture of the source
     pub build_conflicts_indep: Option<Relations>,
+
+    #[deb822(field = "Build-Conflicts-Arch")]
+    /// Build conflicts dependent on the architecture of the source
+    pub build_conflicts_arch: Option<Relations>,
 
     #[deb822(field = "Standards-Version")]
     /// Standards version of the source
