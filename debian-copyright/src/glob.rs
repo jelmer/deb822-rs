@@ -1,3 +1,4 @@
+/// Convert a glob pattern to a regular expression.
 pub fn glob_to_regex(glob: &str) -> regex::Regex {
     let mut it = glob.chars();
     let mut r = "^".to_string();
