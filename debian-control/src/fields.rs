@@ -625,6 +625,52 @@ impl Ord for StandardsVersion {
     }
 }
 
+/// Dgit information
+///
+/// The Dgit field format is: `<commit-hash> <suite> <ref> <url>`
+/// For example: `c1370424e2404d3c22bd09c828d4b28d81d897ad debian archive/debian/1.1.0 https://git.dgit.debian.org/cltl`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DgitInfo {
+    /// Git commit hash
+    pub commit: String,
+    /// Suite (e.g., "debian")
+    pub suite: String,
+    /// Git reference (e.g., "archive/debian/1.1.0")
+    pub git_ref: String,
+    /// Git repository URL
+    pub url: String,
+}
+
+impl FromStr for DgitInfo {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split_whitespace().collect();
+        if parts.len() != 4 {
+            return Err(format!(
+                "Invalid Dgit field format: expected 4 parts (commit suite ref url), got {}",
+                parts.len()
+            ));
+        }
+        Ok(Self {
+            commit: parts[0].to_string(),
+            suite: parts[1].to_string(),
+            git_ref: parts[2].to_string(),
+            url: parts[3].to_string(),
+        })
+    }
+}
+
+impl std::fmt::Display for DgitInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {} {} {}",
+            self.commit, self.suite, self.git_ref, self.url
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -804,5 +850,47 @@ mod tests {
         assert!("a.b.c".parse::<StandardsVersion>().is_err());
         assert!("1.2.3.4.5".parse::<StandardsVersion>().is_err());
         assert!("1.2.3.-1".parse::<StandardsVersion>().is_err());
+    }
+
+    #[test]
+    fn test_dgit_info_parse() {
+        let input = "c1370424e2404d3c22bd09c828d4b28d81d897ad debian archive/debian/1.1.0 https://git.dgit.debian.org/cltl";
+        let dgit: DgitInfo = input.parse().unwrap();
+        assert_eq!(dgit.commit, "c1370424e2404d3c22bd09c828d4b28d81d897ad");
+        assert_eq!(dgit.suite, "debian");
+        assert_eq!(dgit.git_ref, "archive/debian/1.1.0");
+        assert_eq!(dgit.url, "https://git.dgit.debian.org/cltl");
+    }
+
+    #[test]
+    fn test_dgit_info_display() {
+        let dgit = DgitInfo {
+            commit: "c1370424e2404d3c22bd09c828d4b28d81d897ad".to_string(),
+            suite: "debian".to_string(),
+            git_ref: "archive/debian/1.1.0".to_string(),
+            url: "https://git.dgit.debian.org/cltl".to_string(),
+        };
+        let output = dgit.to_string();
+        assert_eq!(
+            output,
+            "c1370424e2404d3c22bd09c828d4b28d81d897ad debian archive/debian/1.1.0 https://git.dgit.debian.org/cltl"
+        );
+    }
+
+    #[test]
+    fn test_dgit_info_roundtrip() {
+        let original = "90f40df9c40b0ceb59c207bcbec0a729e90d7ea9 debian archive/debian/1.0.debian1-5 https://git.dgit.debian.org/crafty-books-medium";
+        let dgit: DgitInfo = original.parse().unwrap();
+        assert_eq!(dgit.to_string(), original);
+    }
+
+    #[test]
+    fn test_dgit_info_invalid() {
+        // Too few parts
+        assert!("abc123 debian".parse::<DgitInfo>().is_err());
+        // Too many parts
+        assert!("abc123 debian ref url extra".parse::<DgitInfo>().is_err());
+        // Empty string
+        assert!("".parse::<DgitInfo>().is_err());
     }
 }

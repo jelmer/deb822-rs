@@ -213,6 +213,10 @@ pub struct Source {
     /// VCS Mtn of the source
     pub vcs_mtn: Option<String>,
 
+    #[deb822(field = "Dgit")]
+    /// Dgit information (commit, suite, ref, url)
+    pub dgit: Option<crate::fields::DgitInfo>,
+
     #[deb822(field = "Priority")]
     /// Priority of the source
     pub priority: Option<crate::fields::Priority>,
@@ -593,5 +597,27 @@ Section: science
                     .collect()
             )
         );
+    }
+
+    #[test]
+    fn test_source_with_dgit() {
+        let source = r#"Package: test-pkg
+Version: 1.0-1
+Maintainer: Test Maintainer <test@example.com>
+Dgit: c1370424e2404d3c22bd09c828d4b28d81d897ad debian archive/debian/1.1.0 https://git.dgit.debian.org/test-pkg
+Directory: pool/main/t/test-pkg
+Package-List: 
+ abinit deb science optional arch=any
+ abinit-data deb science optional arch=all
+ abinit-doc deb doc optional arch=all
+"#;
+
+        let source: Source = source.parse().unwrap();
+        assert_eq!(source.package, "test-pkg");
+        let dgit = source.dgit.as_ref().unwrap();
+        assert_eq!(dgit.commit, "c1370424e2404d3c22bd09c828d4b28d81d897ad");
+        assert_eq!(dgit.suite, "debian");
+        assert_eq!(dgit.git_ref, "archive/debian/1.1.0");
+        assert_eq!(dgit.url, "https://git.dgit.debian.org/test-pkg");
     }
 }
