@@ -1563,3 +1563,51 @@ License: Apache-2.0
         assert_eq!(result, expected);
     }
 }
+
+/// Thread-safe parse result for Copyright files, suitable for use in Salsa databases.
+///
+/// This type wraps `deb822_lossless::Parse<Deb822>` for use in Salsa databases.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parse(deb822_lossless::Parse<Deb822>);
+
+impl Parse {
+    /// Parse copyright text, returning a Parse result
+    pub fn parse(text: &str) -> Self {
+        Parse(Deb822::parse(text))
+    }
+
+    /// Parse copyright text relaxed (allows syntax errors)
+    pub fn parse_relaxed(text: &str) -> Self {
+        let deb822_parse = Deb822::parse(text);
+        Parse(deb822_parse)
+    }
+
+    /// Get the syntax errors
+    pub fn errors(&self) -> &[String] {
+        self.0.errors()
+    }
+
+    /// Check if there are any errors
+    pub fn ok(&self) -> bool {
+        self.0.ok()
+    }
+
+    /// Convert to a Copyright object
+    pub fn to_copyright(&self) -> Copyright {
+        if let Ok(deb822) = self.0.clone().to_result() {
+            Copyright(deb822)
+        } else {
+            // If there are parse errors, create an empty copyright
+            Copyright(Deb822::new())
+        }
+    }
+
+    /// Convert to a Result, returning the Copyright if there are no errors
+    pub fn to_result(self) -> Result<Copyright, Error> {
+        self.0.to_result().map(Copyright).map_err(Error::ParseError)
+    }
+}
+
+// Implement Send + Sync since deb822_lossless::Parse implements them
+unsafe impl Send for Parse {}
+unsafe impl Sync for Parse {}
