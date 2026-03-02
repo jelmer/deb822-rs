@@ -83,16 +83,15 @@ impl<T> Parse<T> {
         }
     }
 
-    /// Get the parsed syntax tree, panicking if there are errors
+    /// Get the parsed syntax tree
+    ///
+    /// Returns the syntax tree even if there are parse errors.
+    /// Use `errors()` or `positioned_errors()` to check for errors if needed.
+    /// This allows for error-resilient tooling that can work with partial/invalid input.
     pub fn tree(&self) -> T
     where
         T: AstNode<Language = crate::lossless::Lang>,
     {
-        assert!(
-            self.errors.is_empty(),
-            "tried to get tree with errors: {:?}",
-            self.errors
-        );
         let node = SyntaxNode::new_root_mut(self.green.clone());
         T::cast(node).expect("root node has wrong type")
     }
@@ -170,5 +169,22 @@ mod tests {
                 assert!(!error_text.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn test_tree_with_errors_does_not_panic() {
+        // Verify that tree() returns a tree even when there are parse errors,
+        // enabling error-resilient tooling
+        let input = "Invalid field without colon\nBroken: field: extra colon\n";
+        let parsed = Parse::<Deb822>::parse_deb822(input);
+
+        // Verify there are errors
+        assert!(!parsed.errors().is_empty());
+
+        // tree() should not panic despite errors
+        let tree = parsed.tree();
+
+        // Verify we got a valid syntax tree
+        assert!(tree.syntax().text().to_string() == input);
     }
 }
