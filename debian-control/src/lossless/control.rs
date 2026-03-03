@@ -215,6 +215,34 @@ impl Control {
             })
     }
 
+    /// Return the source package if it intersects with the given text range
+    ///
+    /// # Arguments
+    /// * `range` - The text range to query
+    ///
+    /// # Returns
+    /// The source package if it exists and its text range overlaps with the provided range
+    pub fn source_in_range(&self, range: rowan::TextRange) -> Option<Source> {
+        self.source().filter(|s| {
+            let para_range = s.as_deb822().text_range();
+            para_range.start() < range.end() && para_range.end() > range.start()
+        })
+    }
+
+    /// Iterate over binary packages that intersect with the given text range
+    ///
+    /// # Arguments
+    /// * `range` - The text range to query
+    ///
+    /// # Returns
+    /// An iterator over binary packages whose text ranges overlap with the provided range
+    pub fn binaries_in_range(&self, range: rowan::TextRange) -> impl Iterator<Item = Binary> + '_ {
+        self.binaries().filter(move |b| {
+            let para_range = b.as_deb822().text_range();
+            para_range.start() < range.end() && para_range.end() > range.start()
+        })
+    }
+
     /// Add a new source package
     ///
     /// # Arguments
@@ -2584,5 +2612,150 @@ Depends: libfoo, %%%bad%%%, libbar
         let output = control.to_string();
         let expected = "Source: test-package\nSection: utils\nMaintainer: Test <test@example.com>\n\nPackage: test-pkg\nArchitecture: any\n";
         assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_source_in_range() {
+        // Test that source_in_range() returns the source when it intersects with range
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+Section: utils
+
+Package: test-pkg
+Architecture: any
+"#;
+        let control: Control = input.parse().unwrap();
+
+        // Get the text range of the source paragraph
+        let source = control.source().unwrap();
+        let source_range = source.as_deb822().text_range();
+
+        // Query with the exact range - should return the source
+        let result = control.source_in_range(source_range);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name(), Some("test-package".to_string()));
+
+        // Query with a range that overlaps the source
+        let overlap_range = rowan::TextRange::new(0.into(), 20.into());
+        let result = control.source_in_range(overlap_range);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name(), Some("test-package".to_string()));
+
+        // Query with a range that doesn't overlap the source
+        let no_overlap_range = rowan::TextRange::new(100.into(), 150.into());
+        let result = control.source_in_range(no_overlap_range);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_binaries_in_range_single() {
+        // Test that binaries_in_range() returns a single binary in range
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+
+Package: test-pkg
+Architecture: any
+
+Package: another-pkg
+Architecture: all
+"#;
+        let control: Control = input.parse().unwrap();
+
+        // Get the text range of the first binary paragraph
+        let first_binary = control.binaries().next().unwrap();
+        let binary_range = first_binary.as_deb822().text_range();
+
+        // Query with that range - should return only the first binary
+        let binaries: Vec<_> = control.binaries_in_range(binary_range).collect();
+        assert_eq!(binaries.len(), 1);
+        assert_eq!(binaries[0].name(), Some("test-pkg".to_string()));
+    }
+
+    #[test]
+    fn test_binaries_in_range_multiple() {
+        // Test that binaries_in_range() returns multiple binaries in range
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+
+Package: test-pkg
+Architecture: any
+
+Package: another-pkg
+Architecture: all
+
+Package: third-pkg
+Architecture: any
+"#;
+        let control: Control = input.parse().unwrap();
+
+        // Create a range that covers the first two binary paragraphs
+        let range = rowan::TextRange::new(50.into(), 130.into());
+
+        // Query with that range
+        let binaries: Vec<_> = control.binaries_in_range(range).collect();
+        assert!(binaries.len() >= 2);
+        assert!(binaries.iter().any(|b| b.name() == Some("test-pkg".to_string())));
+        assert!(binaries.iter().any(|b| b.name() == Some("another-pkg".to_string())));
+    }
+
+    #[test]
+    fn test_binaries_in_range_none() {
+        // Test that binaries_in_range() returns empty iterator when no binaries in range
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+
+Package: test-pkg
+Architecture: any
+"#;
+        let control: Control = input.parse().unwrap();
+
+        // Create a range that's way beyond the document
+        let range = rowan::TextRange::new(1000.into(), 2000.into());
+
+        // Should return empty iterator
+        let binaries: Vec<_> = control.binaries_in_range(range).collect();
+        assert_eq!(binaries.len(), 0);
+    }
+
+    #[test]
+    fn test_binaries_in_range_all() {
+        // Test that binaries_in_range() returns all binaries when range covers entire document
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+
+Package: test-pkg
+Architecture: any
+
+Package: another-pkg
+Architecture: all
+"#;
+        let control: Control = input.parse().unwrap();
+
+        // Create a range that covers the entire document
+        let range = rowan::TextRange::new(0.into(), input.len().try_into().unwrap());
+
+        // Should return all binaries
+        let binaries: Vec<_> = control.binaries_in_range(range).collect();
+        assert_eq!(binaries.len(), 2);
+    }
+
+    #[test]
+    fn test_source_in_range_partial_overlap() {
+        // Test that source_in_range() returns source with partial overlap
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+
+Package: test-pkg
+Architecture: any
+"#;
+        let control: Control = input.parse().unwrap();
+
+        // Create a range that starts in the middle of the source paragraph
+        let range = rowan::TextRange::new(10.into(), 30.into());
+
+        // Should include the source since it overlaps
+        let result = control.source_in_range(range);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name(), Some("test-package".to_string()));
     }
 }

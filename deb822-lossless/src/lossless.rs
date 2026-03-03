@@ -854,6 +854,40 @@ impl Deb822 {
         self.0.children().filter_map(Paragraph::cast)
     }
 
+    /// Returns paragraphs that intersect with the given text range.
+    ///
+    /// A paragraph is included if its text range overlaps with the provided range.
+    ///
+    /// # Arguments
+    ///
+    /// * `range` - The text range to query
+    ///
+    /// # Returns
+    ///
+    /// An iterator over paragraphs that intersect with the range
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    /// use text_size::TextRange;
+    ///
+    /// let input = "Package: foo\n\nPackage: bar\n\nPackage: baz\n";
+    /// let deb822 = Deb822::parse(input).tree();
+    ///
+    /// // Query paragraphs in the first half of the document
+    /// let range = TextRange::new(0.into(), 20.into());
+    /// let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    /// assert!(paras.len() >= 1);
+    /// ```
+    pub fn paragraphs_in_range(&self, range: rowan::TextRange) -> impl Iterator<Item = Paragraph> + '_ {
+        self.paragraphs().filter(move |p| {
+            let para_range = p.text_range();
+            // Check if ranges overlap: para starts before range ends AND para ends after range starts
+            para_range.start() < range.end() && para_range.end() > range.start()
+        })
+    }
+
     /// Converts the perceptual paragraph index to the node index.
     fn convert_index(&self, index: usize) -> Option<usize> {
         let mut current_pos = 0usize;
@@ -1318,6 +1352,11 @@ impl Paragraph {
     /// the GreenNode structure.
     pub fn snapshot(&self) -> Self {
         Paragraph(SyntaxNode::new_root_mut(self.0.green().into_owned()))
+    }
+
+    /// Returns the text range covered by this paragraph.
+    pub fn text_range(&self) -> rowan::TextRange {
+        self.0.text_range()
     }
 
     /// Reformat this paragraph
@@ -5045,4 +5084,125 @@ Architecture: all
 
     let original_para = deb822.paragraphs().next().unwrap();
     assert_eq!(original_para.get("Source").as_deref(), Some("foo"));
+}
+
+#[test]
+fn test_paragraph_text_range() {
+    // Test that text_range() returns the correct range for a paragraph
+    let text = r#"Source: foo
+Maintainer: Joe <joe@example.com>
+
+Package: foo
+Architecture: all
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let paras: Vec<_> = deb822.paragraphs().collect();
+
+    // First paragraph
+    let range1 = paras[0].text_range();
+    let para1_text = &text[range1.start().into()..range1.end().into()];
+    assert_eq!(para1_text, "Source: foo\nMaintainer: Joe <joe@example.com>\n");
+
+    // Second paragraph
+    let range2 = paras[1].text_range();
+    let para2_text = &text[range2.start().into()..range2.end().into()];
+    assert_eq!(para2_text, "Package: foo\nArchitecture: all\n");
+}
+
+#[test]
+fn test_paragraphs_in_range_single() {
+    // Test finding a single paragraph in range
+    let text = r#"Source: foo
+
+Package: bar
+
+Package: baz
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Get range of first paragraph
+    let first_para = deb822.paragraphs().next().unwrap();
+    let range = first_para.text_range();
+
+    // Query paragraphs in that range
+    let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    assert_eq!(paras.len(), 1);
+    assert_eq!(paras[0].get("Source").as_deref(), Some("foo"));
+}
+
+#[test]
+fn test_paragraphs_in_range_multiple() {
+    // Test finding multiple paragraphs in range
+    let text = r#"Source: foo
+
+Package: bar
+
+Package: baz
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Create a range that covers first two paragraphs
+    let range = rowan::TextRange::new(0.into(), 25.into());
+
+    // Query paragraphs in that range
+    let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    assert_eq!(paras.len(), 2);
+    assert_eq!(paras[0].get("Source").as_deref(), Some("foo"));
+    assert_eq!(paras[1].get("Package").as_deref(), Some("bar"));
+}
+
+#[test]
+fn test_paragraphs_in_range_partial_overlap() {
+    // Test that paragraphs are included if they partially overlap with the range
+    let text = r#"Source: foo
+
+Package: bar
+
+Package: baz
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Create a range that starts in the middle of the second paragraph
+    let range = rowan::TextRange::new(15.into(), 30.into());
+
+    // Should include the second paragraph since it overlaps
+    let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    assert!(paras.len() >= 1);
+    assert!(paras.iter().any(|p| p.get("Package").as_deref() == Some("bar")));
+}
+
+#[test]
+fn test_paragraphs_in_range_no_match() {
+    // Test that empty iterator is returned when no paragraphs are in range
+    let text = r#"Source: foo
+
+Package: bar
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Create a range that's way beyond the document
+    let range = rowan::TextRange::new(1000.into(), 2000.into());
+
+    // Should return empty iterator
+    let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    assert_eq!(paras.len(), 0);
+}
+
+#[test]
+fn test_paragraphs_in_range_all() {
+    // Test finding all paragraphs when range covers entire document
+    let text = r#"Source: foo
+
+Package: bar
+
+Package: baz
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Create a range that covers the entire document
+    let range = rowan::TextRange::new(0.into(), text.len().try_into().unwrap());
+
+    // Should return all paragraphs
+    let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    assert_eq!(paras.len(), 3);
 }
