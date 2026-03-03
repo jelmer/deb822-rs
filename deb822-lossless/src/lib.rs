@@ -12,7 +12,7 @@ pub use lossless::{
     Deb822, Entry, Error, IndentPattern, Lang, Paragraph, ParseError, PositionedParseError,
 };
 pub use parse::Parse;
-pub use rowan::TextRange;
+pub use rowan::{TextRange, TextSize};
 
 /// The indentation to use when writing a deb822 file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

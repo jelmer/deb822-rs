@@ -869,8 +869,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
-    /// use text_size::TextRange;
+    /// use deb822_lossless::{Deb822, TextRange};
     ///
     /// let input = "Package: foo\n\nPackage: bar\n\nPackage: baz\n";
     /// let deb822 = Deb822::parse(input).tree();
@@ -904,8 +903,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
-    /// use text_size::TextSize;
+    /// use deb822_lossless::{Deb822, TextSize};
     ///
     /// let input = "Package: foo\n\nPackage: bar\n";
     /// let deb822 = Deb822::parse(input).tree();
@@ -1481,8 +1479,7 @@ impl Paragraph {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
-    /// use text_size::TextRange;
+    /// use deb822_lossless::{Deb822, TextRange};
     ///
     /// let input = "Package: foo\nVersion: 1.0\nArchitecture: amd64\n";
     /// let deb822 = Deb822::parse(input).tree();
@@ -1514,8 +1511,7 @@ impl Paragraph {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
-    /// use text_size::TextSize;
+    /// use deb822_lossless::{Deb822, TextSize};
     ///
     /// let input = "Package: foo\nVersion: 1.0\n";
     /// let deb822 = Deb822::parse(input).tree();
