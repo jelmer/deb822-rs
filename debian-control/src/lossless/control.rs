@@ -119,9 +119,15 @@ fn format_field(name: &str, value: &str) -> String {
         | "Enhances"
         | "Pre-Depends"
         | "Breaks" => {
-            let relations: Relations = value.parse().unwrap();
-            let relations = relations.wrap_and_sort();
-            relations.to_string()
+            // Try to parse and format the relations, but if parsing fails,
+            // preserve the original value to maintain lossless behavior
+            match value.parse::<Relations>() {
+                Ok(relations) => {
+                    let relations = relations.wrap_and_sort();
+                    relations.to_string()
+                }
+                Err(_) => value.to_string(),
+            }
         }
         _ => value.to_string(),
     }
@@ -2759,5 +2765,33 @@ Architecture: any
         let result = control.source_in_range(range);
         assert!(result.is_some());
         assert_eq!(result.unwrap().name(), Some("test-package".to_string()));
+    }
+
+    #[test]
+    fn test_wrap_and_sort_with_malformed_relations() {
+        // Test that wrap_and_sort doesn't panic on malformed relations
+        // and preserves the original value when parsing fails
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+Build-Depends: some invalid relation syntax here
+
+Package: test-pkg
+Architecture: any
+"#;
+        let mut control: Control = input.parse().unwrap();
+
+        // This should not panic, even with malformed relations
+        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(2), false, None);
+
+        // The malformed field should be preserved as-is (lossless behavior)
+        let output = control.to_string();
+        let expected = r#"Source: test-package
+Maintainer: Test <test@example.com>
+Build-Depends: some invalid relation syntax here
+
+Package: test-pkg
+Architecture: any
+"#;
+        assert_eq!(output, expected);
     }
 }
