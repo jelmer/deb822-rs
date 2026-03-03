@@ -854,6 +854,145 @@ impl Deb822 {
         self.0.children().filter_map(Paragraph::cast)
     }
 
+    /// Returns paragraphs that intersect with the given text range.
+    ///
+    /// A paragraph is included if its text range overlaps with the provided range.
+    ///
+    /// # Arguments
+    ///
+    /// * `range` - The text range to query
+    ///
+    /// # Returns
+    ///
+    /// An iterator over paragraphs that intersect with the range
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::{Deb822, TextRange};
+    ///
+    /// let input = "Package: foo\n\nPackage: bar\n\nPackage: baz\n";
+    /// let deb822 = Deb822::parse(input).tree();
+    ///
+    /// // Query paragraphs in the first half of the document
+    /// let range = TextRange::new(0.into(), 20.into());
+    /// let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    /// assert!(paras.len() >= 1);
+    /// ```
+    pub fn paragraphs_in_range(
+        &self,
+        range: rowan::TextRange,
+    ) -> impl Iterator<Item = Paragraph> + '_ {
+        self.paragraphs().filter(move |p| {
+            let para_range = p.text_range();
+            // Check if ranges overlap: para starts before range ends AND para ends after range starts
+            para_range.start() < range.end() && para_range.end() > range.start()
+        })
+    }
+
+    /// Find the paragraph that contains the given text offset.
+    ///
+    /// # Arguments
+    ///
+    /// * `offset` - The text offset to query
+    ///
+    /// # Returns
+    ///
+    /// The paragraph containing the offset, or None if no paragraph contains it
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::{Deb822, TextSize};
+    ///
+    /// let input = "Package: foo\n\nPackage: bar\n";
+    /// let deb822 = Deb822::parse(input).tree();
+    ///
+    /// // Find paragraph at offset 5 (within first paragraph)
+    /// let para = deb822.paragraph_at_position(TextSize::from(5));
+    /// assert!(para.is_some());
+    /// ```
+    pub fn paragraph_at_position(&self, offset: rowan::TextSize) -> Option<Paragraph> {
+        self.paragraphs().find(|p| {
+            let range = p.text_range();
+            range.contains(offset)
+        })
+    }
+
+    /// Find the paragraph at the given line number (0-indexed).
+    ///
+    /// # Arguments
+    ///
+    /// * `line` - The line number to query (0-indexed)
+    ///
+    /// # Returns
+    ///
+    /// The paragraph at the given line, or None if no paragraph is at that line
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    ///
+    /// let input = "Package: foo\nVersion: 1.0\n\nPackage: bar\n";
+    /// let deb822 = Deb822::parse(input).tree();
+    ///
+    /// // Find paragraph at line 0
+    /// let para = deb822.paragraph_at_line(0);
+    /// assert!(para.is_some());
+    /// ```
+    pub fn paragraph_at_line(&self, line: usize) -> Option<Paragraph> {
+        self.paragraphs().find(|p| {
+            let start_line = p.line();
+            let range = p.text_range();
+            let text_str = self.0.text().to_string();
+            let text_before_end = &text_str[..range.end().into()];
+            let end_line = text_before_end.lines().count().saturating_sub(1);
+            line >= start_line && line <= end_line
+        })
+    }
+
+    /// Find the entry at the given line and column position.
+    ///
+    /// # Arguments
+    ///
+    /// * `line` - The line number (0-indexed)
+    /// * `col` - The column number (0-indexed)
+    ///
+    /// # Returns
+    ///
+    /// The entry at the given position, or None if no entry is at that position
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::Deb822;
+    ///
+    /// let input = "Package: foo\nVersion: 1.0\n";
+    /// let deb822 = Deb822::parse(input).tree();
+    ///
+    /// // Find entry at line 0, column 0
+    /// let entry = deb822.entry_at_line_col(0, 0);
+    /// assert!(entry.is_some());
+    /// ```
+    pub fn entry_at_line_col(&self, line: usize, col: usize) -> Option<Entry> {
+        // Convert line/col to text offset
+        let text_str = self.0.text().to_string();
+        let offset: usize = text_str.lines().take(line).map(|l| l.len() + 1).sum();
+        let position = rowan::TextSize::from((offset + col) as u32);
+
+        // Find the entry that contains this position
+        for para in self.paragraphs() {
+            for entry in para.entries() {
+                let range = entry.text_range();
+                if range.contains(position) {
+                    return Some(entry);
+                }
+            }
+        }
+        None
+    }
+
     /// Converts the perceptual paragraph index to the node index.
     fn convert_index(&self, index: usize) -> Option<usize> {
         let mut current_pos = 0usize;
@@ -1318,6 +1457,75 @@ impl Paragraph {
     /// the GreenNode structure.
     pub fn snapshot(&self) -> Self {
         Paragraph(SyntaxNode::new_root_mut(self.0.green().into_owned()))
+    }
+
+    /// Returns the text range covered by this paragraph.
+    pub fn text_range(&self) -> rowan::TextRange {
+        self.0.text_range()
+    }
+
+    /// Returns entries that intersect with the given text range.
+    ///
+    /// An entry is included if its text range overlaps with the provided range.
+    ///
+    /// # Arguments
+    ///
+    /// * `range` - The text range to query
+    ///
+    /// # Returns
+    ///
+    /// An iterator over entries that intersect with the range
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::{Deb822, TextRange};
+    ///
+    /// let input = "Package: foo\nVersion: 1.0\nArchitecture: amd64\n";
+    /// let deb822 = Deb822::parse(input).tree();
+    /// let para = deb822.paragraphs().next().unwrap();
+    ///
+    /// // Query entries in a specific range
+    /// let range = TextRange::new(0.into(), 15.into());
+    /// let entries: Vec<_> = para.entries_in_range(range).collect();
+    /// assert!(entries.len() >= 1);
+    /// ```
+    pub fn entries_in_range(&self, range: rowan::TextRange) -> impl Iterator<Item = Entry> + '_ {
+        self.entries().filter(move |e| {
+            let entry_range = e.text_range();
+            // Check if ranges overlap
+            entry_range.start() < range.end() && entry_range.end() > range.start()
+        })
+    }
+
+    /// Find the entry that contains the given text offset.
+    ///
+    /// # Arguments
+    ///
+    /// * `offset` - The text offset to query
+    ///
+    /// # Returns
+    ///
+    /// The entry containing the offset, or None if no entry contains it
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use deb822_lossless::{Deb822, TextSize};
+    ///
+    /// let input = "Package: foo\nVersion: 1.0\n";
+    /// let deb822 = Deb822::parse(input).tree();
+    /// let para = deb822.paragraphs().next().unwrap();
+    ///
+    /// // Find entry at offset 5 (within "Package: foo")
+    /// let entry = para.entry_at_position(TextSize::from(5));
+    /// assert!(entry.is_some());
+    /// ```
+    pub fn entry_at_position(&self, offset: rowan::TextSize) -> Option<Entry> {
+        self.entries().find(|e| {
+            let range = e.text_range();
+            range.contains(offset)
+        })
     }
 
     /// Reformat this paragraph
@@ -5045,4 +5253,371 @@ Architecture: all
 
     let original_para = deb822.paragraphs().next().unwrap();
     assert_eq!(original_para.get("Source").as_deref(), Some("foo"));
+}
+
+#[test]
+fn test_paragraph_text_range() {
+    // Test that text_range() returns the correct range for a paragraph
+    let text = r#"Source: foo
+Maintainer: Joe <joe@example.com>
+
+Package: foo
+Architecture: all
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let paras: Vec<_> = deb822.paragraphs().collect();
+
+    // First paragraph
+    let range1 = paras[0].text_range();
+    let para1_text = &text[range1.start().into()..range1.end().into()];
+    assert_eq!(
+        para1_text,
+        "Source: foo\nMaintainer: Joe <joe@example.com>\n"
+    );
+
+    // Second paragraph
+    let range2 = paras[1].text_range();
+    let para2_text = &text[range2.start().into()..range2.end().into()];
+    assert_eq!(para2_text, "Package: foo\nArchitecture: all\n");
+}
+
+#[test]
+fn test_paragraphs_in_range_single() {
+    // Test finding a single paragraph in range
+    let text = r#"Source: foo
+
+Package: bar
+
+Package: baz
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Get range of first paragraph
+    let first_para = deb822.paragraphs().next().unwrap();
+    let range = first_para.text_range();
+
+    // Query paragraphs in that range
+    let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    assert_eq!(paras.len(), 1);
+    assert_eq!(paras[0].get("Source").as_deref(), Some("foo"));
+}
+
+#[test]
+fn test_paragraphs_in_range_multiple() {
+    // Test finding multiple paragraphs in range
+    let text = r#"Source: foo
+
+Package: bar
+
+Package: baz
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Create a range that covers first two paragraphs
+    let range = rowan::TextRange::new(0.into(), 25.into());
+
+    // Query paragraphs in that range
+    let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    assert_eq!(paras.len(), 2);
+    assert_eq!(paras[0].get("Source").as_deref(), Some("foo"));
+    assert_eq!(paras[1].get("Package").as_deref(), Some("bar"));
+}
+
+#[test]
+fn test_paragraphs_in_range_partial_overlap() {
+    // Test that paragraphs are included if they partially overlap with the range
+    let text = r#"Source: foo
+
+Package: bar
+
+Package: baz
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Create a range that starts in the middle of the second paragraph
+    let range = rowan::TextRange::new(15.into(), 30.into());
+
+    // Should include the second paragraph since it overlaps
+    let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    assert!(paras.len() >= 1);
+    assert!(paras
+        .iter()
+        .any(|p| p.get("Package").as_deref() == Some("bar")));
+}
+
+#[test]
+fn test_paragraphs_in_range_no_match() {
+    // Test that empty iterator is returned when no paragraphs are in range
+    let text = r#"Source: foo
+
+Package: bar
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Create a range that's way beyond the document
+    let range = rowan::TextRange::new(1000.into(), 2000.into());
+
+    // Should return empty iterator
+    let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    assert_eq!(paras.len(), 0);
+}
+
+#[test]
+fn test_paragraphs_in_range_all() {
+    // Test finding all paragraphs when range covers entire document
+    let text = r#"Source: foo
+
+Package: bar
+
+Package: baz
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Create a range that covers the entire document
+    let range = rowan::TextRange::new(0.into(), text.len().try_into().unwrap());
+
+    // Should return all paragraphs
+    let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
+    assert_eq!(paras.len(), 3);
+}
+
+#[test]
+fn test_paragraph_at_position() {
+    // Test finding paragraph at a given text offset
+    let text = r#"Package: foo
+Version: 1.0
+
+Package: bar
+Architecture: all
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Position 5 is within first paragraph ("Package: foo")
+    let para = deb822.paragraph_at_position(rowan::TextSize::from(5));
+    assert!(para.is_some());
+    assert_eq!(para.unwrap().get("Package").as_deref(), Some("foo"));
+
+    // Position 30 is within second paragraph
+    let para = deb822.paragraph_at_position(rowan::TextSize::from(30));
+    assert!(para.is_some());
+    assert_eq!(para.unwrap().get("Package").as_deref(), Some("bar"));
+
+    // Position beyond document
+    let para = deb822.paragraph_at_position(rowan::TextSize::from(1000));
+    assert!(para.is_none());
+}
+
+#[test]
+fn test_paragraph_at_line() {
+    // Test finding paragraph at a given line number
+    let text = r#"Package: foo
+Version: 1.0
+
+Package: bar
+Architecture: all
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Line 0 is in first paragraph
+    let para = deb822.paragraph_at_line(0);
+    assert!(para.is_some());
+    assert_eq!(para.unwrap().get("Package").as_deref(), Some("foo"));
+
+    // Line 1 is also in first paragraph
+    let para = deb822.paragraph_at_line(1);
+    assert!(para.is_some());
+    assert_eq!(para.unwrap().get("Package").as_deref(), Some("foo"));
+
+    // Line 3 is in second paragraph
+    let para = deb822.paragraph_at_line(3);
+    assert!(para.is_some());
+    assert_eq!(para.unwrap().get("Package").as_deref(), Some("bar"));
+
+    // Line beyond document
+    let para = deb822.paragraph_at_line(100);
+    assert!(para.is_none());
+}
+
+#[test]
+fn test_entry_at_line_col() {
+    // Test finding entry at a given line/column position
+    let text = r#"Package: foo
+Version: 1.0
+Architecture: all
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Line 0, column 0 is in "Package: foo"
+    let entry = deb822.entry_at_line_col(0, 0);
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Package".to_string()));
+
+    // Line 1, column 0 is in "Version: 1.0"
+    let entry = deb822.entry_at_line_col(1, 0);
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Version".to_string()));
+
+    // Line 2, column 5 is in "Architecture: all"
+    let entry = deb822.entry_at_line_col(2, 5);
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Architecture".to_string()));
+
+    // Position beyond document
+    let entry = deb822.entry_at_line_col(100, 0);
+    assert!(entry.is_none());
+}
+
+#[test]
+fn test_entry_at_line_col_multiline() {
+    // Test finding entry in a multiline value
+    let text = r#"Package: foo
+Description: A package
+ with a long
+ description
+Version: 1.0
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Line 1 is the start of Description
+    let entry = deb822.entry_at_line_col(1, 0);
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Description".to_string()));
+
+    // Line 2 is continuation of Description
+    let entry = deb822.entry_at_line_col(2, 1);
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Description".to_string()));
+
+    // Line 3 is also continuation of Description
+    let entry = deb822.entry_at_line_col(3, 1);
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Description".to_string()));
+
+    // Line 4 is Version
+    let entry = deb822.entry_at_line_col(4, 0);
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Version".to_string()));
+}
+
+#[test]
+fn test_entries_in_range() {
+    // Test finding entries in a paragraph within a range
+    let text = r#"Package: foo
+Version: 1.0
+Architecture: all
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let para = deb822.paragraphs().next().unwrap();
+
+    // Get first entry's range
+    let first_entry = para.entries().next().unwrap();
+    let range = first_entry.text_range();
+
+    // Query entries in that range - should get only first entry
+    let entries: Vec<_> = para.entries_in_range(range).collect();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].key(), Some("Package".to_string()));
+
+    // Query with a range covering first two entries
+    let range = rowan::TextRange::new(0.into(), 25.into());
+    let entries: Vec<_> = para.entries_in_range(range).collect();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].key(), Some("Package".to_string()));
+    assert_eq!(entries[1].key(), Some("Version".to_string()));
+}
+
+#[test]
+fn test_entries_in_range_partial_overlap() {
+    // Test that entries with partial overlap are included
+    let text = r#"Package: foo
+Version: 1.0
+Architecture: all
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let para = deb822.paragraphs().next().unwrap();
+
+    // Create a range that starts in the middle of the second entry
+    let range = rowan::TextRange::new(15.into(), 30.into());
+
+    let entries: Vec<_> = para.entries_in_range(range).collect();
+    assert!(entries.len() >= 1);
+    assert!(entries
+        .iter()
+        .any(|e| e.key() == Some("Version".to_string())));
+}
+
+#[test]
+fn test_entries_in_range_no_match() {
+    // Test that empty iterator is returned when no entries match
+    let text = "Package: foo\n";
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let para = deb822.paragraphs().next().unwrap();
+
+    // Range beyond the paragraph
+    let range = rowan::TextRange::new(1000.into(), 2000.into());
+    let entries: Vec<_> = para.entries_in_range(range).collect();
+    assert_eq!(entries.len(), 0);
+}
+
+#[test]
+fn test_entry_at_position() {
+    // Test finding entry at a specific text offset
+    let text = r#"Package: foo
+Version: 1.0
+Architecture: all
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let para = deb822.paragraphs().next().unwrap();
+
+    // Position 5 is within "Package: foo"
+    let entry = para.entry_at_position(rowan::TextSize::from(5));
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Package".to_string()));
+
+    // Position 15 is within "Version: 1.0"
+    let entry = para.entry_at_position(rowan::TextSize::from(15));
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Version".to_string()));
+
+    // Position beyond paragraph
+    let entry = para.entry_at_position(rowan::TextSize::from(1000));
+    assert!(entry.is_none());
+}
+
+#[test]
+fn test_entry_at_position_multiline() {
+    // Test finding entry in a multiline value
+    let text = r#"Description: A package
+ with a long
+ description
+"#;
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let para = deb822.paragraphs().next().unwrap();
+
+    // Position 5 is within the Description entry
+    let entry = para.entry_at_position(rowan::TextSize::from(5));
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Description".to_string()));
+
+    // Position in continuation line should also find the Description entry
+    let entry = para.entry_at_position(rowan::TextSize::from(30));
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().key(), Some("Description".to_string()));
+}
+
+#[test]
+fn test_paragraph_at_position_at_boundary() {
+    // Test paragraph_at_position at paragraph boundaries
+    let text = "Package: foo\n\nPackage: bar\n";
+    let deb822 = text.parse::<Deb822>().unwrap();
+
+    // Position 0 is start of first paragraph
+    let para = deb822.paragraph_at_position(rowan::TextSize::from(0));
+    assert!(para.is_some());
+    assert_eq!(para.unwrap().get("Package").as_deref(), Some("foo"));
+
+    // Position at start of second paragraph
+    let para = deb822.paragraph_at_position(rowan::TextSize::from(15));
+    assert!(para.is_some());
+    assert_eq!(para.unwrap().get("Package").as_deref(), Some("bar"));
 }
