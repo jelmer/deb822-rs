@@ -1911,8 +1911,7 @@ Description: Test package
         // Test range that covers only the Source field
         let source_start = 0;
         let source_end = "Source: test-package".len();
-        let source_range =
-            TextRange::new((source_start as u32).into(), (source_end as u32).into());
+        let source_range = TextRange::new((source_start as u32).into(), (source_end as u32).into());
 
         let fields: Vec<_> = control.fields_in_range(source_range).collect();
         assert_eq!(fields.len(), 1);
@@ -2090,8 +2089,7 @@ Description: Example package
         // Simulate a change to Standards-Version field
         let change_start = control_text.find("Standards-Version:").unwrap();
         let change_end = change_start + "Standards-Version: 4.6.0".len();
-        let change_range =
-            TextRange::new((change_start as u32).into(), (change_end as u32).into());
+        let change_range = TextRange::new((change_start as u32).into(), (change_end as u32).into());
 
         // Only process fields in the changed range
         let affected_fields: Vec<_> = control.fields_in_range(change_range).collect();
@@ -2694,8 +2692,12 @@ Architecture: any
         // Query with that range
         let binaries: Vec<_> = control.binaries_in_range(range).collect();
         assert!(binaries.len() >= 2);
-        assert!(binaries.iter().any(|b| b.name() == Some("test-pkg".to_string())));
-        assert!(binaries.iter().any(|b| b.name() == Some("another-pkg".to_string())));
+        assert!(binaries
+            .iter()
+            .any(|b| b.name() == Some("test-pkg".to_string())));
+        assert!(binaries
+            .iter()
+            .any(|b| b.name() == Some("another-pkg".to_string())));
     }
 
     #[test]

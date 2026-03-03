@@ -880,7 +880,10 @@ impl Deb822 {
     /// let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
     /// assert!(paras.len() >= 1);
     /// ```
-    pub fn paragraphs_in_range(&self, range: rowan::TextRange) -> impl Iterator<Item = Paragraph> + '_ {
+    pub fn paragraphs_in_range(
+        &self,
+        range: rowan::TextRange,
+    ) -> impl Iterator<Item = Paragraph> + '_ {
         self.paragraphs().filter(move |p| {
             let para_range = p.text_range();
             // Check if ranges overlap: para starts before range ends AND para ends after range starts
@@ -977,11 +980,7 @@ impl Deb822 {
     pub fn entry_at_line_col(&self, line: usize, col: usize) -> Option<Entry> {
         // Convert line/col to text offset
         let text_str = self.0.text().to_string();
-        let offset: usize = text_str
-            .lines()
-            .take(line)
-            .map(|l| l.len() + 1)
-            .sum();
+        let offset: usize = text_str.lines().take(line).map(|l| l.len() + 1).sum();
         let position = rowan::TextSize::from((offset + col) as u32);
 
         // Find the entry that contains this position
@@ -5275,7 +5274,10 @@ Architecture: all
     // First paragraph
     let range1 = paras[0].text_range();
     let para1_text = &text[range1.start().into()..range1.end().into()];
-    assert_eq!(para1_text, "Source: foo\nMaintainer: Joe <joe@example.com>\n");
+    assert_eq!(
+        para1_text,
+        "Source: foo\nMaintainer: Joe <joe@example.com>\n"
+    );
 
     // Second paragraph
     let range2 = paras[1].text_range();
@@ -5342,7 +5344,9 @@ Package: baz
     // Should include the second paragraph since it overlaps
     let paras: Vec<_> = deb822.paragraphs_in_range(range).collect();
     assert!(paras.len() >= 1);
-    assert!(paras.iter().any(|p| p.get("Package").as_deref() == Some("bar")));
+    assert!(paras
+        .iter()
+        .any(|p| p.get("Package").as_deref() == Some("bar")));
 }
 
 #[test]
@@ -5541,7 +5545,9 @@ Architecture: all
 
     let entries: Vec<_> = para.entries_in_range(range).collect();
     assert!(entries.len() >= 1);
-    assert!(entries.iter().any(|e| e.key() == Some("Version".to_string())));
+    assert!(entries
+        .iter()
+        .any(|e| e.key() == Some("Version".to_string())));
 }
 
 #[test]
