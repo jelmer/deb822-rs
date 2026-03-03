@@ -37,7 +37,7 @@
 
 use crate::{License, CURRENT_FORMAT, KNOWN_FORMATS};
 use deb822_lossless::IndentPattern;
-use deb822_lossless::{Deb822, Paragraph};
+use deb822_lossless::{Deb822, Paragraph, TextRange};
 use std::path::Path;
 
 /// Decode deb822 paragraph markers in a multi-line field value.
@@ -157,6 +157,54 @@ impl Copyright {
                 !x.contains_key("Files") && !x.contains_key("Format") && x.contains_key("License")
             })
             .map(LicenseParagraph)
+    }
+
+    /// Return the header paragraph if it intersects with the given text range
+    ///
+    /// # Arguments
+    /// * `range` - The text range to query
+    ///
+    /// # Returns
+    /// The header paragraph if it exists and its text range overlaps with the provided range
+    pub fn header_in_range(&self, range: TextRange) -> Option<Header> {
+        self.header().filter(|h| {
+            let para_range = h.as_deb822().text_range();
+            para_range.start() < range.end() && para_range.end() > range.start()
+        })
+    }
+
+    /// Iterate over files paragraphs that intersect with the given text range
+    ///
+    /// # Arguments
+    /// * `range` - The text range to query
+    ///
+    /// # Returns
+    /// An iterator over files paragraphs whose text ranges overlap with the provided range
+    pub fn iter_files_in_range(
+        &self,
+        range: TextRange,
+    ) -> impl Iterator<Item = FilesParagraph> + '_ {
+        self.iter_files().filter(move |f| {
+            let para_range = f.as_deb822().text_range();
+            para_range.start() < range.end() && para_range.end() > range.start()
+        })
+    }
+
+    /// Iterate over license paragraphs that intersect with the given text range
+    ///
+    /// # Arguments
+    /// * `range` - The text range to query
+    ///
+    /// # Returns
+    /// An iterator over license paragraphs whose text ranges overlap with the provided range
+    pub fn iter_licenses_in_range(
+        &self,
+        range: TextRange,
+    ) -> impl Iterator<Item = LicenseParagraph> + '_ {
+        self.iter_licenses().filter(move |l| {
+            let para_range = l.as_deb822().text_range();
+            para_range.start() < range.end() && para_range.end() > range.start()
+        })
     }
 
     /// Returns the Files paragraph for the given filename.
@@ -306,6 +354,92 @@ impl Copyright {
         } else {
             false
         }
+    }
+
+    /// Wrap and sort the entire copyright file
+    ///
+    /// This will:
+    /// - Sort paragraphs according to DEP-5 conventions (header first, Files paragraphs sorted by pattern, License paragraphs last)
+    /// - Sort file patterns within Files paragraphs (wildcards first, debian/* last)
+    /// - Sort fields within each paragraph according to their respective field orders
+    /// - Wrap long lines according to the provided parameters
+    ///
+    /// # Arguments
+    /// * `indentation` - The indentation to use for multi-line fields
+    /// * `immediate_empty_line` - Whether to add an empty line at the start of multi-line fields
+    /// * `max_line_length_one_liner` - The maximum line length for one-liner fields
+    pub fn wrap_and_sort(
+        &mut self,
+        indentation: deb822_lossless::Indentation,
+        immediate_empty_line: bool,
+        max_line_length_one_liner: Option<usize>,
+    ) {
+        // Sort paragraphs: header first, Files paragraphs by pattern, License paragraphs last
+        let sort_paragraphs = |a: &Paragraph, b: &Paragraph| -> std::cmp::Ordering {
+            let a_is_header = a.contains_key("Format");
+            let b_is_header = b.contains_key("Format");
+            let a_is_files = a.contains_key("Files");
+            let b_is_files = b.contains_key("Files");
+
+            // Header always comes first
+            if a_is_header && !b_is_header {
+                return std::cmp::Ordering::Less;
+            }
+            if !a_is_header && b_is_header {
+                return std::cmp::Ordering::Greater;
+            }
+
+            // Files paragraphs come before license paragraphs
+            if a_is_files && !b_is_files && !b_is_header {
+                return std::cmp::Ordering::Less;
+            }
+            if !a_is_files && b_is_files && !a_is_header {
+                return std::cmp::Ordering::Greater;
+            }
+
+            // Sort Files paragraphs by their first file pattern
+            if a_is_files && b_is_files {
+                let a_files = a.get("Files").unwrap_or_default();
+                let b_files = b.get("Files").unwrap_or_default();
+
+                let a_first = a_files.split_whitespace().next().unwrap_or("");
+                let b_first = b_files.split_whitespace().next().unwrap_or("");
+
+                let a_depth = crate::pattern_depth(a_first);
+                let b_depth = crate::pattern_depth(b_first);
+
+                let a_key = crate::pattern_sort_key(a_first, a_depth);
+                let b_key = crate::pattern_sort_key(b_first, b_depth);
+
+                return a_key.cmp(&b_key);
+            }
+
+            std::cmp::Ordering::Equal
+        };
+
+        // Wrap and sort each paragraph based on its type
+        let wrap_and_sort_para = |para: &Paragraph| -> Paragraph {
+            let is_header = para.contains_key("Format");
+            let is_files = para.contains_key("Files");
+
+            if is_header {
+                let mut header = Header(para.clone());
+                header.wrap_and_sort(indentation, immediate_empty_line, max_line_length_one_liner);
+                header.0
+            } else if is_files {
+                let mut files = FilesParagraph(para.clone());
+                files.wrap_and_sort(indentation, immediate_empty_line, max_line_length_one_liner);
+                files.0
+            } else {
+                let mut license = LicenseParagraph(para.clone());
+                license.wrap_and_sort(indentation, immediate_empty_line, max_line_length_one_liner);
+                license.0
+            }
+        };
+
+        self.0 = self
+            .0
+            .wrap_and_sort(Some(&sort_paragraphs), Some(&wrap_and_sort_para));
     }
 }
 
@@ -476,6 +610,40 @@ impl Header {
             self.0.set("Format", format.as_str());
         }
     }
+
+    /// Wrap and sort the header paragraph
+    ///
+    /// # Arguments
+    /// * `indentation` - The indentation to use
+    /// * `immediate_empty_line` - Whether to add an empty line at the start of multi-line fields
+    /// * `max_line_length_one_liner` - The maximum line length for one-liner fields
+    pub fn wrap_and_sort(
+        &mut self,
+        indentation: deb822_lossless::Indentation,
+        immediate_empty_line: bool,
+        max_line_length_one_liner: Option<usize>,
+    ) {
+        let sort_entries =
+            |a: &deb822_lossless::Entry, b: &deb822_lossless::Entry| -> std::cmp::Ordering {
+                let a_key = a.key().unwrap_or_default();
+                let b_key = b.key().unwrap_or_default();
+                let a_pos = HEADER_FIELD_ORDER.iter().position(|&k| k == a_key);
+                let b_pos = HEADER_FIELD_ORDER.iter().position(|&k| k == b_key);
+                match (a_pos, b_pos) {
+                    (Some(a_idx), Some(b_idx)) => a_idx.cmp(&b_idx),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+            };
+        self.0 = self.0.wrap_and_sort(
+            indentation,
+            immediate_empty_line,
+            max_line_length_one_liner,
+            Some(&sort_entries),
+            None,
+        );
+    }
 }
 
 /// A files paragraph
@@ -592,6 +760,54 @@ impl FilesParagraph {
         self.0
             .set_with_forced_indent("License", &text, &indent_pattern, Some(FILES_FIELD_ORDER));
     }
+
+    /// Wrap and sort the files paragraph
+    ///
+    /// # Arguments
+    /// * `indentation` - The indentation to use
+    /// * `immediate_empty_line` - Whether to add an empty line at the start of multi-line fields
+    /// * `max_line_length_one_liner` - The maximum line length for one-liner fields
+    pub fn wrap_and_sort(
+        &mut self,
+        indentation: deb822_lossless::Indentation,
+        immediate_empty_line: bool,
+        max_line_length_one_liner: Option<usize>,
+    ) {
+        let sort_entries =
+            |a: &deb822_lossless::Entry, b: &deb822_lossless::Entry| -> std::cmp::Ordering {
+                let a_key = a.key().unwrap_or_default();
+                let b_key = b.key().unwrap_or_default();
+                let a_pos = FILES_FIELD_ORDER.iter().position(|&k| k == a_key);
+                let b_pos = FILES_FIELD_ORDER.iter().position(|&k| k == b_key);
+                match (a_pos, b_pos) {
+                    (Some(a_idx), Some(b_idx)) => a_idx.cmp(&b_idx),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+            };
+
+        let format_value = |key: &str, value: &str| -> String {
+            if key == "Files" {
+                let mut patterns: Vec<_> = value.split_whitespace().collect();
+                patterns.sort_by_key(|p| {
+                    let depth = crate::pattern_depth(p);
+                    crate::pattern_sort_key(p, depth)
+                });
+                patterns.join(FILES_SEPARATOR)
+            } else {
+                value.to_string()
+            }
+        };
+
+        self.0 = self.0.wrap_and_sort(
+            indentation,
+            immediate_empty_line,
+            max_line_length_one_liner,
+            Some(&sort_entries),
+            Some(&format_value),
+        );
+    }
 }
 
 /// A paragraph that contains a license
@@ -706,10 +922,46 @@ impl LicenseParagraph {
         };
         self.set_license(&new_license);
     }
+
+    /// Wrap and sort the license paragraph
+    ///
+    /// # Arguments
+    /// * `indentation` - The indentation to use
+    /// * `immediate_empty_line` - Whether to add an empty line at the start of multi-line fields
+    /// * `max_line_length_one_liner` - The maximum line length for one-liner fields
+    pub fn wrap_and_sort(
+        &mut self,
+        indentation: deb822_lossless::Indentation,
+        immediate_empty_line: bool,
+        max_line_length_one_liner: Option<usize>,
+    ) {
+        let sort_entries =
+            |a: &deb822_lossless::Entry, b: &deb822_lossless::Entry| -> std::cmp::Ordering {
+                let a_key = a.key().unwrap_or_default();
+                let b_key = b.key().unwrap_or_default();
+                let a_pos = LICENSE_FIELD_ORDER.iter().position(|&k| k == a_key);
+                let b_pos = LICENSE_FIELD_ORDER.iter().position(|&k| k == b_key);
+                match (a_pos, b_pos) {
+                    (Some(a_idx), Some(b_idx)) => a_idx.cmp(&b_idx),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+            };
+        self.0 = self.0.wrap_and_sort(
+            indentation,
+            immediate_empty_line,
+            max_line_length_one_liner,
+            Some(&sort_entries),
+            None,
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use deb822_lossless::{TextRange, TextSize};
+
     #[test]
     fn test_not_machine_readable() {
         let s = r#"
@@ -1528,6 +1780,304 @@ License: GPL-3+
         let license = copyright.iter_licenses().next().unwrap();
         let para = license.as_deb822();
         assert!(para.get("License").unwrap().starts_with("GPL-3+"));
+    }
+
+    #[test]
+    fn test_header_in_range() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: example
+
+Files: *
+Copyright: 2024 Author
+License: MIT
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+
+        // Get the header's text range
+        let header = copyright.header().unwrap();
+        let header_range = header.as_deb822().text_range();
+
+        // Query with the exact header range should return the header
+        let result = copyright.header_in_range(header_range);
+        assert!(result.is_some());
+        assert_eq!(
+            "https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/",
+            result.unwrap().format_string().unwrap()
+        );
+
+        // Query with a range that overlaps with the header
+        let overlapping_range =
+            TextRange::new(TextSize::from(0), header_range.end() - TextSize::from(10));
+        let result = copyright.header_in_range(overlapping_range);
+        assert!(result.is_some());
+
+        // Query with a range completely outside the header should return None
+        let files = copyright.iter_files().next().unwrap();
+        let files_range = files.as_deb822().text_range();
+        let result = copyright.header_in_range(files_range);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_iter_files_in_range() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: *
+Copyright: 2024 Main Author
+License: GPL-3+
+
+Files: src/*
+Copyright: 2024 Author
+License: MIT
+
+Files: debian/*
+Copyright: 2024 Debian Maintainer
+License: GPL-3+
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+
+        // Get all files paragraphs
+        let all_files: Vec<_> = copyright.iter_files().collect();
+        assert_eq!(3, all_files.len());
+
+        // Query with the range of the second Files paragraph
+        let second_range = all_files[1].as_deb822().text_range();
+        let result: Vec<_> = copyright.iter_files_in_range(second_range).collect();
+        assert_eq!(1, result.len());
+        assert_eq!(vec!["src/*"], result[0].files());
+
+        // Query with a range that spans the first two Files paragraphs
+        let span_range = TextRange::new(
+            all_files[0].as_deb822().text_range().start(),
+            all_files[1].as_deb822().text_range().end(),
+        );
+        let result: Vec<_> = copyright.iter_files_in_range(span_range).collect();
+        assert_eq!(2, result.len());
+        assert_eq!(vec!["*"], result[0].files());
+        assert_eq!(vec!["src/*"], result[1].files());
+
+        // Query with a range that doesn't overlap with any Files paragraphs
+        let header_range = copyright.header().unwrap().as_deb822().text_range();
+        let result: Vec<_> = copyright.iter_files_in_range(header_range).collect();
+        assert_eq!(0, result.len());
+    }
+
+    #[test]
+    fn test_iter_licenses_in_range() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: *
+Copyright: 2024 Author
+License: MIT
+
+License: MIT
+ MIT license text here.
+
+License: GPL-3+
+ GPL license text here.
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+
+        // Get all license paragraphs
+        let all_licenses: Vec<_> = copyright.iter_licenses().collect();
+        assert_eq!(2, all_licenses.len());
+
+        // Query with the range of the first License paragraph
+        let first_range = all_licenses[0].as_deb822().text_range();
+        let result: Vec<_> = copyright.iter_licenses_in_range(first_range).collect();
+        assert_eq!(1, result.len());
+        assert_eq!(Some("MIT".to_string()), result[0].name());
+
+        // Query with a range that spans both License paragraphs
+        let span_range = TextRange::new(
+            all_licenses[0].as_deb822().text_range().start(),
+            all_licenses[1].as_deb822().text_range().end(),
+        );
+        let result: Vec<_> = copyright.iter_licenses_in_range(span_range).collect();
+        assert_eq!(2, result.len());
+        assert_eq!(Some("MIT".to_string()), result[0].name());
+        assert_eq!(Some("GPL-3+".to_string()), result[1].name());
+
+        // Query with a range that doesn't overlap with any License paragraphs (Files range)
+        let files = copyright.iter_files().next().unwrap();
+        let files_range = files.as_deb822().text_range();
+        let result: Vec<_> = copyright.iter_licenses_in_range(files_range).collect();
+        assert_eq!(0, result.len());
+    }
+
+    #[test]
+    fn test_header_wrap_and_sort() {
+        // Test that Header::wrap_and_sort() properly orders fields
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Comment: Some comment
+Source: https://example.com
+Upstream-Contact: John Doe
+Upstream-Name: example
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut header = copyright.header().unwrap();
+
+        header.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+
+        // Verify the exact output with fields in HEADER_FIELD_ORDER
+        let expected = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\nUpstream-Name: example\nUpstream-Contact: John Doe\nSource: https://example.com\nComment: Some comment\n";
+        assert_eq!(expected, header.0.to_string());
+    }
+
+    #[test]
+    fn test_files_paragraph_wrap_and_sort_field_order() {
+        // Test that FilesParagraph::wrap_and_sort() properly orders fields
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Comment: Some comment
+License: MIT
+Copyright: 2024 Author
+Files: *
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut files = copyright.iter_files().next().unwrap();
+
+        files.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+
+        // Verify the exact output with fields in FILES_FIELD_ORDER
+        let expected = "Files: *\nCopyright: 2024 Author\nLicense: MIT\nComment: Some comment\n";
+        assert_eq!(expected, files.0.to_string());
+    }
+
+    #[test]
+    fn test_files_paragraph_wrap_and_sort_patterns() {
+        // Test that FilesParagraph::wrap_and_sort() properly sorts file patterns
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: debian/* src/foo/* * src/*
+Copyright: 2024 Author
+License: MIT
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut files = copyright.iter_files().next().unwrap();
+
+        files.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+
+        // Verify exact file pattern order
+        assert_eq!(vec!["*", "src/*", "src/foo/*", "debian/*"], files.files());
+
+        // Verify exact output
+        let expected = "Files: * src/* src/foo/* debian/*\nCopyright: 2024 Author\nLicense: MIT\n";
+        assert_eq!(expected, files.0.to_string());
+    }
+
+    #[test]
+    fn test_license_paragraph_wrap_and_sort() {
+        // Test that LicenseParagraph::wrap_and_sort() properly orders fields
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Comment: This is a comment
+License: GPL-3+
+ GPL license text here.
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut license = copyright.iter_licenses().next().unwrap();
+
+        license.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+
+        // Verify the exact output with fields in LICENSE_FIELD_ORDER
+        let expected = "License: GPL-3+\n GPL license text here.\nComment: This is a comment\n";
+        assert_eq!(expected, license.0.to_string());
+    }
+
+    #[test]
+    fn test_copyright_wrap_and_sort() {
+        // Test that Copyright::wrap_and_sort() properly sorts paragraphs and file patterns
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: example
+
+Files: debian/*
+Copyright: 2024 Debian Maintainer
+License: GPL-3+
+
+License: GPL-3+
+ GPL license text here.
+
+Files: src/foo/* src/*
+Copyright: 2024 Author
+License: MIT
+
+Files: *
+Copyright: 2024 Main Author
+License: GPL-3+
+
+License: MIT
+ MIT license text here.
+"#;
+        let mut copyright = s.parse::<super::Copyright>().expect("failed to parse");
+
+        // Apply wrap and sort
+        copyright.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+
+        // Verify exact output with correct paragraph and field ordering
+        let expected = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: example
+
+Files: *
+Copyright: 2024 Main Author
+License: GPL-3+
+
+Files: src/* src/foo/*
+Copyright: 2024 Author
+License: MIT
+
+Files: debian/*
+Copyright: 2024 Debian Maintainer
+License: GPL-3+
+
+License: GPL-3+
+ GPL license text here.
+
+License: MIT
+ MIT license text here.
+"#;
+        assert_eq!(expected, copyright.to_string());
+
+        // Also verify via iteration
+        let files: Vec<_> = copyright.iter_files().collect();
+        assert_eq!(3, files.len());
+        assert_eq!(vec!["*"], files[0].files());
+        assert_eq!(vec!["src/*", "src/foo/*"], files[1].files());
+        assert_eq!(vec!["debian/*"], files[2].files());
+
+        let licenses: Vec<_> = copyright.iter_licenses().collect();
+        assert_eq!(2, licenses.len());
+    }
+
+    #[test]
+    fn test_copyright_wrap_and_sort_file_patterns_within_paragraph() {
+        // Test that file patterns within a Files paragraph are sorted correctly
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: debian/* src/foo/* * src/*
+Copyright: 2024 Author
+License: MIT
+"#;
+        let mut copyright = s.parse::<super::Copyright>().expect("failed to parse");
+
+        copyright.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+
+        // Verify exact output with sorted patterns
+        let expected = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: * src/* src/foo/* debian/*
+Copyright: 2024 Author
+License: MIT
+"#;
+        assert_eq!(expected, copyright.to_string());
+
+        // Also verify via iteration
+        let files: Vec<_> = copyright.iter_files().collect();
+        assert_eq!(1, files.len());
+        assert_eq!(
+            vec!["*", "src/*", "src/foo/*", "debian/*"],
+            files[0].files()
+        );
     }
 
     #[test]
