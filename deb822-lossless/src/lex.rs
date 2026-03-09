@@ -1,26 +1,37 @@
 use crate::common;
 
-/// Let's start with defining all kinds of tokens and
-/// composite nodes.
+/// Syntax kinds for tokens and composite nodes in deb822 files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 #[repr(u16)]
 pub enum SyntaxKind {
+    /// Field name/key
     KEY = 0,
+    /// Field value
     VALUE,
+    /// Colon separator between key and value
     COLON,
+    /// Indentation (spaces or tabs)
     INDENT,
+    /// Newline character
     NEWLINE,
-    WHITESPACE, // whitespaces is explicit
-    COMMENT,    // comments
-    ERROR,      // as well as errors
+    /// Whitespace (spaces or tabs, but not newlines)
+    WHITESPACE,
+    /// Comment line (starts with #)
+    COMMENT,
+    /// Error token for invalid syntax
+    ERROR,
 
     // composite nodes
-    ROOT,       // The entire file
-    PARAGRAPH,  // A deb822 paragraph
-    ENTRY,      // A single key-value pair
-    EMPTY_LINE, // An empty line
+    /// The entire file
+    ROOT,
+    /// A deb822 paragraph (collection of entries)
+    PARAGRAPH,
+    /// A single key-value pair
+    ENTRY,
+    /// An empty line (separates paragraphs)
+    EMPTY_LINE,
 }
 
 /// Convert our `SyntaxKind` into the rowan `SyntaxKind`.

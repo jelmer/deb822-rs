@@ -8,6 +8,7 @@ mod common;
 mod lex;
 mod lossless;
 mod parse;
+pub use lex::SyntaxKind;
 pub use lossless::{
     Deb822, Entry, Error, IndentPattern, Lang, Paragraph, ParseError, PositionedParseError,
 };

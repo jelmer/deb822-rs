@@ -136,6 +136,11 @@ impl Copyright {
         Self(Deb822::new())
     }
 
+    /// Return the underlying Deb822 object
+    pub fn as_deb822(&self) -> &Deb822 {
+        &self.0
+    }
+
     /// Return the header paragraph
     pub fn header(&self) -> Option<Header> {
         self.0.paragraphs().next().map(Header)
@@ -2140,6 +2145,14 @@ impl Parse {
     /// Check if there are any errors
     pub fn ok(&self) -> bool {
         self.0.ok()
+    }
+
+    /// Get the parsed tree, even if there are errors
+    ///
+    /// Returns the Copyright object regardless of parse errors, allowing
+    /// error-resilient tooling to work with partial/invalid input.
+    pub fn tree(&self) -> Copyright {
+        Copyright(self.0.tree())
     }
 
     /// Convert to a Copyright object
