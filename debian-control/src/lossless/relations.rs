@@ -250,6 +250,7 @@ fn parse(text: &str, allow_substvar: bool) -> Parse {
                         }
                         _ => {
                             self.error("Expected architecture name or '!' or ']'".to_string());
+                            break;
                         }
                     }
                 }
@@ -286,6 +287,7 @@ fn parse(text: &str, allow_substvar: bool) -> Parse {
                         }
                         _ => {
                             self.error("Expected profile or '!' or '>'".to_string());
+                            break;
                         }
                     }
                 }
@@ -4906,5 +4908,46 @@ Description: test
         let added = relations.ensure_relation(new_entry);
         assert!(added);
         assert_eq!(relations.to_string(), "python3, debhelper (>= 12), rustc");
+    }
+
+    #[test]
+    fn test_parse_invalid_token_in_arch_list() {
+        let input = "foo [>= bar]";
+        let result: Result<Relations, _> = input.parse();
+        assert!(
+            result.is_err(),
+            "Expected error for invalid token in architecture list"
+        );
+    }
+
+    #[test]
+    fn test_parse_invalid_token_in_profile_list() {
+        let input = "foo <[] baz>";
+        let result: Result<Relations, _> = input.parse();
+        assert!(
+            result.is_err(),
+            "Expected error for invalid token in profile list"
+        );
+    }
+
+    #[test]
+    fn test_parse_relaxed_unterminated_arch_list() {
+        let (relations, errors) = Relations::parse_relaxed("libc6 [", true);
+        assert!(!errors.is_empty());
+        assert_eq!(relations.to_string(), "libc6 [");
+    }
+
+    #[test]
+    fn test_parse_relaxed_partial_arch_name() {
+        let (relations, errors) = Relations::parse_relaxed("libc6 [amd", true);
+        assert!(!errors.is_empty());
+        assert_eq!(relations.to_string(), "libc6 [amd");
+    }
+
+    #[test]
+    fn test_parse_relaxed_unterminated_profile_list() {
+        let (relations, errors) = Relations::parse_relaxed("libc6 <cross", true);
+        assert!(!errors.is_empty());
+        assert_eq!(relations.to_string(), "libc6 <cross");
     }
 }
