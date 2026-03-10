@@ -43,7 +43,7 @@ impl std::error::Error for ParseError {}
 /// these two SyntaxKind types, allowing for a nicer SyntaxNode API where
 /// "kinds" are values from our `enum SyntaxKind`, instead of plain u16 values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum Lang {}
+pub enum Lang {}
 impl rowan::Language for Lang {
     type Kind = SyntaxKind;
     fn kind_from_raw(raw: rowan::SyntaxKind) -> Self::Kind {
@@ -389,11 +389,12 @@ fn parse(text: &str, allow_substvar: bool) -> Parse {
 // but it contains parent pointers, offsets, and
 // has identity semantics.
 
-type SyntaxNode = rowan::SyntaxNode<Lang>;
-#[allow(unused)]
-type SyntaxToken = rowan::SyntaxToken<Lang>;
-#[allow(unused)]
-type SyntaxElement = rowan::NodeOrToken<SyntaxNode, SyntaxToken>;
+/// A syntax node in the relations tree.
+pub type SyntaxNode = rowan::SyntaxNode<Lang>;
+/// A syntax token in the relations tree.
+pub type SyntaxToken = rowan::SyntaxToken<Lang>;
+/// A syntax element (node or token) in the relations tree.
+pub type SyntaxElement = rowan::NodeOrToken<SyntaxNode, SyntaxToken>;
 
 impl Parse {
     fn root_mut(&self) -> Relations {
@@ -414,6 +415,11 @@ macro_rules! ast_node {
                 } else {
                     None
                 }
+            }
+
+            /// Access the underlying syntax node.
+            pub fn syntax(&self) -> &rowan::SyntaxNode<Lang> {
+                &self.0
             }
         }
 
