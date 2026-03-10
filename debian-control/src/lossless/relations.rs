@@ -104,6 +104,7 @@ fn parse(text: &str, allow_substvar: bool) -> Parse {
                     }
                     e => {
                         self.error(format!("expected identifier or : but got {:?}", e).to_string());
+                        break;
                     }
                 }
             }
@@ -4949,5 +4950,19 @@ Description: test
         let (relations, errors) = Relations::parse_relaxed("libc6 <cross", true);
         assert!(!errors.is_empty());
         assert_eq!(relations.to_string(), "libc6 <cross");
+    }
+
+    #[test]
+    fn test_parse_relaxed_unterminated_substvar() {
+        let (relations, errors) = Relations::parse_relaxed("${shlibs:Depends", true);
+        assert!(!errors.is_empty());
+        assert_eq!(relations.to_string(), "${shlibs:Depends");
+    }
+
+    #[test]
+    fn test_parse_relaxed_empty_substvar() {
+        let (relations, errors) = Relations::parse_relaxed("${", true);
+        assert!(!errors.is_empty());
+        assert_eq!(relations.to_string(), "${");
     }
 }
