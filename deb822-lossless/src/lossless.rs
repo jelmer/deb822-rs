@@ -1654,6 +1654,23 @@ impl Paragraph {
             .map(|e| e.value())
     }
 
+    /// Returns the value of the given key, including any comment lines embedded
+    /// within multi-line values.
+    ///
+    /// This is like [`get()`](Self::get) but also includes `#`-prefixed comment lines
+    /// that appear between continuation lines.
+    ///
+    /// Field names are compared case-insensitively.
+    pub fn get_with_comments(&self, key: &str) -> Option<String> {
+        self.entries()
+            .find(|e| {
+                e.key()
+                    .as_deref()
+                    .is_some_and(|k| k.eq_ignore_ascii_case(key))
+            })
+            .map(|e| e.value_with_comments())
+    }
+
     /// Returns the entry for the given key in the paragraph.
     ///
     /// Field names are compared case-insensitively.
@@ -5674,11 +5691,10 @@ Standards-Version: 4.7.0
         para.get("Build-Depends").as_deref(),
         Some("dh-python,\nlibsvn-dev,\npython3-all-dev,\npython3-docutils")
     );
-    // value_with_comments() includes the comment lines
-    let entry = para.get_entry("Build-Depends").unwrap();
+    // get_with_comments() / value_with_comments() includes the comment lines
     assert_eq!(
-        entry.value_with_comments(),
-        "dh-python,\nlibsvn-dev,\n#               python-all-dbg (>= 2.6.6-3),\npython3-all-dev,\n#               python3-all-dbg,\npython3-docutils"
+        para.get_with_comments("Build-Depends").as_deref(),
+        Some("dh-python,\nlibsvn-dev,\n#               python-all-dbg (>= 2.6.6-3),\npython3-all-dev,\n#               python3-all-dbg,\npython3-docutils")
     );
     assert_eq!(
         para.get("Standards-Version").as_deref(),
