@@ -5696,10 +5696,7 @@ Standards-Version: 4.7.0
         para.get_with_comments("Build-Depends").as_deref(),
         Some("dh-python,\nlibsvn-dev,\n#               python-all-dbg (>= 2.6.6-3),\npython3-all-dev,\n#               python3-all-dbg,\npython3-docutils")
     );
-    assert_eq!(
-        para.get("Standards-Version").as_deref(),
-        Some("4.7.0")
-    );
+    assert_eq!(para.get("Standards-Version").as_deref(), Some("4.7.0"));
     // Round-trip
     assert_eq!(deb822.to_string(), text);
 }
