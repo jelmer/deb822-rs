@@ -262,7 +262,9 @@ impl Source {
 
     /// Get the build depends
     pub fn build_depends(&self) -> Option<Relations> {
-        self.0.get("Build-Depends").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Build-Depends")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the build depends
@@ -273,7 +275,7 @@ impl Source {
     /// Get the arch-independent build depends
     pub fn build_depends_indep(&self) -> Option<Relations> {
         self.0
-            .get("Build-Depends-Indep")
+            .get_with_comments("Build-Depends-Indep")
             .map(|s| s.parse().unwrap())
     }
 
@@ -284,7 +286,9 @@ impl Source {
 
     /// Get the arch-dependent build depends
     pub fn build_depends_arch(&self) -> Option<Relations> {
-        self.0.get("Build-Depends-Arch").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Build-Depends-Arch")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the arch-dependent build depends
@@ -294,7 +298,9 @@ impl Source {
 
     /// Get the build conflicts
     pub fn build_conflicts(&self) -> Option<Relations> {
-        self.0.get("Build-Conflicts").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Build-Conflicts")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the build conflicts
@@ -305,7 +311,7 @@ impl Source {
     /// Get the build conflicts indep
     pub fn build_conflicts_indep(&self) -> Option<Relations> {
         self.0
-            .get("Build-Conflicts-Indep")
+            .get_with_comments("Build-Conflicts-Indep")
             .map(|s| s.parse().unwrap())
     }
 
@@ -317,7 +323,7 @@ impl Source {
     /// Get the build conflicts arch
     pub fn build_conflicts_arch(&self) -> Option<Relations> {
         self.0
-            .get("Build-Conflicts-Arch")
+            .get_with_comments("Build-Conflicts-Arch")
             .map(|s| s.parse().unwrap())
     }
 
@@ -653,7 +659,9 @@ impl Package {
 
     /// Get the packages that this package depends on.
     pub fn depends(&self) -> Option<Relations> {
-        self.0.get("Depends").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Depends")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the packages that this package depends on.
@@ -663,7 +671,9 @@ impl Package {
 
     /// Get the packages that this package suggests.
     pub fn recommends(&self) -> Option<Relations> {
-        self.0.get("Recommends").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Recommends")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the packages that this package recommends.
@@ -673,7 +683,9 @@ impl Package {
 
     /// Get the packages that this package suggests.
     pub fn suggests(&self) -> Option<Relations> {
-        self.0.get("Suggests").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Suggests")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the packages that this package suggests.
@@ -683,7 +695,9 @@ impl Package {
 
     /// Get the packages that this package enhances.
     pub fn enhances(&self) -> Option<Relations> {
-        self.0.get("Enhances").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Enhances")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the packages that this package enhances.
@@ -693,7 +707,9 @@ impl Package {
 
     /// Get the relations that this package pre-depends on.
     pub fn pre_depends(&self) -> Option<Relations> {
-        self.0.get("Pre-Depends").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Pre-Depends")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the relations that this package pre-depends on.
@@ -703,7 +719,9 @@ impl Package {
 
     /// Get the relations that this package breaks.
     pub fn breaks(&self) -> Option<Relations> {
-        self.0.get("Breaks").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Breaks")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the relations that this package breaks.
@@ -713,7 +731,9 @@ impl Package {
 
     /// Get the relations that this package conflicts with.
     pub fn conflicts(&self) -> Option<Relations> {
-        self.0.get("Conflicts").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Conflicts")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the relations that this package conflicts with.
@@ -723,7 +743,9 @@ impl Package {
 
     /// Get the relations that this package replaces.
     pub fn replaces(&self) -> Option<Relations> {
-        self.0.get("Replaces").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Replaces")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the relations that this package replaces.
@@ -733,7 +755,9 @@ impl Package {
 
     /// Get the relations that this package provides.
     pub fn provides(&self) -> Option<Relations> {
-        self.0.get("Provides").map(|s| s.parse().unwrap())
+        self.0
+            .get_with_comments("Provides")
+            .map(|s| s.parse().unwrap())
     }
 
     /// Set the relations that the package provides.
