@@ -2661,7 +2661,7 @@ impl Relation {
                     n.detach();
                     break;
                 } else {
-                    panic!("Unexpected node: {:?}", n);
+                    break;
                 }
             }
 
@@ -5018,5 +5018,17 @@ Description: test
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].to_string(), "dh-python");
         assert_eq!(entries[1].to_string(), "libfoo-dev");
+    }
+
+    #[test]
+    fn test_relation_remove_first_with_malformed_tree() {
+        // Relaxed parsing can produce ERROR nodes inside an entry.
+        // Removing the first relation should not panic on unexpected tokens.
+        let (relations, errors) = Relations::parse_relaxed("foo @ bar | baz", false);
+        assert!(!errors.is_empty());
+        let mut entry = relations.get_entry(0).unwrap();
+        let mut relation = entry.get_relation(0).unwrap();
+        // Should not panic
+        relation.remove();
     }
 }
