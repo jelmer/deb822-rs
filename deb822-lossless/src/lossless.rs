@@ -360,7 +360,7 @@ pub(crate) fn parse(text: &str) -> Parse {
                     }
                 }
 
-                // Check for continuation lines
+                // Check for continuation lines or inline comments
                 if self.current() == Some(INDENT) {
                     self.bump();
                     self.skip_ws();
@@ -377,6 +377,11 @@ pub(crate) fn parse(text: &str) -> Parse {
                         self.builder.finish_node();
                         break;
                     }
+                } else if self.current() == Some(COMMENT) {
+                    // Comment line within a multi-line field value (e.g. commented-out
+                    // continuation lines in Build-Depends). Consume the comment and
+                    // continue looking for more continuation lines.
+                    self.bump();
                 } else {
                     break;
                 }
@@ -5620,4 +5625,31 @@ fn test_paragraph_at_position_at_boundary() {
     let para = deb822.paragraph_at_position(rowan::TextSize::from(15));
     assert!(para.is_some());
     assert_eq!(para.unwrap().get("Package").as_deref(), Some("bar"));
+}
+
+#[test]
+fn test_comment_in_multiline_value() {
+    // Commented-out continuation lines within a multi-line field value
+    // should be preserved losslessly and not cause parse errors.
+    let text = "\
+Build-Depends: dh-python,
+               libsvn-dev,
+#               python-all-dbg (>= 2.6.6-3),
+               python3-all-dev,
+#               python3-all-dbg,
+               python3-docutils
+Standards-Version: 4.7.0
+";
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let para = deb822.paragraphs().next().unwrap();
+    assert_eq!(
+        para.get("Build-Depends").as_deref(),
+        Some("dh-python,\nlibsvn-dev,\npython3-all-dev,\npython3-docutils")
+    );
+    assert_eq!(
+        para.get("Standards-Version").as_deref(),
+        Some("4.7.0")
+    );
+    // Round-trip
+    assert_eq!(deb822.to_string(), text);
 }
