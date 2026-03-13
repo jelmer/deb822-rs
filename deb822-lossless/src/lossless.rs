@@ -360,7 +360,7 @@ pub(crate) fn parse(text: &str) -> Parse {
                     }
                 }
 
-                // Check for continuation lines
+                // Check for continuation lines or inline comments
                 if self.current() == Some(INDENT) {
                     self.bump();
                     self.skip_ws();
@@ -377,6 +377,11 @@ pub(crate) fn parse(text: &str) -> Parse {
                         self.builder.finish_node();
                         break;
                     }
+                } else if self.current() == Some(COMMENT) {
+                    // Comment line within a multi-line field value (e.g. commented-out
+                    // continuation lines in Build-Depends). Consume the comment and
+                    // continue looking for more continuation lines.
+                    self.bump();
                 } else {
                     break;
                 }
@@ -1649,6 +1654,23 @@ impl Paragraph {
             .map(|e| e.value())
     }
 
+    /// Returns the value of the given key, including any comment lines embedded
+    /// within multi-line values.
+    ///
+    /// This is like [`get()`](Self::get) but also includes `#`-prefixed comment lines
+    /// that appear between continuation lines.
+    ///
+    /// Field names are compared case-insensitively.
+    pub fn get_with_comments(&self, key: &str) -> Option<String> {
+        self.entries()
+            .find(|e| {
+                e.key()
+                    .as_deref()
+                    .is_some_and(|k| k.eq_ignore_ascii_case(key))
+            })
+            .map(|e| e.value_with_comments())
+    }
+
     /// Returns the entry for the given key in the paragraph.
     ///
     /// Field names are compared case-insensitively.
@@ -2662,6 +2684,33 @@ impl Entry {
             .children_with_tokens()
             .filter_map(|it| it.into_token())
             .filter(|it| it.kind() == VALUE)
+            .map(|it| it.text().to_string());
+
+        match parts.next() {
+            None => String::new(),
+            Some(first) => {
+                let mut result = first;
+                for part in parts {
+                    result.push('\n');
+                    result.push_str(&part);
+                }
+                result
+            }
+        }
+    }
+
+    /// Returns the value of this entry, including any comment lines embedded
+    /// within the multi-line value.
+    ///
+    /// This is like [`value()`](Self::value) but also includes `#`-prefixed
+    /// comment lines that appear between continuation lines. This is useful
+    /// for parsers (e.g. Relations) that need to preserve commented-out entries.
+    pub fn value_with_comments(&self) -> String {
+        let mut parts = self
+            .0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .filter(|it| it.kind() == VALUE || it.kind() == COMMENT)
             .map(|it| it.text().to_string());
 
         match parts.next() {
@@ -5620,4 +5669,34 @@ fn test_paragraph_at_position_at_boundary() {
     let para = deb822.paragraph_at_position(rowan::TextSize::from(15));
     assert!(para.is_some());
     assert_eq!(para.unwrap().get("Package").as_deref(), Some("bar"));
+}
+
+#[test]
+fn test_comment_in_multiline_value() {
+    // Commented-out continuation lines within a multi-line field value
+    // should be preserved losslessly and not cause parse errors.
+    let text = "\
+Build-Depends: dh-python,
+               libsvn-dev,
+#               python-all-dbg (>= 2.6.6-3),
+               python3-all-dev,
+#               python3-all-dbg,
+               python3-docutils
+Standards-Version: 4.7.0
+";
+    let deb822 = text.parse::<Deb822>().unwrap();
+    let para = deb822.paragraphs().next().unwrap();
+    // get() returns the value without comments
+    assert_eq!(
+        para.get("Build-Depends").as_deref(),
+        Some("dh-python,\nlibsvn-dev,\npython3-all-dev,\npython3-docutils")
+    );
+    // get_with_comments() / value_with_comments() includes the comment lines
+    assert_eq!(
+        para.get_with_comments("Build-Depends").as_deref(),
+        Some("dh-python,\nlibsvn-dev,\n#               python-all-dbg (>= 2.6.6-3),\npython3-all-dev,\n#               python3-all-dbg,\npython3-docutils")
+    );
+    assert_eq!(para.get("Standards-Version").as_deref(), Some("4.7.0"));
+    // Round-trip
+    assert_eq!(deb822.to_string(), text);
 }
