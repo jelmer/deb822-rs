@@ -2682,6 +2682,33 @@ impl Entry {
         }
     }
 
+    /// Returns the value of this entry, including any comment lines embedded
+    /// within the multi-line value.
+    ///
+    /// This is like [`value()`](Self::value) but also includes `#`-prefixed
+    /// comment lines that appear between continuation lines. This is useful
+    /// for parsers (e.g. Relations) that need to preserve commented-out entries.
+    pub fn value_with_comments(&self) -> String {
+        let mut parts = self
+            .0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .filter(|it| it.kind() == VALUE || it.kind() == COMMENT)
+            .map(|it| it.text().to_string());
+
+        match parts.next() {
+            None => String::new(),
+            Some(first) => {
+                let mut result = first;
+                for part in parts {
+                    result.push('\n');
+                    result.push_str(&part);
+                }
+                result
+            }
+        }
+    }
+
     /// Returns the indentation string used for continuation lines in this entry.
     /// Returns None if the entry has no continuation lines.
     fn get_indent(&self) -> Option<String> {
@@ -5642,9 +5669,16 @@ Standards-Version: 4.7.0
 ";
     let deb822 = text.parse::<Deb822>().unwrap();
     let para = deb822.paragraphs().next().unwrap();
+    // get() returns the value without comments
     assert_eq!(
         para.get("Build-Depends").as_deref(),
         Some("dh-python,\nlibsvn-dev,\npython3-all-dev,\npython3-docutils")
+    );
+    // value_with_comments() includes the comment lines
+    let entry = para.get_entry("Build-Depends").unwrap();
+    assert_eq!(
+        entry.value_with_comments(),
+        "dh-python,\nlibsvn-dev,\n#               python-all-dbg (>= 2.6.6-3),\npython3-all-dev,\n#               python3-all-dbg,\npython3-docutils"
     );
     assert_eq!(
         para.get("Standards-Version").as_deref(),
