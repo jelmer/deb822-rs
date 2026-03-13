@@ -258,7 +258,7 @@ impl Buildinfo {
     /// Get the list of installed build depends
     pub fn installed_build_depends(&self) -> Option<Relations> {
         self.0
-            .get("Installed-Build-Depends")
+            .get_with_comments("Installed-Build-Depends")
             .map(|s| s.parse().unwrap())
     }
 

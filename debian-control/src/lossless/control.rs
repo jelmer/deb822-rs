@@ -670,7 +670,7 @@ impl Source {
     /// The build dependencies of the package.
     pub fn build_depends(&self) -> Option<Relations> {
         self.paragraph
-            .get("Build-Depends")
+            .get_with_comments("Build-Depends")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -682,7 +682,7 @@ impl Source {
     /// Return the Build-Depends-Indep field
     pub fn build_depends_indep(&self) -> Option<Relations> {
         self.paragraph
-            .get("Build-Depends-Indep")
+            .get_with_comments("Build-Depends-Indep")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -694,7 +694,7 @@ impl Source {
     /// Return the Build-Depends-Arch field
     pub fn build_depends_arch(&self) -> Option<Relations> {
         self.paragraph
-            .get("Build-Depends-Arch")
+            .get_with_comments("Build-Depends-Arch")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -706,7 +706,7 @@ impl Source {
     /// The build conflicts of the package.
     pub fn build_conflicts(&self) -> Option<Relations> {
         self.paragraph
-            .get("Build-Conflicts")
+            .get_with_comments("Build-Conflicts")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -718,7 +718,7 @@ impl Source {
     /// Return the Build-Conflicts-Indep field
     pub fn build_conflicts_indep(&self) -> Option<Relations> {
         self.paragraph
-            .get("Build-Conflicts-Indep")
+            .get_with_comments("Build-Conflicts-Indep")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -730,7 +730,7 @@ impl Source {
     /// Return the Build-Conflicts-Arch field
     pub fn build_conflicts_arch(&self) -> Option<Relations> {
         self.paragraph
-            .get("Build-Conflicts-Arch")
+            .get_with_comments("Build-Conflicts-Arch")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1198,7 +1198,7 @@ impl Binary {
     /// The dependencies of the package.
     pub fn depends(&self) -> Option<Relations> {
         self.paragraph
-            .get("Depends")
+            .get_with_comments("Depends")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1214,7 +1214,7 @@ impl Binary {
     /// The package that this package recommends
     pub fn recommends(&self) -> Option<Relations> {
         self.paragraph
-            .get("Recommends")
+            .get_with_comments("Recommends")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1230,7 +1230,7 @@ impl Binary {
     /// Packages that this package suggests
     pub fn suggests(&self) -> Option<Relations> {
         self.paragraph
-            .get("Suggests")
+            .get_with_comments("Suggests")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1246,7 +1246,7 @@ impl Binary {
     /// The package that this package enhances
     pub fn enhances(&self) -> Option<Relations> {
         self.paragraph
-            .get("Enhances")
+            .get_with_comments("Enhances")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1262,7 +1262,7 @@ impl Binary {
     /// The package that this package pre-depends on
     pub fn pre_depends(&self) -> Option<Relations> {
         self.paragraph
-            .get("Pre-Depends")
+            .get_with_comments("Pre-Depends")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1278,7 +1278,7 @@ impl Binary {
     /// The package that this package breaks
     pub fn breaks(&self) -> Option<Relations> {
         self.paragraph
-            .get("Breaks")
+            .get_with_comments("Breaks")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1294,7 +1294,7 @@ impl Binary {
     /// The package that this package conflicts with
     pub fn conflicts(&self) -> Option<Relations> {
         self.paragraph
-            .get("Conflicts")
+            .get_with_comments("Conflicts")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1310,7 +1310,7 @@ impl Binary {
     /// The package that this package replaces
     pub fn replaces(&self) -> Option<Relations> {
         self.paragraph
-            .get("Replaces")
+            .get_with_comments("Replaces")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1326,7 +1326,7 @@ impl Binary {
     /// Return the Provides field
     pub fn provides(&self) -> Option<Relations> {
         self.paragraph
-            .get("Provides")
+            .get_with_comments("Provides")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1342,7 +1342,7 @@ impl Binary {
     /// Return the Built-Using field
     pub fn built_using(&self) -> Option<Relations> {
         self.paragraph
-            .get("Built-Using")
+            .get_with_comments("Built-Using")
             .map(|s| self.parse_relations(&s))
     }
 
@@ -1358,7 +1358,7 @@ impl Binary {
     /// Return the Static-Built-Using field
     pub fn static_built_using(&self) -> Option<Relations> {
         self.paragraph
-            .get("Static-Built-Using")
+            .get_with_comments("Static-Built-Using")
             .map(|s| self.parse_relations(&s))
     }
 
