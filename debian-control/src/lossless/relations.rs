@@ -357,7 +357,10 @@ fn parse(text: &str, allow_substvar: bool) -> Parse {
             self.tokens.last().map(|(kind, _)| *kind)
         }
         fn skip_ws(&mut self) {
-            while self.current() == Some(WHITESPACE) || self.current() == Some(NEWLINE) {
+            while matches!(
+                self.current(),
+                Some(WHITESPACE) | Some(NEWLINE) | Some(COMMENT)
+            ) {
                 self.bump()
             }
         }
@@ -367,7 +370,7 @@ fn parse(text: &str, allow_substvar: bool) -> Parse {
             while i > 0 {
                 i -= 1;
                 match self.tokens[i].0 {
-                    WHITESPACE | NEWLINE => {}
+                    WHITESPACE | NEWLINE | COMMENT => {}
                     _ => return Some(self.tokens[i].0),
                 }
             }
@@ -709,12 +712,12 @@ impl Relations {
         entry
     }
 
-    /// Helper to collect all consecutive WHITESPACE/NEWLINE tokens starting from a node
+    /// Helper to collect all consecutive WHITESPACE/NEWLINE/COMMENT tokens starting from a node
     fn collect_whitespace(start: Option<NodeOrToken<SyntaxNode, SyntaxToken>>) -> String {
         let mut pattern = String::new();
         let mut current = start;
         while let Some(token) = current {
-            if matches!(token.kind(), WHITESPACE | NEWLINE) {
+            if matches!(token.kind(), WHITESPACE | NEWLINE | COMMENT) {
                 if let NodeOrToken::Token(t) = &token {
                     pattern.push_str(t.text());
                 }
@@ -734,10 +737,11 @@ impl Relations {
         }
     }
 
-    /// Helper to check if a token is whitespace
+    /// Helper to check if a token is whitespace or a comment
     fn is_whitespace_token(token: &GreenToken) -> bool {
         token.kind() == rowan::SyntaxKind(WHITESPACE as u16)
             || token.kind() == rowan::SyntaxKind(NEWLINE as u16)
+            || token.kind() == rowan::SyntaxKind(COMMENT as u16)
     }
 
     /// Helper to strip trailing whitespace tokens from a list of green children
@@ -790,9 +794,9 @@ impl Relations {
         for entry_node in self.entries() {
             let mut node = entry_node.0.next_sibling_or_token()?;
 
-            // Skip whitespace tokens and collect their text
+            // Skip whitespace/comment tokens and collect their text
             let mut before = String::new();
-            while matches!(node.kind(), WHITESPACE | NEWLINE) {
+            while matches!(node.kind(), WHITESPACE | NEWLINE | COMMENT) {
                 if let NodeOrToken::Token(t) = &node {
                     before.push_str(t.text());
                 }
@@ -853,8 +857,8 @@ impl Relations {
 
             // Look for comma and whitespace after this entry
             if let Some(mut node) = entry.0.next_sibling_or_token() {
-                // Skip any whitespace/newlines before the comma (odd syntax)
-                while matches!(node.kind(), WHITESPACE | NEWLINE) {
+                // Skip any whitespace/newlines/comments before the comma (odd syntax)
+                while matches!(node.kind(), WHITESPACE | NEWLINE | COMMENT) {
                     if let Some(next) = node.next_sibling_or_token() {
                         node = next;
                     } else {
@@ -1418,9 +1422,9 @@ impl Relations {
 
             let mut removed_comma = false;
 
-            // Remove whitespace and comma after the substvar
+            // Remove whitespace/comments and comma after the substvar
             while let Some(n) = substvar_node.0.next_sibling_or_token() {
-                if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                     n.detach();
                 } else if n.kind() == COMMA {
                     n.detach();
@@ -1431,10 +1435,10 @@ impl Relations {
                 }
             }
 
-            // If not first, remove preceding whitespace and comma
+            // If not first, remove preceding whitespace/comments and comma
             if !is_first {
                 while let Some(n) = substvar_node.0.prev_sibling_or_token() {
-                    if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                    if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                         n.detach();
                     } else if !removed_comma && n.kind() == COMMA {
                         n.detach();
@@ -1446,7 +1450,7 @@ impl Relations {
             } else {
                 // If first and we didn't remove a comma after, clean up any leading whitespace
                 while let Some(n) = substvar_node.0.next_sibling_or_token() {
-                    if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                    if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                         n.detach();
                     } else {
                         break;
@@ -1983,7 +1987,7 @@ impl Entry {
             .skip(1)
             .any(|n| n.kind() == ENTRY);
         while let Some(n) = self.0.next_sibling_or_token() {
-            if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+            if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                 n.detach();
             } else if n.kind() == COMMA {
                 n.detach();
@@ -1995,7 +1999,7 @@ impl Entry {
         }
         if !is_first {
             while let Some(n) = self.0.prev_sibling_or_token() {
-                if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                     n.detach();
                 } else if !removed_comma && n.kind() == COMMA {
                     n.detach();
@@ -2006,7 +2010,7 @@ impl Entry {
             }
         } else {
             while let Some(n) = self.0.next_sibling_or_token() {
-                if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                     n.detach();
                 } else {
                     break;
@@ -2631,7 +2635,7 @@ impl Relation {
             // Not the first item in the list. Remove whitespace backwards to the previous
             // pipe, the pipe and any whitespace until the previous relation
             while let Some(n) = self.0.prev_sibling_or_token() {
-                if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                     n.detach();
                 } else if n.kind() == PIPE {
                     n.detach();
@@ -2641,7 +2645,7 @@ impl Relation {
                 }
             }
             while let Some(n) = self.0.prev_sibling_or_token() {
-                if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                     n.detach();
                 } else {
                     break;
@@ -2651,7 +2655,7 @@ impl Relation {
             // First item in the list. Remove whitespace up to the pipe, the pipe and anything
             // before the next relation
             while let Some(n) = self.0.next_sibling_or_token() {
-                if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                     n.detach();
                 } else if n.kind() == PIPE {
                     n.detach();
@@ -2662,7 +2666,7 @@ impl Relation {
             }
 
             while let Some(n) = self.0.next_sibling_or_token() {
-                if n.kind() == WHITESPACE || n.kind() == NEWLINE {
+                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                     n.detach();
                 } else {
                     break;
@@ -4964,5 +4968,55 @@ Description: test
         let (relations, errors) = Relations::parse_relaxed("${", true);
         assert!(!errors.is_empty());
         assert_eq!(relations.to_string(), "${");
+    }
+
+    #[test]
+    fn test_parse_with_comments() {
+        let input = "dh-python,\nlibsvn-dev,\n#               python-all-dbg (>= 2.6.6-3),\npython3-all-dev,\n#               python3-all-dbg,\npython3-docutils";
+        let relations: Relations = input.parse().unwrap();
+        let entries: Vec<_> = relations.entries().collect();
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0].to_string(), "dh-python");
+        assert_eq!(entries[1].to_string(), "libsvn-dev");
+        assert_eq!(entries[2].to_string(), "python3-all-dev");
+        assert_eq!(entries[3].to_string(), "python3-docutils");
+        // Round-trip preserves comments
+        assert_eq!(relations.to_string(), input);
+    }
+
+    #[test]
+    fn test_remove_entry_with_adjacent_comment() {
+        let input = "dh-python,\n#  commented-out,\npython3-all-dev";
+        let mut relations: Relations = input.parse().unwrap();
+        assert_eq!(relations.entries().count(), 2);
+        relations.remove_entry(0);
+        assert_eq!(relations.entries().count(), 1);
+        assert_eq!(
+            relations.entries().next().unwrap().to_string(),
+            "python3-all-dev"
+        );
+    }
+
+    #[test]
+    fn test_insert_entry_with_comments_present() {
+        let input = "dh-python,\n#  commented-out,\npython3-all-dev";
+        let mut relations: Relations = input.parse().unwrap();
+        let new_entry: Entry = "libfoo-dev".parse().unwrap();
+        relations.push(new_entry);
+        // New entry should be appended
+        let entries: Vec<_> = relations.entries().collect();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[2].to_string(), "libfoo-dev");
+    }
+
+    #[test]
+    fn test_drop_dependency_with_comments() {
+        let input = "dh-python,\n#  commented-out,\npython3-all-dev,\nlibfoo-dev";
+        let mut relations: Relations = input.parse().unwrap();
+        assert!(relations.drop_dependency("python3-all-dev"));
+        let entries: Vec<_> = relations.entries().collect();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].to_string(), "dh-python");
+        assert_eq!(entries[1].to_string(), "libfoo-dev");
     }
 }

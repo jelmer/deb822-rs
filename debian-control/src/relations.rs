@@ -99,7 +99,8 @@ pub enum SyntaxKind {
     DOLLAR,     // $
     L_CURLY,
     R_CURLY,
-    ERROR, // as well as errors
+    COMMENT, // comment line starting with #
+    ERROR,   // as well as errors
 
     // composite nodes
     ROOT,       // The entire file
@@ -220,6 +221,10 @@ impl<'a> Lexer<'a> {
                 '\n' => {
                     self.input.next();
                     Some((SyntaxKind::NEWLINE, c.to_string()))
+                }
+                '#' => {
+                    let comment = self.read_while(|c| c != '\n');
+                    Some((SyntaxKind::COMMENT, comment))
                 }
                 _ if Self::is_whitespace(c) => {
                     let whitespace = self.read_while(Self::is_whitespace);
