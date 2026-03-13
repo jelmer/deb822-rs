@@ -5026,7 +5026,7 @@ Description: test
         // Removing the first relation should not panic on unexpected tokens.
         let (relations, errors) = Relations::parse_relaxed("foo @ bar | baz", false);
         assert!(!errors.is_empty());
-        let mut entry = relations.get_entry(0).unwrap();
+        let entry = relations.get_entry(0).unwrap();
         let mut relation = entry.get_relation(0).unwrap();
         // Should not panic
         relation.remove();
