@@ -2125,6 +2125,12 @@ License: Apache-2.0
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parse(deb822_lossless::Parse<Deb822>);
 
+impl From<deb822_lossless::Parse<Deb822>> for Parse {
+    fn from(parse: deb822_lossless::Parse<Deb822>) -> Self {
+        Parse(parse)
+    }
+}
+
 impl Parse {
     /// Parse copyright text, returning a Parse result
     pub fn parse(text: &str) -> Self {
