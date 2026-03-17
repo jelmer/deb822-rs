@@ -132,12 +132,11 @@ impl LegacyRepository {
             "by-hash" => self.by_hash = Some(YesNoForce::from_str(value)?),
             "allow-insecure" => self.allow_insecure = super::deserialize_yesno(value)?, // , default no
             "allow-weak" => self.allow_weak = super::deserialize_yesno(value)?, // , default no
-            "allow-downgrade-to-insecure" => self.allow_weak = super::deserialize_yesno(value)?, // , default no
+            "allow-downgrade-to-insecure" => {
+                self.allow_downgrade_to_insecure = super::deserialize_yesno(value)?
+            } // , default no
             "trusted" => self.trusted = Some(super::deserialize_yesno(value)?), // default not present is a third state
-            "signed-by" => {
-                self.signature = Some(Signature::KeyPath(PathBuf::from_str(value).unwrap()))
-                // TODO: PathBuf::from_str() has `Infallible` as `Err` type
-            }
+            "signed-by" => self.signature = Some(Signature::KeyPath(PathBuf::from(value))),
             any => return Err(RepositoryError::UnrecognizedFieldName(any.to_string())),
         };
         Ok(())
@@ -228,8 +227,13 @@ impl FromStr for LegacyRepositories {
                 options
                     .trim_matches(|c| c == '[' || c == ']')
                     .split_whitespace()
-                    .map(|o| o.splitn(2, '=').collect_tuple::<(&str, &str)>().unwrap()) // TODO: can we do something about `unwrap()`?
-                    //.map(|(k, v)| (k.to_deb822_option(), v)) // TODO: we don't need this
+                    .map(|o| {
+                        o.splitn(2, '=')
+                            .collect_tuple::<(&str, &str)>()
+                            .ok_or(RepositoryError::InvalidFormat)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
                     .try_for_each(|(k, v)| repository.assign_option_field(k, v))?;
                 repository.uri = Url::from_str(&caps["uri"])?;
                 repository.suite = caps["suite"].to_owned();
@@ -381,7 +385,7 @@ impl Display for LegacyRepository {
                 Cow::Borrowed("")
             },
             if self.allow_downgrade_to_insecure {
-                Cow::Owned("allow_downgrade_to_insecure=yes".to_string())
+                Cow::Owned("allow-downgrade-to-insecure=yes".to_string())
             } else {
                 Cow::Borrowed("")
             },
@@ -475,9 +479,9 @@ mod tests {
         assert_eq!(repository.architectures, vec!["arm64".to_owned()]);
         assert_eq!(
             repository.signature,
-            Some(Signature::KeyPath(
-                PathBuf::from_str("/usr/share/keyrings/rcn-ee-archive-keyring.gpg").unwrap()
-            ))
+            Some(Signature::KeyPath(PathBuf::from(
+                "/usr/share/keyrings/rcn-ee-archive-keyring.gpg"
+            )))
         );
         assert_eq!(repository.typ, RepositoryType::Binary);
         assert_eq!(repository.uri, url!("http://debian.beagleboard.org/arm64/"));
@@ -656,5 +660,40 @@ mod tests {
             display,
             "deb http://example.com/ubuntu jammy main\ndeb-src http://example.com/ubuntu jammy main"
         );
+    }
+
+    #[test]
+    fn test_allow_downgrade_to_insecure_parsing() {
+        let input = "deb [allow-downgrade-to-insecure=yes] http://example.com/ubuntu jammy main\n";
+        let repos = LegacyRepositories::from_str(input).unwrap();
+        assert_eq!(repos.len(), 1);
+        let repo = repos.iter().nth(0).unwrap();
+        assert!(repo.allow_downgrade_to_insecure);
+        assert!(!repo.allow_weak);
+    }
+
+    #[test]
+    fn test_allow_downgrade_to_insecure_display() {
+        let repo = LegacyRepository {
+            enabled: true,
+            typ: RepositoryType::Binary,
+            uri: url!("http://example.com/ubuntu"),
+            suite: "jammy".to_string(),
+            components: vec!["main".to_string()],
+            allow_downgrade_to_insecure: true,
+            ..Default::default()
+        };
+        let text = repo.to_string();
+        assert_eq!(
+            text,
+            "deb [allow-downgrade-to-insecure=yes] http://example.com/ubuntu jammy main"
+        );
+    }
+
+    #[test]
+    fn test_malformed_option_without_equals() {
+        let input = "deb [badoption] http://example.com/ubuntu jammy main\n";
+        let result = LegacyRepositories::from_str(input);
+        assert!(result.is_err());
     }
 }

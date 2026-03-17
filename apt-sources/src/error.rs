@@ -75,8 +75,6 @@ impl std::fmt::Display for RepositoryError {
         // Spare longer messages to split lines by `rustfmt`
         const YNFERRMSG: &str = "The field requiring only `Yes`/`No`/`Force` values is incorrect";
         const YNERRMSG: &str = "The field requiring only `Yes`/`No` values is incorrect";
-        const UFNERRMSG: &str =
-            "The field in the parsed data is not recognized (check `man sources.list`)";
         match self {
             Self::InvalidFormat => write!(f, "Invalid repository format"),
             Self::InvalidUri => write!(f, "Invalid repository URI"),
@@ -85,7 +83,10 @@ impl std::fmt::Display for RepositoryError {
             Self::InvalidSignature => write!(f, "The field `Signed-By` is incorrect"),
             Self::YesNoForceFieldInvalid => f.write_str(YNFERRMSG),
             Self::YesNoFieldInvalid => f.write_str(YNERRMSG),
-            Self::UnrecognizedFieldName(_) => f.write_str(UFNERRMSG), // TODO: dump the field name
+            Self::UnrecognizedFieldName(name) => write!(
+                f,
+                "Unrecognized field name: {name} (check `man sources.list`)"
+            ),
             Self::Lossy(e) => write!(f, "Lossy parser error: {e}"),
             Self::Io(e) => write!(f, "IO error: {e}"),
             Self::Url(e) => write!(f, "URL parse error: {e}"),
@@ -143,6 +144,12 @@ mod tests {
         assert_eq!(
             RepositoryError::InvalidSignature.to_string(),
             "The field `Signed-By` is incorrect"
+        );
+
+        // Test unrecognized field name includes the field name
+        assert_eq!(
+            RepositoryError::UnrecognizedFieldName("foo-bar".to_string()).to_string(),
+            "Unrecognized field name: foo-bar (check `man sources.list`)"
         );
 
         // Test lossy error
