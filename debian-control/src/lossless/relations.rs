@@ -456,7 +456,7 @@ impl PartialEq for Entry {
 
 impl PartialEq for Relation {
     fn eq(&self, other: &Self) -> bool {
-        self.name() == other.name()
+        self.try_name() == other.try_name()
             && self.version() == other.version()
             && self.archqual() == other.archqual()
             && self.architectures().map(|x| x.collect::<HashSet<_>>())
@@ -527,7 +527,7 @@ impl std::fmt::Debug for Relation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct("Relation");
 
-        s.field("name", &self.name());
+        s.field("name", &self.try_name());
 
         if let Some((vc, version)) = self.version() {
             s.field("version", &vc);
@@ -1085,11 +1085,11 @@ impl Relations {
             let relations: Vec<_> = entry.relations().collect();
 
             // Check if this entry has multiple alternatives with our package
-            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+            let names: Vec<_> = relations.iter().filter_map(|r| r.try_name()).collect();
             if names.len() > 1 && names.contains(&package.to_string()) {
                 // This is a complex alternative relation, mark for removal if obsolete
                 let is_obsolete = relations.iter().any(|r| {
-                    if r.name() != package {
+                    if r.try_name().as_deref() != Some(package) {
                         return false;
                     }
                     if let Some((vc, ver)) = r.version() {
@@ -1177,7 +1177,7 @@ impl Relations {
         let entries: Vec<_> = self.entries().collect();
         for (idx, entry) in entries.iter().enumerate() {
             let relations: Vec<_> = entry.relations().collect();
-            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+            let names: Vec<_> = relations.iter().filter_map(|r| r.try_name()).collect();
 
             if names.len() > 1 && names[0] == package {
                 panic!("Complex rule for {}, aborting", package);
@@ -1237,7 +1237,7 @@ impl Relations {
     pub fn ensure_some_version(&mut self, package: &str) {
         for entry in self.entries() {
             let relations: Vec<_> = entry.relations().collect();
-            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+            let names: Vec<_> = relations.iter().filter_map(|r| r.try_name()).collect();
 
             if names.len() > 1 && names[0] == package {
                 panic!("Complex rule for {}, aborting", package);
@@ -1518,7 +1518,9 @@ impl Relations {
                 continue;
             };
 
-            let name = relation.name();
+            let Some(name) = relation.try_name() else {
+                continue;
+            };
 
             // Skip items that should be ignored
             if sorting_order.ignore(&name) {
@@ -1554,7 +1556,9 @@ impl Relations {
             // Empty entry, just append at the end
             return self.len();
         };
-        let package_name = relation.name();
+        let Some(package_name) = relation.try_name() else {
+            return self.len();
+        };
 
         // Count non-empty entries
         let count = self.entries().filter(|e| !e.is_empty()).count();
@@ -1590,7 +1594,10 @@ impl Relations {
                 continue;
             };
 
-            let existing_name = existing_relation.name();
+            let Some(existing_name) = existing_relation.try_name() else {
+                position += 1;
+                continue;
+            };
 
             // Skip special items when finding insertion position
             if sorting_order.ignore(&existing_name) {
@@ -1631,7 +1638,7 @@ impl Relations {
             .enumerate()
             .filter_map(|(idx, entry)| {
                 let relations: Vec<_> = entry.relations().collect();
-                let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+                let names: Vec<_> = relations.iter().filter_map(|r| r.try_name()).collect();
                 if names == vec![package] {
                     Some(idx)
                 } else {
@@ -1701,7 +1708,7 @@ impl Relations {
     pub fn get_relation(&self, package: &str) -> Result<(usize, Entry), String> {
         for (idx, entry) in self.entries().enumerate() {
             let relations: Vec<_> = entry.relations().collect();
-            let names: Vec<_> = relations.iter().map(|r| r.name()).collect();
+            let names: Vec<_> = relations.iter().filter_map(|r| r.try_name()).collect();
 
             if names.len() > 1 && names.contains(&package.to_string()) {
                 return Err(format!("Complex rule for {}, aborting", package));
@@ -1733,7 +1740,7 @@ impl Relations {
     pub fn iter_relations_for(&self, package: &str) -> impl Iterator<Item = (usize, Entry)> + '_ {
         let package = package.to_string();
         self.entries().enumerate().filter(move |(_, entry)| {
-            let names: Vec<_> = entry.relations().map(|r| r.name()).collect();
+            let names: Vec<_> = entry.relations().filter_map(|r| r.try_name()).collect();
             names.contains(&package)
         })
     }
@@ -1755,8 +1762,11 @@ impl Relations {
     /// assert!(!relations.has_relation("nonexistent"));
     /// ```
     pub fn has_relation(&self, package: &str) -> bool {
-        self.entries()
-            .any(|entry| entry.relations().any(|r| r.name() == package))
+        self.entries().any(|entry| {
+            entry
+                .relations()
+                .any(|r| r.try_name().as_deref() == Some(package))
+        })
     }
 }
 
@@ -1950,7 +1960,10 @@ impl Entry {
     /// ```
     pub fn satisfied_by(&self, package_version: impl crate::VersionLookup + Copy) -> bool {
         self.relations().any(|r| {
-            let actual = package_version.lookup_version(r.name().as_str());
+            let Some(name) = r.try_name() else {
+                return false;
+            };
+            let actual = package_version.lookup_version(name.as_str());
             if let Some((vc, version)) = r.version() {
                 if let Some(actual) = actual {
                     match vc {
@@ -2259,7 +2272,9 @@ impl Relation {
     pub fn wrap_and_sort(&self) -> Self {
         let mut builder = GreenNodeBuilder::new();
         builder.start_node(SyntaxKind::RELATION.into());
-        builder.token(IDENT.into(), self.name().as_str());
+        if let Some(name) = self.try_name() {
+            builder.token(IDENT.into(), name.as_str());
+        }
         if let Some(archqual) = self.archqual() {
             builder.token(COLON.into(), ":");
             builder.token(IDENT.into(), archqual.as_str());
@@ -2363,7 +2378,32 @@ impl Relation {
         false
     }
 
+    /// Return the name of the package in the relation, if present.
+    ///
+    /// Returns `None` for malformed relations that lack a package name
+    /// (e.g. when substvars are parsed without substvar support).
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relation;
+    /// let relation = Relation::simple("samba");
+    /// assert_eq!(relation.try_name(), Some("samba".to_string()));
+    /// ```
+    pub fn try_name(&self) -> Option<String> {
+        self.0
+            .children_with_tokens()
+            .find_map(|it| match it {
+                SyntaxElement::Token(token) if token.kind() == IDENT => Some(token),
+                _ => None,
+            })
+            .map(|token| token.text().to_string())
+    }
+
     /// Return the name of the package in the relation.
+    ///
+    /// # Panics
+    /// Panics if the relation has no package name (e.g. malformed input).
+    /// Prefer [`try_name`](Self::try_name) for potentially malformed relations.
     ///
     /// # Example
     /// ```
@@ -2371,16 +2411,12 @@ impl Relation {
     /// let relation = Relation::simple("samba");
     /// assert_eq!(relation.name(), "samba");
     /// ```
+    #[deprecated(
+        since = "0.3.6",
+        note = "Use try_name() instead, which returns Option<String>"
+    )]
     pub fn name(&self) -> String {
-        self.0
-            .children_with_tokens()
-            .find_map(|it| match it {
-                SyntaxElement::Token(token) if token.kind() == IDENT => Some(token),
-                _ => None,
-            })
-            .unwrap()
-            .text()
-            .to_string()
+        self.try_name().expect("Relation has no package name")
     }
 
     /// Return the archqual
@@ -2837,7 +2873,7 @@ impl Relation {
     /// assert!(inner2.is_implied_by(&outer));
     /// ```
     pub fn is_implied_by(&self, outer: &Relation) -> bool {
-        if self.name() != outer.name() {
+        if self.try_name() != outer.try_name() {
             return false;
         }
 
@@ -2981,7 +3017,7 @@ impl Eq for Relation {}
 impl Ord for Relation {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Compare by name first, then by version
-        let name_cmp = self.name().cmp(&other.name());
+        let name_cmp = self.try_name().cmp(&other.try_name());
         if name_cmp != std::cmp::Ordering::Equal {
             return name_cmp;
         }
@@ -3085,7 +3121,7 @@ impl From<crate::lossy::Relation> for Relation {
 impl From<Relation> for crate::lossy::Relation {
     fn from(relation: Relation) -> Self {
         crate::lossy::Relation {
-            name: relation.name(),
+            name: relation.try_name().unwrap_or_default(),
             version: relation.version(),
             archqual: relation.archqual(),
             architectures: relation.architectures().map(|a| a.collect()),
