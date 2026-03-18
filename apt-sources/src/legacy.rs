@@ -3,7 +3,7 @@
 //!
 //! # Examples
 //! ```
-//! # use url_macro::url;
+//! # use url::Url;
 //! # use apt_sources::legacy::LegacyRepositories;
 //! # use std::str::FromStr;
 //! let single_line = "deb http://archive.ubuntu.com/ubuntu jammy main restricted";
@@ -11,7 +11,7 @@
 //!     .expect("Shall not fail for correct list entry!");
 //! assert_eq!(repositories.len(), 1);
 //! let repository = repositories.iter().nth(0).expect("Shall not fail for first line");
-//! assert_eq!(repository.uri, url!("http://archive.ubuntu.com/ubuntu"));
+//! assert_eq!(repository.uri, "http://archive.ubuntu.com/ubuntu".parse::<Url>().unwrap());
 //! ```
 use super::RepositoryError;
 use super::RepositoryType;
@@ -28,7 +28,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
 use url::Url;
-use url_macro::url;
 
 /// A structure representing APT repository as declared by one-line-style `.list` file:
 /// ```text
@@ -104,7 +103,7 @@ impl Default for LegacyRepository {
         Self {
             enabled: true,
             typ: RepositoryType::Binary,
-            uri: url!("http://nowhere.com"),
+            uri: "http://nowhere.com".parse().unwrap(),
             suite: "none".to_string(),
             components: vec![],
             architectures: vec![],
@@ -484,7 +483,12 @@ mod tests {
             )))
         );
         assert_eq!(repository.typ, RepositoryType::Binary);
-        assert_eq!(repository.uri, url!("http://debian.beagleboard.org/arm64/"));
+        assert_eq!(
+            repository.uri,
+            "http://debian.beagleboard.org/arm64/"
+                .parse::<Url>()
+                .unwrap()
+        );
         assert_eq!(repository.suite, "jammy".to_owned());
         assert_eq!(repository.components, vec!["main".to_owned()]);
     }
@@ -559,7 +563,7 @@ mod tests {
         let sample = LegacyRepository {
             enabled: true,
             typ: RepositoryType::Binary,
-            uri: url!("http://debian.beagleboard.org/arm64/"),
+            uri: "http://debian.beagleboard.org/arm64/".parse().unwrap(),
             suite: "jammy".to_string(),
             components: vec!["main".to_string()],
             architectures: vec![],
@@ -586,7 +590,7 @@ mod tests {
         let sample = LegacyRepository {
             enabled: true,
             typ: RepositoryType::Binary,
-            uri: url!("http://debian.beagleboard.org/arm64/"),
+            uri: "http://debian.beagleboard.org/arm64/".parse().unwrap(),
             suite: "jammy".to_string(),
             components: vec!["main".to_string()],
             architectures: vec!["amd64".to_string()],
@@ -617,7 +621,7 @@ mod tests {
         let repo = Repository {
             enabled: Some(true),
             types: HashSet::from([RepositoryType::Binary, RepositoryType::Source]),
-            uris: vec![url!("http://archive.ubuntu.com/ubuntu")],
+            uris: vec!["http://archive.ubuntu.com/ubuntu".parse().unwrap()],
             suites: vec!["jammy".to_string()],
             components: Some(vec!["main".to_string(), "universe".to_string()]),
             architectures: vec!["amd64".to_string()],
@@ -640,7 +644,7 @@ mod tests {
             LegacyRepository {
                 enabled: true,
                 typ: RepositoryType::Binary,
-                uri: url!("http://example.com/ubuntu"),
+                uri: "http://example.com/ubuntu".parse().unwrap(),
                 suite: "jammy".to_string(),
                 components: vec!["main".to_string()],
                 ..Default::default()
@@ -648,7 +652,7 @@ mod tests {
             LegacyRepository {
                 enabled: true,
                 typ: RepositoryType::Source,
-                uri: url!("http://example.com/ubuntu"),
+                uri: "http://example.com/ubuntu".parse().unwrap(),
                 suite: "jammy".to_string(),
                 components: vec!["main".to_string()],
                 ..Default::default()
@@ -677,7 +681,7 @@ mod tests {
         let repo = LegacyRepository {
             enabled: true,
             typ: RepositoryType::Binary,
-            uri: url!("http://example.com/ubuntu"),
+            uri: "http://example.com/ubuntu".parse().unwrap(),
             suite: "jammy".to_string(),
             components: vec!["main".to_string()],
             allow_downgrade_to_insecure: true,
