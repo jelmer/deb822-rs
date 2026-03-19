@@ -1026,10 +1026,12 @@ impl Relations {
 
     /// Return the names of substvars in this relations field
     pub fn substvars(&self) -> impl Iterator<Item = String> + '_ {
-        self.0
-            .children()
-            .filter_map(Substvar::cast)
-            .map(|s| s.to_string())
+        self.substvar_nodes().map(|s| s.to_string())
+    }
+
+    /// Return the substvar nodes in this relations field
+    pub fn substvar_nodes(&self) -> impl Iterator<Item = Substvar> + '_ {
+        self.0.children().filter_map(Substvar::cast)
     }
 
     /// Parse a relations field from a string, allowing syntax errors
@@ -3286,6 +3288,27 @@ mod tests {
             parsed.substvars().collect::<Vec<_>>(),
             vec!["${shlibs:Depends}"]
         );
+    }
+
+    #[test]
+    fn test_substvar_nodes() {
+        let input = "foo, ${shlibs:Depends}, bar, ${misc:Depends}";
+
+        let (parsed, errors) = Relations::parse_relaxed(input, true);
+        assert_eq!(errors, Vec::<String>::new());
+
+        let substvar_nodes: Vec<Substvar> = parsed.substvar_nodes().collect();
+        assert_eq!(substvar_nodes.len(), 2);
+        assert_eq!(substvar_nodes[0].to_string(), "${shlibs:Depends}");
+        assert_eq!(substvar_nodes[1].to_string(), "${misc:Depends}");
+    }
+
+    #[test]
+    fn test_substvar_nodes_empty() {
+        let parsed: Relations = "foo, bar".parse().unwrap();
+
+        let substvar_nodes: Vec<Substvar> = parsed.substvar_nodes().collect();
+        assert_eq!(substvar_nodes.len(), 0);
     }
 
     #[test]
