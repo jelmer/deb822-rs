@@ -50,7 +50,9 @@ pub const CURRENT_FORMAT: &str =
 /// The known versions of the DEP-5 format.
 pub const KNOWN_FORMATS: &[&str] = &[CURRENT_FORMAT];
 
+pub mod expression;
 mod glob;
+pub use expression::LicenseExpr;
 
 /// Decode deb822 paragraph markers in a multi-line field value.
 ///
@@ -121,6 +123,10 @@ pub enum License {
 
 impl License {
     /// Returns the name of the license, if any.
+    ///
+    /// Note that this may be a license expression containing multiple licenses
+    /// combined with `or`, `and`, or `with`. Use [`License::expr`] to parse
+    /// the expression into a structured [`LicenseExpr`].
     pub fn name(&self) -> Option<&str> {
         match self {
             License::Name(name) => Some(name),
@@ -136,6 +142,28 @@ impl License {
             License::Text(text) => Some(text),
             License::Named(_, text) => Some(text),
         }
+    }
+
+    /// Parse the license name as a structured expression.
+    ///
+    /// Returns `None` if the license has no name (i.e. is a `Text` variant).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use debian_copyright::{License, LicenseExpr};
+    ///
+    /// let license = License::Name("GPL-2+ or MIT".to_string());
+    /// assert_eq!(
+    ///     license.expr(),
+    ///     Some(LicenseExpr::Or(vec![
+    ///         LicenseExpr::Name("GPL-2+".to_string()),
+    ///         LicenseExpr::Name("MIT".to_string()),
+    ///     ])),
+    /// );
+    /// ```
+    pub fn expr(&self) -> Option<LicenseExpr> {
+        self.name().map(LicenseExpr::parse)
     }
 }
 
