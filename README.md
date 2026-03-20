@@ -15,3 +15,4 @@ Four related crates that build on these two crates are:
 * [r-description](https://github.com/jelmer/r-description-rs): A parser and
 editor for R DESCRIPTION files.
 * ``apt-sources``: A parser and editor for APT source files (package repositories specification).
+* [debian-watch](https://github.com/jelmer/debian-watch-rs): A parser and editor for debian/watch files (format 5+ is de8b22-based)
