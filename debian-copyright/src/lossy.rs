@@ -184,7 +184,7 @@ impl FilesParagraph {
     pub fn matches(&self, filename: &std::path::Path) -> bool {
         self.files
             .iter()
-            .any(|f| crate::glob::glob_to_regex(f).is_match(filename.to_str().unwrap()))
+            .any(|f| crate::GlobPattern::new(f).is_match(filename.to_str().unwrap()))
     }
 }
 
