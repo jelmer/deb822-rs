@@ -671,6 +671,67 @@ impl std::fmt::Display for DgitInfo {
     }
 }
 
+/// A list of checksums (multiline field)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChecksumList<T>(pub Vec<T>);
+
+impl<T: FromStr> FromStr for ChecksumList<T> {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut checksums = Vec::new();
+        for line in s.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            checksums.push(
+                line.parse()
+                    .map_err(|_| format!("Failed to parse checksum: {}", line))?,
+            );
+        }
+        Ok(Self(checksums))
+    }
+}
+
+impl<T: std::fmt::Display> std::fmt::Display for ChecksumList<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        for checksum in &self.0 {
+            writeln!(f, "{}", checksum)?;
+        }
+        Ok(())
+    }
+}
+
+/// A list of package list entries (multiline field)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageList(pub Vec<PackageListEntry>);
+
+impl FromStr for PackageList {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut entries = Vec::new();
+        for line in s.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            entries.push(line.parse()?);
+        }
+        Ok(Self(entries))
+    }
+}
+
+impl std::fmt::Display for PackageList {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        for entry in &self.0 {
+            writeln!(f, "{}", entry)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -892,5 +953,88 @@ mod tests {
         assert!("abc123 debian ref url extra".parse::<DgitInfo>().is_err());
         // Empty string
         assert!("".parse::<DgitInfo>().is_err());
+    }
+
+    #[test]
+    fn test_checksum_list_parse_md5() {
+        let input = "d41d8cd98f00b204e9800998ecf8427e 0 file1.txt\n5d41402abc4b2a76b9719d911017c592 5 file2.txt";
+        let list: ChecksumList<Md5Checksum> = input.parse().unwrap();
+        assert_eq!(list.0.len(), 2);
+        assert_eq!(list.0[0].md5sum, "d41d8cd98f00b204e9800998ecf8427e");
+        assert_eq!(list.0[0].size, 0);
+        assert_eq!(list.0[0].filename, "file1.txt");
+        assert_eq!(list.0[1].md5sum, "5d41402abc4b2a76b9719d911017c592");
+        assert_eq!(list.0[1].size, 5);
+        assert_eq!(list.0[1].filename, "file2.txt");
+    }
+
+    #[test]
+    fn test_checksum_list_parse_sha256() {
+        let input = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 0 empty.txt";
+        let list: ChecksumList<Sha256Checksum> = input.parse().unwrap();
+        assert_eq!(list.0.len(), 1);
+        assert_eq!(
+            list.0[0].sha256,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(list.0[0].size, 0);
+        assert_eq!(list.0[0].filename, "empty.txt");
+    }
+
+    #[test]
+    fn test_checksum_list_empty_lines() {
+        let input = "d41d8cd98f00b204e9800998ecf8427e 0 file1.txt\n\n5d41402abc4b2a76b9719d911017c592 5 file2.txt\n";
+        let list: ChecksumList<Md5Checksum> = input.parse().unwrap();
+        assert_eq!(list.0.len(), 2);
+    }
+
+    #[test]
+    fn test_checksum_list_display() {
+        let list = ChecksumList(vec![
+            Md5Checksum {
+                md5sum: "d41d8cd98f00b204e9800998ecf8427e".to_string(),
+                size: 0,
+                filename: "file1.txt".to_string(),
+            },
+            Md5Checksum {
+                md5sum: "5d41402abc4b2a76b9719d911017c592".to_string(),
+                size: 5,
+                filename: "file2.txt".to_string(),
+            },
+        ]);
+        let output = list.to_string();
+        assert!(output.contains("d41d8cd98f00b204e9800998ecf8427e 0 file1.txt"));
+        assert!(output.contains("5d41402abc4b2a76b9719d911017c592 5 file2.txt"));
+    }
+
+    #[test]
+    fn test_package_list_parse() {
+        let input = "pkg1 deb main optional\npkg2 deb contrib extra arch=amd64";
+        let list: PackageList = input.parse().unwrap();
+        assert_eq!(list.0.len(), 2);
+        assert_eq!(list.0[0].package, "pkg1");
+        assert_eq!(list.0[0].package_type, "deb");
+        assert_eq!(list.0[0].section, "main");
+        assert_eq!(list.0[0].priority, Priority::Optional);
+        assert_eq!(list.0[1].package, "pkg2");
+        assert_eq!(list.0[1].extra.get("arch"), Some(&"amd64".to_string()));
+    }
+
+    #[test]
+    fn test_package_list_empty_lines() {
+        let input = "pkg1 deb main optional\n\npkg2 deb contrib extra";
+        let list: PackageList = input.parse().unwrap();
+        assert_eq!(list.0.len(), 2);
+    }
+
+    #[test]
+    fn test_package_list_display() {
+        let list = PackageList(vec![
+            PackageListEntry::new("pkg1", "deb", "main", Priority::Optional),
+            PackageListEntry::new("pkg2", "deb", "contrib", Priority::Extra),
+        ]);
+        let output = list.to_string();
+        assert!(output.contains("pkg1 deb main optional"));
+        assert!(output.contains("pkg2 deb contrib extra"));
     }
 }
