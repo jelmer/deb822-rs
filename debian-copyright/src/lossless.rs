@@ -605,6 +605,26 @@ impl Header {
             .set_with_field_order("Files-Included", &files.join("\n"), HEADER_FIELD_ORDER);
     }
 
+    /// Check whether a file is included in the upstream source.
+    ///
+    /// A file is considered excluded if it matches any pattern in `Files-Excluded`
+    /// and does not match any pattern in `Files-Included`. If there are no
+    /// `Files-Excluded` entries, all files are considered included.
+    pub fn is_file_included(&self, filename: &Path) -> bool {
+        let excluded = self.files_excluded().unwrap_or_default();
+        let fname = filename.to_str().unwrap();
+        let is_excluded = excluded
+            .iter()
+            .any(|pattern| crate::GlobPattern::new(pattern).is_match(fname));
+        if !is_excluded {
+            return true;
+        }
+        let included = self.files_included().unwrap_or_default();
+        included
+            .iter()
+            .any(|pattern| crate::GlobPattern::new(pattern).is_match(fname))
+    }
+
     /// Fix the the header paragraph
     ///
     /// Currently this just renames `Format-Specification` to `Format` and replaces older format
@@ -2167,10 +2187,7 @@ Copyright: 2019 John Doe
         header.set_files_included(&["src/important.c", "docs/*"]);
         assert_eq!(
             header.files_included(),
-            Some(vec![
-                "src/important.c".to_string(),
-                "docs/*".to_string(),
-            ])
+            Some(vec!["src/important.c".to_string(), "docs/*".to_string(),])
         );
     }
 
@@ -2201,10 +2218,7 @@ Copyright: 2019 John Doe
         let copyright = s.parse::<super::Copyright>().expect("failed to parse");
         assert_eq!(
             copyright.header().unwrap().files_excluded(),
-            Some(vec![
-                "vendor/*".to_string(),
-                ".github/*".to_string(),
-            ])
+            Some(vec!["vendor/*".to_string(), ".github/*".to_string(),])
         );
     }
 
@@ -2222,11 +2236,57 @@ Copyright: 2019 John Doe
         header.set_files_excluded(&["vendor/*", ".github/*"]);
         assert_eq!(
             header.files_excluded(),
-            Some(vec![
-                "vendor/*".to_string(),
-                ".github/*".to_string(),
-            ])
+            Some(vec!["vendor/*".to_string(), ".github/*".to_string(),])
         );
+    }
+
+    #[test]
+    fn test_is_file_included_no_exclusions() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: example
+
+Files: *
+License: GPL-3+
+Copyright: 2019 John Doe
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let header = copyright.header().unwrap();
+        assert!(header.is_file_included(std::path::Path::new("src/foo.c")));
+        assert!(header.is_file_included(std::path::Path::new("vendor/lib.c")));
+    }
+
+    #[test]
+    fn test_is_file_included_with_exclusion() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: example
+Files-Excluded: vendor/*
+
+Files: *
+License: GPL-3+
+Copyright: 2019 John Doe
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let header = copyright.header().unwrap();
+        assert!(header.is_file_included(std::path::Path::new("src/foo.c")));
+        assert!(!header.is_file_included(std::path::Path::new("vendor/lib.c")));
+    }
+
+    #[test]
+    fn test_is_file_included_with_reinclude() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: example
+Files-Excluded: vendor/*
+Files-Included: vendor/important.c
+
+Files: *
+License: GPL-3+
+Copyright: 2019 John Doe
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let header = copyright.header().unwrap();
+        assert!(header.is_file_included(std::path::Path::new("src/foo.c")));
+        assert!(!header.is_file_included(std::path::Path::new("vendor/lib.c")));
+        assert!(header.is_file_included(std::path::Path::new("vendor/important.c")));
     }
 
     #[test]
