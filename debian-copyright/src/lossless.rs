@@ -2366,6 +2366,14 @@ impl Parse {
     }
 
     /// Convert to a Copyright object
+    ///
+    /// Returns an empty Copyright if there are any parse errors.
+    /// Prefer [`tree()`](Self::tree) which returns the parsed tree
+    /// regardless of errors, allowing error-tolerant tooling.
+    #[deprecated(
+        since = "0.1.48",
+        note = "use tree() instead, which preserves content even with parse errors"
+    )]
     pub fn to_copyright(&self) -> Copyright {
         if let Ok(deb822) = self.0.clone().to_result() {
             Copyright(deb822)
