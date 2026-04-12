@@ -499,9 +499,7 @@ pub(crate) fn parse(text: &str) -> Parse {
         fn bump(&mut self) {
             let (kind, text) = self.tokens.pop().unwrap();
             self.builder.token(kind.into(), text);
-            if self.current_token_index > 0 {
-                self.current_token_index -= 1;
-            }
+            self.current_token_index += 1;
         }
         /// Peek at the first unprocessed token
         fn current(&self) -> Option<SyntaxKind> {
@@ -566,7 +564,7 @@ pub(crate) fn parse(text: &str) -> Parse {
 
     // Reverse tokens for parsing (but keep positions in forward order)
     tokens.reverse();
-    let current_token_index = tokens.len().saturating_sub(1);
+    let current_token_index = 0;
 
     Parser {
         tokens,
@@ -4130,6 +4128,50 @@ Description: Valid
         // Error should point to the problematic location
         let error_text = &input[first_error.range.start().into()..first_error.range.end().into()];
         assert!(!error_text.is_empty());
+    }
+
+    #[test]
+    fn test_positioned_error_range_is_within_input() {
+        let input = "Package test\nDescription: Valid\n";
+        let parsed = super::parse(input);
+
+        for e in &parsed.positioned_errors {
+            eprintln!("message: {:?}", e.message);
+            eprintln!("range: {:?}", e.range);
+            eprintln!("code: {:?}", e.code);
+            let text = &input[usize::from(e.range.start())..usize::from(e.range.end())];
+            eprintln!("text: {:?}", text);
+        }
+
+        assert!(!parsed.positioned_errors.is_empty());
+
+        let first_error = &parsed.positioned_errors[0];
+        assert!(!first_error.message.is_empty());
+        assert!(first_error.code.is_some());
+
+        let start: usize = first_error.range.start().into();
+        let end: usize = first_error.range.end().into();
+        assert!(start <= input.len());
+        assert!(end <= input.len());
+        assert!(start <= end);
+
+        assert!(start < "Package test\n".len());
+    }
+
+    #[test]
+    fn test_positioned_error_points_to_correct_token() {
+        let input = "Package test\nDescription: Valid\n";
+        let parsed = super::parse(input);
+
+        assert!(!parsed.positioned_errors.is_empty());
+
+        let first_error = &parsed.positioned_errors[0];
+        assert_eq!(first_error.message, "missing colon ':' after field name");
+        assert_eq!(first_error.code.as_deref(), Some("missing_colon"));
+
+        let error_text =
+            &input[usize::from(first_error.range.start())..usize::from(first_error.range.end())];
+        assert_eq!(error_text, "test");
     }
 
     #[test]
