@@ -499,9 +499,7 @@ pub(crate) fn parse(text: &str) -> Parse {
         fn bump(&mut self) {
             let (kind, text) = self.tokens.pop().unwrap();
             self.builder.token(kind.into(), text);
-            if self.current_token_index > 0 {
-                self.current_token_index -= 1;
-            }
+            self.current_token_index += 1;
         }
         /// Peek at the first unprocessed token
         fn current(&self) -> Option<SyntaxKind> {
@@ -566,7 +564,7 @@ pub(crate) fn parse(text: &str) -> Parse {
 
     // Reverse tokens for parsing (but keep positions in forward order)
     tokens.reverse();
-    let current_token_index = tokens.len().saturating_sub(1);
+    let current_token_index = 0;
 
     Parser {
         tokens,
@@ -4130,6 +4128,24 @@ Description: Valid
         // Error should point to the problematic location
         let error_text = &input[first_error.range.start().into()..first_error.range.end().into()];
         assert!(!error_text.is_empty());
+    }
+
+    #[test]
+    fn test_positioned_error_points_to_correct_token() {
+        let input = "Package test\nDescription: Valid\n";
+        let parsed = super::parse(input);
+
+        assert_eq!(parsed.positioned_errors.len(), 1);
+
+        let first_error = &parsed.positioned_errors[0];
+        assert_eq!(first_error.message, "missing colon ':' after field name");
+        assert_eq!(first_error.code.as_deref(), Some("missing_colon"));
+
+        let start: usize = first_error.range.start().into();
+        let end: usize = first_error.range.end().into();
+        assert_eq!(start, 8);
+        assert_eq!(end, 12);
+        assert_eq!(&input[start..end], "test");
     }
 
     #[test]
