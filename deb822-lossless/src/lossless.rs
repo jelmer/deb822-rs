@@ -5172,6 +5172,48 @@ fn test_field_with_value_then_empty_continuation() {
 }
 
 #[test]
+fn test_substvar_continuation_line() {
+    let text = "\
+Package: python3-cryptography
+Architecture: any
+Depends: python3-bcrypt,
+         ${misc:Depends},
+         ${python3:Depends},
+         ${shlibs:Depends},
+Suggests: python-cryptography-doc,
+          python3-cryptography-vectors,
+Description: Python library exposing cryptographic recipes and primitives
+ The cryptography library is designed to be a \"one-stop-shop\" for
+ all your cryptographic needs in Python.
+ .
+ As an alternative to the libraries that came before it, cryptography
+ tries to address some of the issues with those libraries:
+  - Lack of PyPy and Python 3 support.
+  - Lack of maintenance.
+  - Use of poor implementations of algorithms (i.e. ones with known
+    side-channel attacks).
+  - Lack of high level, \"Cryptography for humans\", APIs.
+  - Absence of algorithms such as AES-GCM.
+  - Poor introspectability, and thus poor testability.
+  - Extremely error prone APIs, and bad defaults.
+";
+    let parsed = Deb822::parse(text);
+    for e in parsed.positioned_errors() {
+        eprintln!("error at {:?}: {}", e.range, e.message);
+    }
+    assert!(
+        parsed.errors().is_empty(),
+        "Should not produce errors: {:?}",
+        parsed.errors()
+    );
+    assert!(
+        parsed.positioned_errors().is_empty(),
+        "Should not produce positioned errors: {:?}",
+        parsed.positioned_errors()
+    );
+}
+
+#[test]
 fn test_line_col() {
     let text = r#"Source: foo
 Maintainer: Foo Bar <jelmer@jelmer.uk>

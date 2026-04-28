@@ -299,6 +299,30 @@ Section: vcs
     }
 
     #[test]
+    fn test_lex_substvar_continuation() {
+        let text = "Depends: python3-bcrypt,\n         ${shlibs:Depends},\nSuggests: foo\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+        assert_eq!(
+            tokens,
+            vec![
+                (KEY, "Depends"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "python3-bcrypt,"),
+                (NEWLINE, "\n"),
+                (INDENT, "         "),
+                (VALUE, "${shlibs:Depends},"),
+                (NEWLINE, "\n"),
+                (KEY, "Suggests"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "foo"),
+                (NEWLINE, "\n"),
+            ]
+        );
+    }
+
+    #[test]
     fn test_lex_continuation_starting_with_colon() {
         // Test continuation line that STARTS with a colon
         // This was the bug reported in issue #315
