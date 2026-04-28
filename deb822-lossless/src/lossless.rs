@@ -2317,7 +2317,9 @@ impl Paragraph {
 
     /// Rename the given field in the paragraph.
     ///
-    /// Field names are compared case-insensitively.
+    /// Field names are compared case-insensitively. The entry's existing
+    /// formatting (post-colon whitespace, continuation-line indentation) is
+    /// preserved — only the key token is replaced.
     pub fn rename(&mut self, old_key: &str, new_key: &str) -> bool {
         for entry in self.entries() {
             if entry
@@ -2325,11 +2327,24 @@ impl Paragraph {
                 .as_deref()
                 .is_some_and(|k| k.eq_ignore_ascii_case(old_key))
             {
-                self.0.splice_children(
-                    entry.0.index()..entry.0.index() + 1,
-                    vec![Entry::new(new_key, entry.value().as_str()).0.into()],
-                );
-                return true;
+                let key_index = entry
+                    .0
+                    .children_with_tokens()
+                    .position(|it| it.as_token().is_some_and(|t| t.kind() == KEY));
+                if let Some(key_index) = key_index {
+                    let new_token =
+                        rowan::NodeOrToken::Token(rowan::GreenToken::new(KEY.into(), new_key));
+                    let new_green = entry
+                        .0
+                        .green()
+                        .splice_children(key_index..key_index + 1, vec![new_token]);
+                    let parent = entry.0.parent().expect("Entry must have a parent");
+                    parent.splice_children(
+                        entry.0.index()..entry.0.index() + 1,
+                        vec![SyntaxNode::new_root_mut(new_green).into()],
+                    );
+                    return true;
+                }
             }
         }
         false
@@ -4989,6 +5004,45 @@ fn test_rename_changes_case() {
     assert_eq!(p.get("package").as_deref(), Some("test"));
     assert_eq!(p.get("Package").as_deref(), Some("test"));
     assert_eq!(p.get("PACKAGE").as_deref(), Some("test"));
+}
+
+#[test]
+fn test_rename_preserves_indentation_and_whitespace() {
+    // When renaming a field, the original post-colon whitespace and
+    // continuation-line indentation must be preserved (only the key changes).
+    let text =
+        "Comments:     Exceptions\n            1997-1999, 2003 MIT\n            License terms\n";
+    let d: Deb822 = text.parse().unwrap();
+    let mut p = d.paragraphs().next().unwrap();
+
+    assert!(p.rename("Comments", "Comment"));
+    assert_eq!(
+        d.to_string(),
+        "Comment:     Exceptions\n            1997-1999, 2003 MIT\n            License terms\n"
+    );
+}
+
+#[test]
+fn test_rename_in_multi_field_paragraph() {
+    // Reproduce the intel-mkl scenario: Comments is the last of several
+    // fields, with multi-line value containing internal indentation.
+    let text = "Files: *\nCopyright: 2017 Foo\nLicense: GPL-2+\nComments:  Exceptions\n There are many files in the .rpm archives.\n            1997-1999, 2003 MIT\n";
+    let d: Deb822 = text.parse().unwrap();
+    let mut p = d.paragraphs().next().unwrap();
+
+    assert!(p.rename("Comments", "Comment"));
+    assert_eq!(d.to_string(), text.replace("Comments:", "Comment:"));
+}
+
+#[test]
+fn test_rename_preserves_post_colon_whitespace() {
+    // A single-line value with non-default post-colon whitespace must keep it.
+    let text = "Files:     install_GUI.sh\n";
+    let d: Deb822 = text.parse().unwrap();
+    let mut p = d.paragraphs().next().unwrap();
+
+    assert!(p.rename("Files", "File"));
+    assert_eq!(d.to_string(), "File:     install_GUI.sh\n");
 }
 
 #[test]
